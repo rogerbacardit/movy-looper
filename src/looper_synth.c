@@ -125,6 +125,14 @@ typedef struct {
     int  knob_acc[9];              /* detent accumulators of the enum knobs */
     int  last_knob;                /* last PISTA knob touched (display view) */
     char pista_lab[24];            /* readout of the last PISTA knob ("IN +8/16") */
+    /* RESET undo: settings snapshot taken by reset_track; valid while the core's
+     * undo entry is still that track's CLEAR (see undo_cmd). */
+    struct {
+        int valid, track;
+        int lvl[NTRK], pan, fx, fx_on, fxp, spd, rev, shot;
+        char fx_module[64];
+        int muted[NTRK], saved_level[NTRK], solo, solo_saved[NTRK];
+    } rsnap;
     int  solo;                     /* soloed track, 0 = none */
     int  solo_saved[NTRK];         /* mute flags before the solo */
     int  count_bars;               /* count-in length in bars, 1 or 2 */
@@ -556,6 +564,69 @@ static void knob_delta(synth_t *s, const char *val) {
     }
 }
 
+/* Per-track settings back to what a fresh module has; the audio is cleared
+ * separately. With save, snapshot the previous settings for RESET's undo. */
+static void reset_settings(synth_t *s, int t, int save) {
+    int i = t - 1;
+    if (save) {
+        char b[64] = "";
+        s->rsnap.valid = 1; s->rsnap.track = t;
+        for (int k = 1; k <= NTRK; k++) {
+            s->rsnap.lvl[k - 1] = get_t(s, k, "level");
+            s->rsnap.muted[k - 1] = s->muted[k - 1];
+            s->rsnap.saved_level[k - 1] = s->saved_level[k - 1];
+            s->rsnap.solo_saved[k - 1] = s->solo_saved[k - 1];
+        }
+        s->rsnap.solo = s->solo;
+        s->rsnap.pan = get_t(s, t, "pan"); s->rsnap.fx = get_t(s, t, "fx");
+        s->rsnap.fx_on = get_t(s, t, "fx_on"); s->rsnap.fxp = get_t(s, t, "fxp");
+        s->rsnap.spd = get_t(s, t, "spd"); s->rsnap.rev = get_t(s, t, "rev");
+        s->rsnap.shot = get_t(s, t, "shot");
+        char key[24]; snprintf(key, sizeof key, "t%d_fx_module", t);
+        if (mark_get_param(s->m, key, b, sizeof b) <= 0) b[0] = 0;
+        snprintf(s->rsnap.fx_module, sizeof s->rsnap.fx_module, "%s", b);
+    }
+    if (s->solo == t) {                    /* the soloed track leaves: the others get their old mutes back */
+        for (int k = 1; k <= NTRK; k++) if (k != t) set_mute(s, k, s->solo_saved[k - 1]);
+        s->solo = 0;
+    }
+    if (s->solo) s->solo_saved[i] = 0;     /* soloing another track: no longer muted when that ends */
+    set_mute(s, t, 0);
+    s->solo_saved[i] = 0;
+    set_t(s, t, "level", 100);
+    set_t(s, t, "pan", 50);
+    set_t(s, t, "fx", 1);                  /* LPF, the module default once switched on */
+    set_t(s, t, "fx_on", 0);
+    set_t(s, t, "fxp", 50);
+    set_t(s, t, "spd", MK_SPD_1X);
+    set_t(s, t, "rev", 0);
+    set_t(s, t, "shot", 0);
+    char key[24]; snprintf(key, sizeof key, "t%d_fx_module", t);
+    mark_set_param(s->m, key, "");
+}
+
+static void restore_settings(synth_t *s) {
+    int t = s->rsnap.track;
+    for (int k = 1; k <= NTRK; k++) {
+        s->muted[k - 1] = s->rsnap.muted[k - 1];
+        s->saved_level[k - 1] = s->rsnap.saved_level[k - 1];
+        s->solo_saved[k - 1] = s->rsnap.solo_saved[k - 1];
+        set_t(s, k, "level", s->rsnap.lvl[k - 1]);
+    }
+    s->solo = s->rsnap.solo;
+    set_t(s, t, "pan", s->rsnap.pan);
+    set_t(s, t, "fx", s->rsnap.fx);
+    set_t(s, t, "fx_on", s->rsnap.fx_on);
+    set_t(s, t, "fxp", s->rsnap.fxp);
+    set_t(s, t, "spd", s->rsnap.spd);
+    set_t(s, t, "rev", s->rsnap.rev);
+    set_t(s, t, "shot", s->rsnap.shot);
+    if (s->rsnap.fx_module[0]) {
+        char key[24]; snprintf(key, sizeof key, "t%d_fx_module", t);
+        mark_set_param(s->m, key, s->rsnap.fx_module);
+    }
+}
+
 /* Movy's Undo / Shift+Undo (undo_param). One level: undo only when there is
  * something to undo, redo only right after an undo. */
 static void undo_cmd(synth_t *s, const char *val) {
@@ -564,8 +635,19 @@ static void undo_cmd(synth_t *s, const char *val) {
     if (!redo && strcmp(val, "undo")) return;
     s->wave_dirty = 1;
     if (av != (redo ? 2 : 1)) { say(s, redo ? "NOTHING TO REDO" : "NOTHING TO UNDO"); return; }
+    int owned = 0;                         /* this undo entry is the CLEAR made by a RESET */
+    if (s->rsnap.valid) {
+        char b[32] = ""; int tr = 0, kind = 0, rd = 0;
+        if (mark_get_param(s->m, "undo_info", b, sizeof b) > 0 && sscanf(b, "%d:%d:%d", &tr, &kind, &rd) == 3
+            && tr == s->rsnap.track && kind == 2) owned = 1;
+        else s->rsnap.valid = 0;           /* superseded by a newer undo entry */
+    }
     say(s, redo ? "REDO" : "UNDO");
     trig(s, "undo");
+    if (owned) {
+        if (redo) reset_settings(s, s->rsnap.track, 0);
+        else      restore_settings(s);
+    }
 }
 
 static void rec_pad(synth_t *s, int t) {
@@ -714,14 +796,34 @@ static void clear_track(synth_t *s, int t) {
     s->cur_track = t;
     s->wave_dirty = 1;
     clear_flags(s, t);
+    s->rsnap.valid = 0;
     say(s, "CLEAR %d", t);
     trig_t(s, t, "clear");
+}
+
+/* Delete + the track's PISTA selector (top row): CLEAR plus every per-track
+ * setting back to a fresh module's. Undo brings both back (while the core's
+ * undo entry is still this CLEAR; an empty track has no audio undo, so no snapshot). */
+static void reset_track(synth_t *s, int t) {
+    s->cur_track = t;
+    s->wave_dirty = 1;
+    clear_flags(s, t);
+    s->rsnap.valid = 0;
+    trig_t(s, t, "clear");
+    {
+        char b[32] = ""; int tr = 0, kind = 0, rd = 0;
+        int own = mark_get_param(s->m, "undo_info", b, sizeof b) > 0 && sscanf(b, "%d:%d:%d", &tr, &kind, &rd) == 3
+                  && tr == t && kind == 2 && !rd;
+        reset_settings(s, t, own);
+    }
+    say(s, "RESET %d", t);
 }
 
 static void delete_pad(synth_t *s, int idx) {
     const pad_def_t *p = pad_for_note(NOTE_BASE + idx);
     if (!p || p->arg < 1 || p->arg > NTRK) return;
-    clear_track(s, p->arg);
+    if (p->act == A_SEL) reset_track(s, p->arg);
+    else clear_track(s, p->arg);
 }
 
 static void arm_toggle(synth_t *s) {

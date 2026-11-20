@@ -1319,6 +1319,72 @@ int main(int argc, char **argv) {
         CHECK(strstr(disp_head(), "ZOOM") == NULL && abs(disp_mark() - 32) <= 1);
     }
 
+    /* --- Delete + PISTA selector (top row) = RESET: audio + every setting; rows 1-3 = audio only --- */
+    {
+        for (int row = 0; row < 2; row++) {          /* 0: rows 1-3 pad (CLEAR), 1: selector (RESET) */
+            fresh(&host); seti("quantize", 0);
+            tap(REC(3)); run(300); tap(REC(3)); run(2); CHECK(state(3) == S_PLAY);
+            int len3 = gett(3, "len");
+            seti("t3_fx", 4); seti("t3_fx_on", 1); seti("t3_fxp", 80); seti("t3_level", 140); seti("t3_pan", 20);
+            seti("t3_spd", 5); seti("t3_rev", 1); seti("t3_shot", 1);
+            seti("delete_pad", (row ? FX(3) : STOP(3)) - 36); run(2);
+            CHECK(state(3) == S_EMPTY && gett(3, "len") == 0);
+            CHECK(!strcmp(status_text(), row ? "RESET 3" : "CLEAR 3"));
+            if (row) {
+                CHECK(gett(3, "fx_on") == 0 && gett(3, "fx") == 1 && gett(3, "fxp") == 50);
+                CHECK(gett(3, "level") == 100 && gett(3, "pan") == 50 && gett(3, "spd") == 3);
+                CHECK(gett(3, "rev") == 0 && gett(3, "shot") == 0);
+            } else {
+                CHECK(gett(3, "fx_on") == 1 && gett(3, "fx") == 4 && gett(3, "fxp") == 80);
+                CHECK(gett(3, "level") == 140 && gett(3, "pan") == 20 && gett(3, "spd") == 5);
+                CHECK(gett(3, "rev") == 1 && gett(3, "shot") == 1);
+            }
+            /* undo restores audio + settings, redo re-applies, undo again restores */
+            if (row) {
+                UNDO(); run(2);
+                CHECK(state(3) == S_STOP && gett(3, "len") == len3);
+                CHECK(gett(3, "fx_on") == 1 && gett(3, "fx") == 4 && gett(3, "fxp") == 80);
+                CHECK(gett(3, "level") == 140 && gett(3, "pan") == 20 && gett(3, "spd") == 5);
+                CHECK(gett(3, "rev") == 1 && gett(3, "shot") == 1);
+                REDO(); run(2);
+                CHECK(state(3) == S_EMPTY && gett(3, "fx_on") == 0 && gett(3, "level") == 100 && gett(3, "spd") == 3);
+                UNDO(); run(2);
+                CHECK(state(3) == S_STOP && gett(3, "fxp") == 80 && gett(3, "level") == 140 && gett(3, "rev") == 1);
+            }
+        }
+        /* a newer undo entry supersedes the snapshot: a later undo must not touch settings */
+        fresh(&host); seti("quantize", 0);
+        tap(REC(1)); run(300); tap(REC(1)); run(2);
+        tap(REC(2)); run(300); tap(REC(2)); run(2);
+        seti("t1_pan", 10); seti("t2_pan", 90);
+        seti("delete_pad", FX(1) - 36);                 /* reset 1 */
+        seti("delete_pad", STOP(2) - 36);               /* plain clear of 2 takes the undo slot */
+        UNDO(); run(2);
+        CHECK(state(2) == S_STOP && gett(2, "pan") == 90 && gett(1, "pan") == 50);
+        /* mute / solo interplay */
+        fresh(&host); seti("quantize", 0);
+        for (int k = 1; k <= 3; k++) { tap(REC(k)); run(300); tap(REC(k)); run(2); }
+        tap(MUTE(3)); CHECK(state(3) == S_MUTE); seti("t3_pan", 30);
+        seti("delete_pad", FX(3) - 36);                 /* muted track: RESET unmutes, level 100 */
+        CHECK(state(3) == S_EMPTY && gett(3, "level") == 100);
+        tap(REC(3)); run(300); tap(REC(3)); run(2); CHECK(state(3) == S_PLAY);
+        down(M_SHIFT); tap(MUTE(1)); up(M_SHIFT);       /* solo 1 */
+        CHECK(state(1) == S_PLAY && state(2) == S_MUTE && state(3) == S_MUTE);
+        seti("delete_pad", FX(1) - 36);                 /* resetting the soloed track ends the solo */
+        CHECK(state(2) == S_PLAY && gett(2, "level") == 100 && gett(1, "level") == 100);
+        UNDO(); run(2);                                 /* back to solo 1 */
+        CHECK(state(1) == S_STOP || state(1) == S_PLAY); CHECK(state(2) == S_MUTE && state(3) == S_MUTE);
+        down(M_SHIFT); tap(MUTE(1)); up(M_SHIFT);       /* unsolo restores the mutes found */
+        CHECK(state(2) == S_PLAY && state(3) == S_PLAY);
+        /* solo 2, reset 3 (muted by the solo): 3 leaves the solo state and is unmuted */
+        down(M_SHIFT); tap(MUTE(2)); up(M_SHIFT);
+        CHECK(state(3) == S_MUTE);
+        seti("delete_pad", FX(3) - 36);
+        CHECK(state(3) == S_EMPTY && gett(3, "level") == 100);
+        down(M_SHIFT); tap(MUTE(2)); up(M_SHIFT);       /* unsolo */
+        CHECK(state(1) == S_STOP && state(2) == S_PLAY);
+    }
+
     /* --- nothing crashes on garbage --- */
     uint8_t junk[3] = {0x90, 200, 100}; A->on_midi(S, junk, 3, 0);
     A->set_param(S, "nonsense", "1");

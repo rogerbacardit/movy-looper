@@ -59,7 +59,7 @@ El pad SHIFT es gris tenue y blanco mientras se mantiene.
 Colores: verde = reproduciendo, rojo = grabando, violeta = overdub, naranja parpadeante = ARM/armada. Las filas MUTE/selector (y STOP, parada) usan el color de cada pista (azul, cian, amarillo, magenta, blanco, naranja); mute = gris. La columna 1 y la 8 no usan ni verde ni rojo.
 
 - **REC/DUB** (fila 1): pista vacia -> graba; segundo toque -> cierra la grabacion (PLAY, o DUB si Rec Action = REC>DUB); PLAY -> DUB; DUB -> PLAY; pista parada -> empieza a sonar directamente en DUB. Se ve en rojo (rec) / violeta (dub).
-- **PLAY/STOP** (fila 2): pista parada -> PLAY; sonando/DUB -> STOP; grabando -> cierra la grabacion y para. **Borrar pista (CLEAR): mantener Delete (X) del Move y tocar cualquier pad de la columna de esa pista** (Movy lo reenvia al modulo con `delete_pad_param`). El boton **Undo** del Move lo deshace; Shift+Undo = rehacer el borrado; UNDO es de un solo nivel. Verde = suena, color de pista = parada con clip, apagado = vacia.
+- **PLAY/STOP** (fila 2): pista parada -> PLAY; sonando/DUB -> STOP; grabando -> cierra la grabacion y para. **Borrar: mantener Delete (X) del Move y tocar un pad de la columna de la pista** (Movy lo reenvia al modulo con `delete_pad_param`). **X + pad de las filas 1-3 = borra el audio** (CLEAR; la pista conserva sus ajustes). **X + el selector PISTA (fila superior) = pista desde cero** (RESET: borra el audio y devuelve FX, volumen 100, pan centro, velocidad 1x, reverse, one-shot y mute a los valores de fabrica, y la saca del solo). El boton **Undo** del Move lo deshace (en RESET devuelve tambien los ajustes; solo si la pista tenia audio); Shift+Undo = rehacer; UNDO es de un solo nivel. El pedal (mantener 2) solo borra el audio. Verde = suena, color de pista = parada con clip, apagado = vacia.
 - **MUTE**: silencia la pista pero sigue girando, y al quitar el mute vuelve en su sitio.
 - **ARM** (columna 1, fila 3): un toque (pulsar y soltar) activa/desactiva el modo "grabar al detectar sonido": al pulsar REC en una pista vacia queda *armada* y empieza a grabar sola cuando la entrada supera el umbral. Tocar REC otra vez cancela. ARMADA parpadea en naranja.
 - **REVERSE**: SHIFT + pad de fila 1 (o K8 en la vista PISTA). Alias antiguo: manten pulsado ARM y toca un pad de pista (fila 1 o 2); al soltar ARM tras usarlo asi, ARM no cambia, y mientras esta pulsado los pads de fila 2 se iluminan en blanco (invertida) o color de pista (normal).
@@ -156,7 +156,7 @@ and since v0.4.0 `step_buttons_param`, `step_leds_param`, `loop_knob_param`):
 A Movy without the feature ignores both params; nothing else changes.
 
 - `display`: `"<seq>|<pos 0-127>|<128 peaks as 256 hex digits, or empty>|<header>"`, the selected track's waveform overview (header e.g. `PLAY 1 - 4 BARS`). Peaks are cached in the module and `seq` bumps only when they change.
-- `delete_pad` (write): Movy sends the rack pad index 0-31 when Delete + pad is pressed; the module CLEARs that pad's track.
+- `delete_pad` (write): Movy sends the rack pad index 0-31 when Delete + pad is pressed; the module CLEARs that pad's track (audio only); on the PISTA selector pad (top row) it RESETs the track instead (audio + all settings, undoable).
 - `step`: write-only, step button index 0..15 (Movy sends it instead of a sequencer step).
 - `step_leds`: 32 hex digits, one palette byte per step button.
 - `loop_knob`: write-only `"N:delta[:1]"` while Loop is held (N = knob 1..8, `:1` = Shift/fine).

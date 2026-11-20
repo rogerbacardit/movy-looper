@@ -3293,6 +3293,8 @@ int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
         if (m->undo_track >= 0 && m->swap_track < 0) v = m->undo_redo ? 2 : 1;
         return snprintf(buf, (size_t)buf_len, "%d", v);
     }
+    if (!strcmp(key, "undo_info"))       /* "<track 1..N or 0>:<kind>:<redo>" (shim: RESET snapshot ownership) */
+        return snprintf(buf, (size_t)buf_len, "%d:%d:%d", m->undo_track + 1, m->undo_kind, m->undo_redo ? 1 : 0);
     if (!strcmp(key, "all_btn") || !strcmp(key, "undo"))
         return snprintf(buf, (size_t)buf_len, "0");
 
