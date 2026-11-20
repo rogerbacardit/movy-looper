@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SECS="${MARK_SECONDS:-120}"
 CFLAGS="-O3 -g -shared -fPIC -Wall -Wextra -Iinclude -Isrc -DMARK_TRACKS=6 -DMARK_MAX_SECONDS=$SECS"
-SRCS="src/mark_core.c src/looper_synth.c src/gfx1.c src/perform.c src/perform_ui.c"
+SRCS="src/mark_core.c src/looper_synth.c src/gfx1.c src/wire3d.c src/perform.c src/perform_ui.c"
 D=build/modules/sound_generators/looper-606
 rm -rf "$D"; mkdir -p "$D"
 cp module.json "$D/"

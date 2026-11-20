@@ -95,7 +95,7 @@ Los loops sobreviven a cerrar/recargar Movy y a apagar la Move.
 - **Al cargar** un Set cuyo `state` trae un ID, y solo si la instancia esta vacia, el mismo hilo lee los WAV y deja las pistas en STOP (nunca pisa loops vivos). Ademas del audio vuelven largo fijo, velocidad, mute, count-in, umbral y volumen de entrada.
 - Limitaciones: un Set duplicado por Movy comparte ID con el original hasta que uno grabe algo nuevo; quitar el modulo de una pista deja su carpeta huerfana (se puede borrar a mano); una carpeta ilegible no se sobrescribe. Variables de entorno solo para tests: `LOOPER606_PERSIST_DIR`, `LOOPER606_PERSIST_DELAY_MS`.
 
-## PERFORM: efectos en los botones de paso (v0.10.0)
+## PERFORM: efectos en los botones de paso (v0.10.1)
 
 Con **SHIFT** (pad de arriba de la columna 1) mantenido, la pantalla muestra la pagina **PERFORM**: una rejilla de 4 x 4 casillas (`NN XXX`: numero y nombre de 3 letras) con los 16 efectos en el orden de los botones de paso (pasos 1-4 arriba, 13-16 abajo). El titulo lleva el objetivo: `PISTA 3` o `MIX`. Las casillas de efectos activos llevan marca: un cuadradito si estan en la pila y una banderita con visto si estan **enclavados** (latch). Los LEDs de paso se iluminan por familia: azul = repeticion, naranja = cinta/tiempo, violeta = tono y filtros, cian = ritmo, verde azulado = espacio (delay/freeze), amarillo = KILL. Sin SHIFT los pasos siguen fijando el largo del loop igual que siempre.
 
@@ -127,6 +127,8 @@ Mientras mantienes un efecto, los 8 knobs (knob capture) son sus parametros; cad
 | 14 | RETRIGGER: cada unidad de rejilla se repite su primer cuarto saltando atras al inicio de la unidad (retrigger de DJ, en tiempo) | K1 cada 1/4, 1/2, 1 compas | flechas de rebobinado en un anillo y cabezas de lectura/directo |
 | 15 | HALF SPEED: lectura a ½ o ¼ de velocidad (cae el tono) que vuelve a tiempo cada ciclo (2 o 4 pulsos) | K1 ½ / ¼ | orbita lenta con estela y orbita fantasma a velocidad normal |
 | 16 | KILL: silencio inmediato (fundido de 3 ms) mientras se mantiene | K1 parte: ALL (todo) / LOW (se van los graves, corte 400 Hz) / HIGH (se van los agudos, corte 2 kHz), 24 dB/oct | X grande con rayas de aviso; en LOW/HIGH, espectro con la zona muerta tachada |
+
+Escenas 3D: desde la v0.10.1 cada efecto tiene una escena de alambre 3D (motor minimo `src/wire3d.c`: rotaciones, proyeccion en perspectiva, recorte al visor y aristas lejanas punteadas como pista de profundidad; solo lineas de 1 px). Beat repeat = cubos anidados, stutter = losas apiladas, pitch = cubo estirado, bitcrush = esfera de anillos, tape = dos bobinas, reverse = tunel, vinyl = disco inclinado con brazo, filtros = rejilla synthwave (horizonte = cutoff, onda = reso), gate = 4x2 cubos, delay = marcos que se alejan, freeze = octaedro, retrigger = cubo que salta, half speed = esfera lenta, kill = cubo que implosiona. Titulo, lecturas a la derecha, etiquetas de efectos combinados e indicadores de latch no cambian.
 
 Pantalla propia: el modulo declara `screen_param` (framebuffer 128x64 de 1 bit, `"<seq>|<2048 hex>"`) y Movy lo dibuja en lugar de la onda o la pagina de knobs mientras no sea `""`. Se genera en `get_param` (nunca en `process()`), a 25 fps como maximo y solo si cambia (`src/gfx1.c`, `src/perform_ui.c`). Tambien usa `step_up_param` para saber cuando se suelta un paso. Hace falta la build `module-leds` v10 de Movy o posterior (la v0.10.0 no pide cambios en Movy).
 

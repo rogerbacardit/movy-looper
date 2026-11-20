@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
         snprintf(st, sizeof st, "%d", fx);
         A->set_param(S, "step", st);
         for (int f = 0; f < 4; f++) {
-            run(f == 0 ? 10 : 50 + 20 * f);
+            run(f == 0 ? 10 : 90 + 110 * f);
             snprintf(nm, sizeof nm, "fx%d_%d", fx + 1, f);
             dump(argv[2], nm);
         }
@@ -76,8 +76,8 @@ int main(int argc, char **argv) {
         run(4);
     }
     dump(argv[2], "grid_latched");
-    A->set_param(S, "step", "12"); run(40); dump(argv[2], "combo_a"); run(60); dump(argv[2], "combo_b");
-    A->set_param(S, "step", "15"); run(30); dump(argv[2], "combo_c");
+    A->set_param(S, "step", "12"); run(150); dump(argv[2], "combo_a"); run(60); dump(argv[2], "combo_b");
+    A->set_param(S, "step", "15"); run(100); dump(argv[2], "combo_c");
     A->set_param(S, "step_up", "15"); A->set_param(S, "step_up", "12"); run(5);
     note(note_of(4, 0), 0);
     return 0;

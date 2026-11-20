@@ -1886,10 +1886,12 @@ int main(int argc, char **argv) {
         CHECK(strchr(screen(), '|') != NULL);                       /* the effect scene stays while the step is held */
         setstr("step_up", "0"); run(8);
         CHECK(!strcmp(screen(), ""));
-        for (int fx = 0; fx < 8; fx++) {                            /* every scene draws, in PISTA and MIX */
+        for (int fx = 0; fx < 16; fx++) {                           /* every 3D scene draws, animates, and keeps the title bar and readouts */
             char b[8]; snprintf(b, sizeof b, "%d", fx);
-            down(M_SHIFT); setstr("step", b); run(30);
+            down(M_SHIFT); setstr("step", b); run(60);
             const char *bar = strchr(screen(), '|'); CHECK(bar && strlen(bar + 1) == 2048);
+            CHECK(bar && bar[1 + 32] == 'F' && bar[2 + 32] == 'F');                  /* row 1: border + inverted title bar */
+            unsigned sq = scr_seq(); run(40); CHECK(scr_seq() != sq || fx == 15);  /* animated (KILL may settle) */
             setstr("step_up", b); up(M_SHIFT); run(8);
         }
     }

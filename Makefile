@@ -13,7 +13,7 @@ endif
 
 test-synth:
 	@mkdir -p build
-	$(CC) $(CFLAGS) -fPIC $(SHARED_FLAGS) src/mark_core.c src/looper_synth.c src/gfx1.c src/perform.c src/perform_ui.c -o build/looper-606-host.so -lm -lpthread -ldl
+	$(CC) $(CFLAGS) -fPIC $(SHARED_FLAGS) src/mark_core.c src/looper_synth.c src/gfx1.c src/wire3d.c src/perform.c src/perform_ui.c -o build/looper-606-host.so -lm -lpthread -ldl
 	$(CC) $(CFLAGS) test/synth_smoke.c -o build/synth_smoke -ldl -lm
 	./build/synth_smoke build/looper-606-host.so build/hierarchy.json
 	python3 scripts/check-hierarchy.py build/hierarchy.json module.json

@@ -12,7 +12,7 @@ typedef struct {
     unsigned seq;
     int      have;               /* a picture was published (prev is valid) */
     long     last_frames;        /* audio clock of the last drawn frame */
-    float    rot[2];             /* reel / record / spiral angles (radians) */
+    float    rot[4];             /* reel / record / spiral angles (radians) */
     unsigned rnd;
     int      shown;              /* the last call published something (not "") */
 } perf_ui_t;

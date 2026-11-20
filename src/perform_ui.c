@@ -3,14 +3,12 @@
 #include <string.h>
 #include "mark_core.h"
 #include "perform_ui.h"
+#include "wire3d.h"
 
 #define CX 44
 #define CY 36
 #define PI_F 3.14159265f
 
-static void polar(int cx, int cy, float r, float a, int *x, int *y) {
-    *x = cx + (int)lroundf(cosf(a) * r); *y = cy + (int)lroundf(sinf(a) * r);
-}
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static unsigned rnd(perf_ui_t *u) { u->rnd = u->rnd * 1664525u + 1013904223u; return u->rnd >> 8; }
 
@@ -37,240 +35,160 @@ static void level_bar(gfx_t *g, float lvl) {
     gfx_rect(g, 92, 56, 33, 4, GFX_ON);
     gfx_frect(g, 93, 57, (int)lroundf(clampf(lvl * 2.0f, 0.0f, 1.0f) * 31.0f), 2, GFX_ON);
 }
-/* tick ring + level gauge: the common radar furniture */
-static void radar_base(gfx_t *g, float lvl, int r) {
-    for (int i = 0; i < 24; i++) {
-        int x0, y0, x1, y1;
-        float a = (float)i * PI_F / 12.0f, l = i % 6 == 0 ? 4.0f : 2.0f;
-        polar(CX, CY, (float)r, a, &x0, &y0); polar(CX, CY, (float)r + l, a, &x1, &y1);
-        gfx_line(g, x0, y0, x1, y1, GFX_ON);
-    }
-    float sw = clampf(lvl * 2.5f, 0.0f, 1.0f) * 90.0f;
-    gfx_arc(g, CX, CY, 25, 270.0f - sw, 270.0f + sw, GFX_ON);
-    gfx_dline(g, 8, CY, CX - r - 6, CY, 1, 2, GFX_ON);
-    gfx_dline(g, CX + r + 6, CY, 81, CY, 1, 2, GFX_ON);
+/* ---- scenes: 3D wireframe, one per effect. All of them are drawn into the ~82 x 49 px
+ * viewport left of the readouts; far edges are dotted (the depth cue), thin 1 px lines only. ---- */
+static void vp(w3_t *w, gfx_t *g, float unit, float cam) {       /* viewport: `unit` px per world unit at z = 0 */
+    w3_init(w, g, (float)CX, 36.0f, unit * cam, cam);
+    w3_clip(w, 3, 12, 86, 61);
 }
+static float ease_out(float t) { t = clampf(t, 0.0f, 1.0f); return 1.0f - (1.0f - t) * (1.0f - t); }
 
-/* ---- scenes ---- */
-static void scene_beatrep(gfx_t *g, perf_t *p, const perf_vis_t *v) {
+static void scene_beatrep(gfx_t *g, perf_t *p, const perf_vis_t *v, float tsec) {
     static const int NR[6] = { 2, 3, 4, 5, 3, 4 };
-    int idx = (int)perf_pval(p, PF_BEATREP, 0), n = NR[idx];
-    float decay = perf_pval(p, PF_BEATREP, 1);
-    float gain = powf(decay, (float)(v->rep > 40 ? 40 : v->rep));
-    float ping = 3.0f + v->phase * 15.0f;
+    int n = NR[(int)perf_pval(p, PF_BEATREP, 0)];
+    float decay = perf_pval(p, PF_BEATREP, 1), gain = powf(decay, (float)(v->rep > 40 ? 40 : v->rep));
+    int act = v->rep % n;
+    w3_t w; vp(&w, g, 13.5f, 6.0f);
+    w3_view(&w, 0.5f + 0.1f * sinf(tsec * 0.4f), tsec * 0.45f, 0.0f);
+    float lv = 1.0f + clampf(v->level * 2.0f, 0.0f, 1.0f) * 0.08f;
+    for (int i = 0; i < n; i++) {                                 /* outer cube first; each repeat lights the next one in */
+        float s = (1.0f - (float)i * 0.6f / (float)(n - 1)) * lv;
+        if (i == act) s *= 1.0f + 0.16f * gain * (1.0f - v->phase);
+        w3_xf x = W3_XF(0, 0, 0, (float)i * 0.3f, (float)i * 0.55f, (float)i * 0.2f, 1.0f);
+        w3_box(&w, &x, s, s, s, i > act ? W3_FAINT : i == 0 ? W3_AUTO : W3_SOLID);
+    }
+    int cnt = act + 1;                                            /* repeat counter */
     for (int i = 0; i < n; i++) {
-        int r = 3 + (i + 1) * 15 / n;
-        if ((float)r <= ping) gfx_circle(g, CX, CY, r, GFX_ON); else gfx_dcircle(g, CX, CY, r, 14, GFX_ON);
-    }
-    gfx_circle(g, CX, CY, (int)lroundf(ping), GFX_ON);
-    int rd = 1 + (int)lroundf(4.0f * gain * (1.0f - v->phase));
-    for (int r = 0; r <= rd; r++) gfx_circle(g, CX, CY, r, GFX_ON);
-    radar_base(g, v->level, 20);
-    int cnt = v->rep + 1 > 8 ? 8 : v->rep + 1;                   /* repeat counter */
-    for (int i = 0; i < 8; i++) {
-        if (i < cnt) gfx_frect(g, 14 + i * 8, 58, 5, 3, GFX_ON); else gfx_rect(g, 14 + i * 8, 58, 5, 3, GFX_ON);
+        int x = 33 + i * 7 - n * 3;
+        if (i < cnt) gfx_frect(g, x, 57, 4, 2, GFX_ON); else gfx_rect(g, x, 57, 4, 2, GFX_ON);
     }
 }
 
-static void scene_stutter(gfx_t *g, perf_t *p, const perf_vis_t *v) {
+static void scene_stutter(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v, float tsec) {
     float beats = perf_pval(p, PF_STUTTER, 0);
-    float u = clampf((float)(v->k / (beats * v->beat)), 0.0f, 1.0f);
-    float q = 0.9f - 0.3f * u;
-    int act = v->rep % 10;
-    gfx_dline(g, 4, CY, 85, CY, 1, 2, GFX_ON);
-    for (int j = 0; j < 10; j++) {
-        float d = 38.0f * powf(q, (float)j);
-        if (d < 3.0f && j != act) continue;
-        int h = (int)lroundf(10.0f * powf(0.9f, (float)j)) + 2;
-        int on = j == act;
-        if (on) h += (int)lroundf(4.0f * (1.0f - v->phase));
-        for (int s = -1; s <= 1; s += 2) {
-            int x = CX + s * (int)lroundf(d);
-            gfx_line(g, x, CY - h, x, CY + h, GFX_ON);
-            if (on) gfx_line(g, x + s, CY - h, x + s, CY + h, GFX_ON);
-        }
+    float prog = clampf((float)(v->k / (beats * v->beat)), 0.0f, 1.0f);
+    int act = v->rep & 3;
+    float gap = 0.78f + 0.42f * sinf(u->rot[1]);                   /* spreads and collapses, faster as it accelerates */
+    w3_t w; vp(&w, g, 13.0f, 7.0f);
+    w3_view(&w, 0.6f, 0.0f, 0.0f);
+    float lv = 1.0f + clampf(v->level * 2.0f, 0.0f, 1.0f) * 0.06f;
+    w3_line(&w, NULL, (v3){ 0, -1.5f * gap - 0.15f, 0 }, (v3){ 0, 1.5f * gap + 0.15f, 0 }, W3_FAINT);
+    for (int i = 0; i < 4; i++) {
+        w3_xf x = W3_XF(0, ((float)i - 1.5f) * gap, 0, 0, tsec * 0.3f + (float)i * 0.32f, 0, lv);
+        if (i == act) w3_box(&w, &x, 0.95f, 0.05f + 0.07f * (1.0f - v->phase), 0.95f, W3_AUTO);
+        else w3_poly(&w, &x, 4, 0.95f * 1.41421356f, 0.0f, 0.7853982f, W3_AUTO);
     }
-    gfx_arc(g, CX, CY, 24, 150.0f, 210.0f, GFX_ON);
-    gfx_arc(g, CX, CY, 24, -30.0f, 30.0f, GFX_ON);
-    gfx_arc(g, CX, CY, 25, 270.0f - clampf(v->level * 2.5f, 0, 1) * 60.0f, 270.0f + clampf(v->level * 2.5f, 0, 1) * 60.0f, GFX_ON);
-    gfx_dcircle(g, CX, CY, 8, 25, GFX_ON);
-    gfx_frect(g, CX - 1, CY - 1, 3, 3, GFX_ON);
-    for (int i = 0; i < 10; i++)                                 /* progress ticks */
-        if (u * 10.0f > (float)i) gfx_frect(g, 14 + i * 6, 58, 4, 3, GFX_ON); else gfx_rect(g, 14 + i * 6, 58, 4, 3, GFX_ON);
+    int on = (int)(prog * 8.0f + 0.5f);                           /* acceleration meter */
+    for (int i = 0; i < 8; i++) { int x = 30 + i * 4; if (i < on) gfx_frect(g, x, 57, 3, 2, GFX_ON); else gfx_dline(g, x, 58, x + 2, 58, 1, 1, GFX_ON); }
 }
 
-static void scene_pitch(gfx_t *g, perf_t *p, const perf_vis_t *v) {
-    int st = (int)perf_pval(p, PF_PITCH, 0), cx = CX, cy = 54;
-    const float R = 36.0f;
-    for (int i = -12; i <= 12; i++) {
-        float a = PI_F + (float)(i + 12) / 24.0f * PI_F;
-        int x0, y0, x1, y1;
-        float l = i == 0 ? 8.0f : i % 6 == 0 ? 6.0f : 3.0f;
-        polar(cx, cy, R, a, &x0, &y0); polar(cx, cy, R - l, a, &x1, &y1);
-        gfx_line(g, x0, y0, x1, y1, GFX_ON);
+static void scene_pitch(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {
+    int st = (int)perf_pval(p, PF_PITCH, 0);
+    float ratio = powf(2.0f, (float)st / 12.0f), hh = 0.72f * ratio;
+    w3_t w; vp(&w, g, 14.0f, 6.0f);
+    w3_view(&w, 0.5f, u->rot[0] + 0.6f, 0.0f);
+    float lv = 1.0f + clampf(v->level * 2.0f, 0.0f, 1.0f) * 0.06f;
+    w3_box(&w, NULL, 0.72f * lv, hh * lv, 0.72f * lv, W3_AUTO);
+    w3_line(&w, NULL, (v3){ 0, -hh - 0.5f, 0 }, (v3){ 0, hh + 0.5f, 0 }, W3_FAINT);
+    for (int i = -12; i <= 12; i += 4) {                          /* ruler: -12 .. +12 semitones */
+        int y = 36 - i * 3 / 2;
+        gfx_line(g, 81, y, i == 0 ? 85 : 83, y, GFX_ON);
     }
-    gfx_arc(g, cx, cy, (int)R, 180.0f, 360.0f, GFX_ON);
-    gfx_darc(g, cx, cy, 22, 180.0f, 360.0f, 6.0f, GFX_ON);
-    gfx_darc(g, cx, cy, 14, 180.0f, 360.0f, 4.0f, GFX_ON);
-    float a = PI_F + (float)(st + 12) / 24.0f * PI_F;
-    int x, y; polar(cx, cy, R - 10.0f + clampf(v->level * 4.0f, 0, 1) * 6.0f, a, &x, &y);
-    int tx, ty; polar(cx, cy, 20.0f, PI_F * 1.5f, &tx, &ty);
-    gfx_dline(g, cx, cy, tx, ty - 14, 1, 2, GFX_ON);               /* the 0 reference */
-    gfx_line(g, cx, cy, x, y, GFX_ON);
-    int x2, y2; polar(cx, cy, 6.0f, a + 0.25f, &x2, &y2); gfx_line(g, cx, cy, x2, y2, GFX_ON);
-    polar(cx, cy, 6.0f, a - 0.25f, &x2, &y2); gfx_line(g, cx, cy, x2, y2, GFX_ON);
-    gfx_circle(g, cx, cy, 3, GFX_ON);
-    gfx_text(g, 9, 56, "-12", GFX_ON);
-    gfx_text(g, 80 - gfx_text_w("+12"), 56, "+12", GFX_ON);
-    gfx_text_c(g, cx, 11, "0", GFX_ON);
+    int my = 36 - st * 3 / 2;
+    gfx_line(g, 79, my, 76, my - 2, GFX_ON); gfx_line(g, 79, my, 76, my + 2, GFX_ON); gfx_line(g, 76, my - 2, 76, my + 2, GFX_ON);
 }
 
 static void scene_crush(gfx_t *g, perf_t *p, const perf_vis_t *v, float tsec) {
     float bits = perf_pval(p, PF_CRUSH, 0), ds = perf_pval(p, PF_CRUSH, 1);
-    int b = (int)lroundf(1.0f + (16.0f - bits) * 0.45f + (ds - 1.0f) * 0.14f);
-    b = b < 1 ? 1 : b > 8 ? 8 : b;
-    if (b == 1) { gfx_circle(g, CX, CY, 22, GFX_ON); gfx_circle(g, CX, CY, 20, GFX_ON); }
-    else {
-        int bw = b - 1;
-        for (int by = -24; by < 24; by += b)
-            for (int bx = -24; bx < 24; bx += b) {
-                float d = sqrtf((float)((bx + b / 2) * (bx + b / 2) + (by + b / 2) * (by + b / 2)));
-                if (d >= 15.0f && d <= 22.0f) gfx_frect(g, CX + bx, CY + by, b >= 4 ? bw : b, b >= 4 ? bw : b, GFX_ON);
-            }
-    }
-    int lv = 1 << (int)bits; if (lv > 24) lv = 24;
-    int hold = (int)lroundf(ds / 4.0f); hold = hold < 1 ? 1 : hold > 8 ? 8 : hold;
-    float amp = 4.0f + 5.0f * clampf(v->level * 3.0f, 0, 1);
-    int py = CY;
-    for (int x = -16; x <= 16; x++) {
-        int xs = ((x + 16) / hold) * hold;
-        float s = sinf((float)xs / 32.0f * 2.0f * PI_F * 1.5f + tsec * 4.0f);
-        float qv = lv > 1 ? roundf((s * 0.5f + 0.5f) * (float)(lv - 1)) / (float)(lv - 1) * 2.0f - 1.0f : 0.0f;
-        int y = CY - (int)lroundf(qv * amp);
-        if (x > -16) gfx_line(g, CX + x - 1, py, CX + x, y, GFX_ON);
-        py = y;
-    }
-    gfx_dline(g, 8, CY, 18, CY, 1, 2, GFX_ON); gfx_dline(g, 70, CY, 81, CY, 1, 2, GFX_ON);
-    float sw = clampf(v->level * 2.5f, 0, 1) * 60.0f;
-    gfx_arc(g, CX, CY, 25, 270.0f - sw, 270.0f + sw, GFX_ON);
+    float k = (bits - 2.0f) / 14.0f;                              /* 1 = clean, 0 = crushed */
+    int lat = 1 + (int)lroundf(k * 4.0f), lon = 2 + (int)lroundf(k * 4.0f), segs = 8 + (int)lroundf(k * 16.0f);
+    w3_t w; vp(&w, g, 21.0f, 6.0f);
+    w.snap = 1.0f + floorf(ds / 7.0f);                            /* vertices on a coarse grid with downsample */
+    w3_view(&w, 0.45f, tsec * 0.5f, 0.35f);
+    float lv = 1.0f + clampf(v->level * 2.0f, 0.0f, 1.0f) * 0.06f;
+    w3_xf x = W3_XF(0, 0, 0, 0, 0, 0, lv);
+    w3_sphere(&w, &x, 1.0f, lat, lon, segs, W3_AUTO);
 }
 
 static void scene_tape(gfx_t *g, perf_ui_t *u, const perf_vis_t *v) {
-    static const int RX[2] = { 24, 64 };
-    float pack0 = 0.5f + 0.5f * (v->speed < 0 ? 0.0f : v->speed);
+    float sp = clampf(v->speed, 0.0f, 1.0f), pack0 = 0.5f + 0.5f * sp;
+    w3_t w; vp(&w, g, 17.0f, 6.0f);
+    w3_view(&w, 0.9f, 0.0f, 0.0f);
     for (int r = 0; r < 2; r++) {
-        int cx = RX[r], cy = 34;
-        gfx_circle(g, cx, cy, 15, GFX_ON);
-        gfx_dcircle(g, cx, cy, (int)lroundf(8.0f + 4.0f * (r ? pack0 : 1.0f - pack0)), 24, GFX_ON);
-        gfx_circle(g, cx, cy, 3, GFX_ON);
-        for (int k = 0; k < 3; k++) {
-            int x0, y0, x1, y1;
-            float a = u->rot[0] + (float)k * 2.0943951f;
-            polar(cx, cy, 4.0f, a, &x0, &y0); polar(cx, cy, 13.0f, a, &x1, &y1);
-            gfx_line(g, x0, y0, x1, y1, GFX_ON);
-            polar(cx, cy, 13.0f, a + 0.28f, &x0, &y0); gfx_line(g, x1, y1, x0, y0, GFX_ON);
+        float tx = r ? 1.1f : -1.1f;
+        w3_xf x = W3_XF(tx, 0, 0, 0, u->rot[0], 0, 1.0f);
+        w3_cylinder(&w, &x, 14, 0.82f, 0.14f, W3_AUTO);
+        float pk = 0.42f + 0.24f * (r ? pack0 : 1.0f - pack0);
+        w3_poly(&w, &x, 14, pk, 0.14f, 0.0f, W3_DOT);
+        w3_poly(&w, &x, 6, 0.2f, 0.14f, 0.0f, W3_SOLID);
+        for (int s = 0; s < 3; s++) {
+            float a = (float)s * 2.0943951f;
+            w3_line(&w, &x, (v3){ cosf(a) * 0.2f, 0.14f, sinf(a) * 0.2f }, (v3){ cosf(a) * 0.5f, 0.14f, sinf(a) * 0.5f }, W3_SOLID);
         }
     }
-    gfx_line(g, 24, 49, 34, 57, GFX_ON); gfx_line(g, 34, 57, 54, 57, GFX_ON); gfx_line(g, 54, 57, 64, 49, GFX_ON);
-    gfx_circle(g, 34, 57, 2, GFX_ON); gfx_circle(g, 54, 57, 2, GFX_ON);
-    gfx_dline(g, 24, 49, 64, 49, 1, 3, GFX_ON);
-    gfx_dline(g, 44, 18, 44, 30, 1, 2, GFX_ON);
-    int w = (int)lroundf(clampf(v->speed, 0, 1) * 30.0f);          /* speed bar */
-    gfx_rect(g, 29, 14, 30, 3, GFX_ON); gfx_frect(g, 29, 14, w, 3, GFX_ON);
-    float sw = clampf(v->level * 2.5f, 0, 1) * 25.0f;
-    gfx_dline(g, 44 - (int)sw, 12, 44 + (int)sw, 12, 1, 1, GFX_ON);
+    w3_line(&w, NULL, (v3){ -1.1f, 0.14f, 0.82f }, (v3){ 1.1f, 0.14f, 0.82f }, W3_SOLID);   /* the tape, front side */
+    w3_line(&w, NULL, (v3){ -1.1f, 0.14f, -0.82f }, (v3){ 1.1f, 0.14f, -0.82f }, W3_DOT);
+    int wd = (int)lroundf(sp * 30.0f);                            /* speed bar */
+    gfx_rect(g, 29, 57, 30, 3, GFX_ON); gfx_frect(g, 29, 57, wd, 3, GFX_ON);
 }
 
 static void scene_reverse(gfx_t *g, perf_ui_t *u, const perf_vis_t *v) {
-    float rot = u->rot[0];
-    int px = 0, py = 0;
-    for (float th = 0.2f; th <= 4.0f * PI_F; th += 0.12f) {
-        int x, y; polar(CX, CY, 2.0f + 17.0f * th / (4.0f * PI_F), th + rot, &x, &y);
-        if (th > 0.2f) gfx_line(g, px, py, x, y, GFX_ON);
-        px = x; py = y;
-    }
-    for (int k = 0; k < 3; k++) {                                /* arrowheads, pointing inward */
-        float th = 1.2f + (float)k * 3.3f + 0.4f;
-        int x, y, x1, y1; polar(CX, CY, 2.0f + 17.0f * th / (4.0f * PI_F), th + rot, &x, &y);
-        polar(CX, CY, 2.0f + 17.0f * (th - 0.35f) / (4.0f * PI_F), th - 0.35f + rot, &x1, &y1);
-        float ang = atan2f((float)(y1 - y), (float)(x1 - x)), c = 4.0f;
-        int xa, ya; xa = x + (int)lroundf(cosf(ang + 0.6f) * c); ya = y + (int)lroundf(sinf(ang + 0.6f) * c); gfx_line(g, x, y, xa, ya, GFX_ON);
-        xa = x + (int)lroundf(cosf(ang - 0.6f) * c); ya = y + (int)lroundf(sinf(ang - 0.6f) * c); gfx_line(g, x, y, xa, ya, GFX_ON);
-    }
-    radar_base(g, v->level, 20);
+    w3_t w; vp(&w, g, 22.0f, 1.0f);
+    w3_view(&w, 0.12f * sinf(u->rot[0] * 0.2f), 0.18f * cosf(u->rot[0] * 0.13f), sinf(u->rot[0] * 0.15f) * 0.5f);
+    w.cue_z = 2.2f;
+    float lv = 1.0f + clampf(v->level * 2.0f, 0.0f, 1.0f) * 0.06f;
+    w3_xf x = W3_XF(0, 0, 0.2f, 0, 0, 0, lv);
+    w3_tunnel(&w, &x, 7, 1.0f, 6.0f, u->rot[0] * 0.35f, W3_AUTO);
 }
 
 static void scene_vinyl(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {
     float cr = perf_pval(p, PF_VINYL, 1);
-    gfx_circle(g, CX, CY, 22, GFX_ON);
-    for (int r = 9; r <= 19; r += 3) { if (r % 2) gfx_dcircle(g, CX, CY, r, 16, GFX_ON); else gfx_circle(g, CX, CY, r, GFX_ON); }
-    gfx_circle(g, CX, CY, 7, GFX_ON); gfx_circle(g, CX, CY, 1, GFX_ON);
-    int x0, y0, x1, y1;
-    polar(CX, CY, 2.0f, u->rot[0], &x0, &y0); polar(CX, CY, 6.0f, u->rot[0], &x1, &y1); gfx_line(g, x0, y0, x1, y1, GFX_ON);
-    polar(CX, CY, 9.0f, u->rot[0] + PI_F, &x0, &y0); polar(CX, CY, 19.0f, u->rot[0] + PI_F, &x1, &y1); gfx_dline(g, x0, y0, x1, y1, 1, 2, GFX_ON);
-    gfx_circle(g, 77, 17, 3, GFX_ON);                            /* tone arm */
-    gfx_line(g, 77, 17, 60, 46, GFX_ON); gfx_line(g, 60, 46, 56, 45, GFX_ON); gfx_line(g, 60, 46, 62, 49, GFX_ON);
-    int nd = (int)lroundf(cr * 8.0f);                            /* crackle */
-    for (int i = 0; i < nd; i++) {
-        int r = 9 + (int)(rnd(u) % 11); float a = (float)(rnd(u) % 628) / 100.0f;
-        polar(CX, CY, (float)r, a, &x0, &y0); gfx_px(g, x0, y0, GFX_XOR); gfx_px(g, x0 + 1, y0, GFX_XOR);
+    w3_t w; vp(&w, g, 16.5f, 6.0f);
+    w3_view(&w, 1.0f, 0.0f, 0.0f);
+    w3_xf x = W3_XF(-0.25f, 0, 0, 0, u->rot[0], 0, 1.0f);
+    w3_disc(&w, &x, 1.45f, 28, W3_AUTO);
+    x.t.y = -0.07f; w3_disc(&w, &x, 1.45f, 28, W3_AUTO); x.t.y = 0;
+    w3_disc(&w, &x, 1.15f, 24, W3_DOT);
+    w3_disc(&w, &x, 0.85f, 20, W3_DOT);
+    w3_disc(&w, &x, 0.5f, 14, W3_SOLID);
+    w3_line(&w, &x, (v3){ 0, 0, 0.15f }, (v3){ 0, 0, 0.5f }, W3_SOLID);        /* label mark: shows the spin */
+    w3_line(&w, &x, (v3){ 1.3f, 0, 0 }, (v3){ 1.45f, 0, 0 }, W3_SOLID);        /* rim notch */
+    v3 piv = { 1.9f, 0.1f, -1.0f }, bend = { 1.35f, 0.1f, 0.15f }, ndl = { 0.65f, 0.0f, 0.5f };
+    w3_line(&w, NULL, piv, bend, W3_SOLID); w3_line(&w, NULL, bend, ndl, W3_SOLID);   /* tonearm */
+    w3_line(&w, NULL, ndl, (v3){ ndl.x, ndl.y + 0.12f, ndl.z }, W3_SOLID);
+    float sx, sy;
+    if (w3_project(&w, w3_pt(&w, NULL, piv), &sx, &sy)) gfx_circle(g, (int)lroundf(sx), (int)lroundf(sy), 2, GFX_ON);
+    if (w3_project(&w, w3_pt(&w, NULL, ndl), &sx, &sy)) {
+        int nd = (int)lroundf(cr * 5.0f);                          /* crackle at the needle */
+        for (int i = 0; i < nd; i++) gfx_px(g, (int)lroundf(sx) - 3 + (int)(rnd(u) % 7), (int)lroundf(sy) + 2 + (int)(rnd(u) % 3), GFX_ON);
     }
-    float sw = clampf(v->level * 2.5f, 0, 1) * 60.0f;
-    gfx_arc(g, CX, CY, 25, 270.0f - sw, 270.0f + sw, GFX_ON);
+    (void)v;
 }
 
-/* ---- batch 2 scenes ---- */
 static void scene_filter(gfx_t *g, perf_t *p, const perf_vis_t *v, int hp, float tsec) {
     float c = clampf(v->aux, 0.0f, 1.0f), q = perf_pval(p, v->fx, 1);
-    int y = CY + 19 - (int)lroundf(c * 38.0f);
-    int cy = CY;
-    gfx_circle(g, CX, cy, 17, GFX_ON); gfx_dcircle(g, CX, cy, 10, 20, GFX_ON); gfx_circle(g, CX, cy, 2, GFX_ON);
-    gfx_dline(g, CX, 12, CX, 61, 1, 3, GFX_ON);                  /* crosshair */
-    gfx_dline(g, 6, cy, 82, cy, 1, 3, GFX_ON);
-    int y0 = hp ? y + 3 : 12, y1 = hp ? 60 : y - 3;              /* the side that is being cut is hatched */
-    for (int yy = y0; yy <= y1; yy += 3) gfx_dline(g, 9 + ((yy / 3) & 1) * 2, yy, 80, yy, 1, 3, GFX_ON);
-    gfx_line(g, 6, y, 82, y, GFX_ON);                            /* the cut line */
-    gfx_line(g, 6, y - 1, 82, y - 1, GFX_ON);
-    int bump = 2 + (int)lroundf(q * 9.0f * (0.85f + 0.15f * sinf(tsec * 9.0f)));   /* resonance peak on the line */
-    int dir = hp ? 1 : -1;
-    gfx_line(g, CX - 12, y, CX, y + dir * bump, GFX_ON); gfx_line(g, CX, y + dir * bump, CX + 12, y, GFX_ON);
-    gfx_cross(g, CX, y, 3, GFX_OFF); gfx_cross(g, CX, y, 2, GFX_ON);
-    gfx_arc(g, CX, cy, 26, 215.0f, 325.0f, GFX_ON);              /* frequency arc */
-    for (int i = 0; i <= 8; i++) {
-        int x0, y0b, x1, y1b; float a = (215.0f + (float)i * 13.75f) * PI_F / 180.0f;
-        polar(CX, cy, 26.0f, a, &x0, &y0b); polar(CX, cy, 29.0f, a, &x1, &y1b); gfx_line(g, x0, y0b, x1, y1b, GFX_ON);
-    }
-    float a = (215.0f + c * 110.0f) * PI_F / 180.0f; int mx, my;
-    polar(CX, cy, 26.0f, a, &mx, &my); gfx_frect(g, mx - 1, my - 1, 3, 3, GFX_ON); gfx_circle(g, mx, my, 3, GFX_ON);
-    gfx_text(g, 7, 56, hp ? "HP" : "LP", GFX_ON);
-    float sw = clampf(v->level * 2.5f, 0, 1) * 8.0f;             /* level: ticks on the right edge */
-    gfx_dline(g, 83, 60, 83, 60 - (int)sw * 3, 1, 1, GFX_ON);
+    float yh = 52.0f - c * 36.0f;                                 /* horizon follows the cutoff */
+    w3_t w; vp(&w, g, 20.0f, 4.0f);
+    w3_grid(&w, yh, hp ? -1 : 1, fmodf(tsec * 0.7f, 1.0f), q * 4.0f, tsec * 3.0f);
+    gfx_cross(g, 84, (int)lroundf(yh), 1, GFX_ON);
+    gfx_text(g, 7, hp ? 56 : 14, hp ? "HP" : "LP", GFX_ON);
 }
 
 static int gate_cells(int idx) { static const int N[6] = { 4, 8, 16, 32, 12, 24 }; return N[idx]; }
-static void scene_gate(gfx_t *g, perf_t *p, const perf_vis_t *v) {
+static void scene_gate(gfx_t *g, perf_t *p, const perf_vis_t *v, float tsec) {
     int idx = (int)perf_pval(p, PF_GATE, 0), n = gate_cells(idx);
     float depth = perf_pval(p, PF_GATE, 1), swing = perf_pval(p, PF_GATE, 2);
-    int cols = n <= 8 ? 4 : n == 12 ? 6 : 8, rows = (n + cols - 1) / cols;
-    if (n == 4) cols = 4;
-    int aw = 76, ah = 42, cw = aw / cols, ch = ah / rows;
-    int cur = v->rep % n;
-    for (int i = 0; i < n; i++) {
-        int cx = 6 + (i % cols) * cw, cy = 13 + (i / cols) * ch, w = cw - 1, h = ch - 1;
-        gfx_rect(g, cx, cy, w, h, GFX_ON);
-        float o = (i & 1) ? swing * 0.4f : 0.0f;                  /* the open half of this cell */
-        int ox = cx + 1 + (int)lroundf(o * (float)(w - 2)), ow = (int)lroundf(0.5f * (float)(w - 2));
-        if (ox + ow > cx + w - 1) ow = cx + w - 1 - ox;
-        int on = i == cur;
-        gfx_frect(g, ox, cy + 1, ow, h - 2, GFX_ON);
-        if (depth < 0.95f && w > 5) gfx_dline(g, ox + ow, cy + h / 2, cx + w - 2, cy + h / 2, 1, depth < 0.5f ? 1 : 3, GFX_ON);   /* what leaks through the closed half */
-        if (on) {                                                   /* playhead cell: bracketed and its phase tick */
-            gfx_rect(g, cx - 1, cy - 1, w + 2, h + 2, GFX_ON);
-            int tx = cx + 1 + (int)lroundf(v->phase * (float)(w - 3));
-            gfx_line(g, tx, cy - 2, tx, cy + h + 1, GFX_XOR);
-        }
+    int cur = (v->rep % n) * 8 / n;                               /* the playhead, mapped onto the 8 cubes */
+    float open = clampf(v->speed, 0.0f, 1.0f);
+    w3_t w; vp(&w, g, 12.0f, 9.0f);
+    w3_view(&w, 0.62f, 0.72f + 0.12f * sinf(tsec * 0.4f), 0.0f);
+    for (int i = 0; i < 8; i++) {
+        int col = i & 3, row = i >> 2;
+        int lit = (((col + (swing > 0.5f ? row : 0)) & 1) == 0) || i == cur;      /* the gate pattern */
+        float lift = i == cur ? 0.35f * open : 0.0f, h = lit ? 0.42f : 0.3f;
+        w3_xf x = W3_XF(((float)col - 1.5f) * 1.55f, lift, ((float)row - 0.5f) * 1.55f, 0, 0, 0, 1.0f);
+        w3_box(&w, &x, h, h, h, lit ? W3_SOLID : (depth < 0.5f ? W3_DOT : W3_DASH));
     }
-    gfx_dline(g, 6, 57, 6 + (int)lroundf(clampf(v->speed, 0, 1) * 70.0f), 57, 1, 1, GFX_ON);   /* gate gain */
     gfx_dline(g, 6, 59, 6 + (int)lroundf(clampf(v->level * 2.5f, 0, 1) * 70.0f), 59, 1, 1, GFX_ON);
 }
 
@@ -278,121 +196,85 @@ static void scene_delay(gfx_t *g, perf_t *p, const perf_vis_t *v) {
     float fb = perf_pval(p, PF_DELAY, 1);
     double Td = (double)v->phase * 131072.0; if (Td < 2000.0) Td = 2000.0;
     float u = (float)fmod(v->k, Td) / (float)Td;
-    for (int j = 0; j < 6; j++) {
-        float gain = powf(0.3f + 0.7f * fb / 0.88f, (float)j);
-        int r = 3 + (int)lroundf(((float)j + u) * 5.0f);
-        if (r > 25 || gain < 0.1f) continue;
-        if (gain > 0.5f) { gfx_circle(g, CX, CY, r, GFX_ON); if (j == 0) gfx_circle(g, CX, CY, r + 1, GFX_ON); }
-        else if (gain > 0.25f) gfx_dcircle(g, CX, CY, r, 18, GFX_ON);
-        else gfx_dcircle(g, CX, CY, r, 7, GFX_ON);
+    w3_t w; vp(&w, g, 16.0f, 3.0f);
+    w3_view(&w, 0.0f, 0.0f, 0.0f);
+    for (int j = 0; j < 6; j++) {                                 /* one frame per echo, receding up and to the right */
+        float gain = powf(0.3f + 0.7f * fb / 0.88f, (float)j), z = ((float)j + u) * 1.35f;
+        if (gain < 0.1f) continue;
+        w3_xf x = W3_XF(-1.3f + z * 0.5f, -0.75f + z * 0.32f, z, 0, 0, 0, 1.0f);
+        w3_square(&w, &x, 0.95f, gain > 0.5f ? W3_SOLID : gain > 0.25f ? W3_DASH : W3_DOT);
     }
-    int core = 2 + (int)lroundf(clampf(v->level * 3.0f, 0, 1) * 3.0f);          /* the thrown sound at the centre */
-    for (int r = 0; r <= core; r++) gfx_circle(g, CX, CY, r, GFX_ON);
-    gfx_cross(g, CX, CY, 28, GFX_OFF);
-    gfx_dline(g, 8, CY, 14, CY, 1, 1, GFX_ON); gfx_dline(g, 74, CY, 81, CY, 1, 1, GFX_ON);
-    gfx_dline(g, CX, 12, CX, 16, 1, 1, GFX_ON); gfx_dline(g, CX, 56, CX, 60, 1, 1, GFX_ON);
+    float core = 0.1f + 0.14f * clampf(v->level * 3.0f, 0.0f, 1.0f);
+    w3_xf c = W3_XF(-1.3f, -0.75f, -0.1f, 0.4f, 0.6f, 0, 1.0f);
+    w3_box(&w, &c, core, core, core, W3_SOLID);
     gfx_text(g, 12, 56, v->held ? "THROW" : "", GFX_ON);
 }
 
 static void scene_freeze(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {
     int idx = (int)perf_pval(p, PF_FREEZE, 0);
-    float grow = clampf((float)(v->k / (0.9 * (double)MARK_SR)), 0.0f, 1.0f);
-    grow = 1.0f - (1.0f - grow) * (1.0f - grow);
-    float R = 4.0f + 17.0f * grow, rot = u->rot[0] * 0.15f;
-    int nb = 1 + (idx + 1) / 2;                                   /* branches per arm: more for a bigger slice */
-    for (int a = 0; a < 6; a++) {
-        float ang = rot + (float)a * PI_F / 3.0f;
-        int x0, y0, x1, y1;
-        polar(CX, CY, 2.0f, ang, &x0, &y0); polar(CX, CY, R, ang, &x1, &y1);
-        gfx_line(g, x0, y0, x1, y1, GFX_ON);
-        for (int b = 1; b <= nb; b++) {
-            float rb = R * (float)b / (float)(nb + 1) + 2.0f, tw = (R - rb) * 0.55f + 1.0f;
-            int bx, by, tx, ty;
-            polar(CX, CY, rb, ang, &bx, &by);
-            polar(bx, by, tw, ang + 0.9f, &tx, &ty); gfx_line(g, bx, by, tx, ty, GFX_ON);
-            polar(bx, by, tw, ang - 0.9f, &tx, &ty); gfx_line(g, bx, by, tx, ty, GFX_ON);
-        }
-        int dx, dy; polar(CX, CY, R + 2.0f, ang, &dx, &dy); gfx_cross(g, dx, dy, 1, GFX_ON);
-    }
-    float h = 5.0f + 3.0f * grow;                                  /* the hexagon core */
-    for (int a = 0; a < 6; a++) {
-        int x0, y0, x1, y1;
-        polar(CX, CY, h, rot + (float)a * PI_F / 3.0f + PI_F / 6.0f, &x0, &y0); polar(CX, CY, h, rot + (float)(a + 1) * PI_F / 3.0f + PI_F / 6.0f, &x1, &y1);
-        gfx_line(g, x0, y0, x1, y1, GFX_ON);
-    }
-    gfx_dcircle(g, CX, CY, 23, 12, GFX_ON);
-    float sw = clampf(v->level * 2.5f, 0, 1) * 40.0f;
-    gfx_arc(g, CX, CY, 25, 270.0f - sw, 270.0f + sw, GFX_ON);
+    float grow = ease_out((float)(v->k / (0.9 * (double)MARK_SR)));
+    float R = (0.8f + 0.1f * (float)idx) * (0.4f + 0.6f * grow);
+    w3_t w; vp(&w, g, 27.0f, 6.0f);
+    w3_view(&w, 0.4f, u->rot[0] * 0.5f, 0.18f);
+    w3_octa(&w, NULL, R * (1.0f + clampf(v->level * 2.0f, 0.0f, 1.0f) * 0.05f), W3_AUTO);
+    w3_xf x = W3_XF(0, 0, 0, 0, -u->rot[0] * 0.9f, 0, 1.0f);
+    w3_octa(&w, &x, R * 0.42f, W3_DOT);
 }
 
 static void scene_retrig(gfx_t *g, perf_t *p, const perf_vis_t *v) {
-    int idx = (int)perf_pval(p, PF_RETRIG, 0), jj = v->rep & 3;
-    (void)idx;
-    gfx_circle(g, CX, CY, 22, GFX_ON); gfx_circle(g, CX, CY, 17, GFX_ON);
-    for (int i = 0; i < 16; i++) {                                  /* 16 ticks, a heavier one every quarter */
-        int x0, y0, x1, y1; float a = ((float)i * 22.5f - 90.0f) * PI_F / 180.0f;
-        polar(CX, CY, 22.0f, a, &x0, &y0); polar(CX, CY, i % 4 == 0 ? 27.0f : 25.0f, a, &x1, &y1); gfx_line(g, x0, y0, x1, y1, GFX_ON);
-    }
-    float live = ((float)jj + v->phase) * 90.0f - 90.0f, rd = v->phase * 90.0f - 90.0f;   /* live head, and where we are reading */
-    gfx_darc(g, CX, CY, 19, -90.0f, rd, 0.0f, GFX_ON);
-    int lx, ly, rx, ry; polar(CX, CY, 19.5f, live * PI_F / 180.0f, &lx, &ly); polar(CX, CY, 19.5f, rd * PI_F / 180.0f, &rx, &ry);
-    gfx_dline(g, lx, ly, rx, ry, 1, 2, GFX_ON);
-    for (int r = 0; r <= 2; r++) gfx_circle(g, rx, ry, r, GFX_ON);   /* read head */
-    gfx_circle(g, lx, ly, 3, GFX_ON);                                /* live head */
-    for (int k = 0; k < 4; k++) {                                    /* rewind chevrons <<, they run backwards round the ring */
-        float a = (-(float)k * 90.0f - (float)jj * 22.5f - v->phase * 22.5f - 45.0f) * PI_F / 180.0f;
-        int x, y; polar(CX, CY, 11.0f, a, &x, &y);
-        float tx = sinf(a), ty = -cosf(a), nx = cosf(a), ny = sinf(a);   /* counter-clockwise tangent and the outward normal */
-        int ax = x + (int)lroundf(tx * 4.0f), ay = y + (int)lroundf(ty * 4.0f);
-        for (int sgn = -1; sgn <= 1; sgn += 2)
-            gfx_line(g, ax, ay, x - (int)lroundf(tx * 3.0f) + (int)lroundf(nx * 3.0f * (float)sgn), y - (int)lroundf(ty * 3.0f) + (int)lroundf(ny * 3.0f * (float)sgn), GFX_ON);
-    }
-    gfx_frect(g, CX - 1, CY - 1, 3, 3, GFX_ON);
-    for (int i = 0; i < 4; i++) { if (i <= jj) gfx_frect(g, 30 + i * 6, 58, 4, 3, GFX_ON); else gfx_rect(g, 30 + i * 6, 58, 4, 3, GFX_ON); }
+    int jj = v->rep & 3;
+    (void)p;
+    float base = 0.5f + (float)jj * 0.35f;                        /* start pose of this retrigger, then a drift that snaps back */
+    float s = 0.85f * (v->phase < 0.12f ? 1.1f : 1.0f);
+    w3_t w; vp(&w, g, 12.0f, 6.0f);
+    w3_view(&w, 0.5f, base + v->phase * v->phase * 1.5f, 0.0f);
+    w3_box(&w, NULL, s, s, s, W3_AUTO);
+    w3_view(&w, 0.5f, base, 0.0f);
+    w3_box(&w, NULL, 1.2f, 1.2f, 1.2f, W3_FAINT);                 /* the pose it snaps back to */
+    for (int i = 0; i < 4; i++) { int x = 30 + i * 7; if (i <= jj) gfx_frect(g, x, 57, 5, 2, GFX_ON); else gfx_rect(g, x, 57, 5, 2, GFX_ON); }
 }
 
 static void scene_half(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {
     int q = (int)perf_pval(p, PF_HALF, 0);
-    (void)v;
-    gfx_dcircle(g, CX, CY, 22, 16, GFX_ON);                         /* slow orbit and the fast ghost orbit */
-    gfx_dcircle(g, CX, CY, 11, 40, GFX_ON);
-    gfx_circle(g, CX, CY, 3, GFX_ON); gfx_circle(g, CX, CY, 1, GFX_ON);
-    float a = u->rot[0];
-    for (int t = 0; t < 7; t++) {                                    /* the body with a fading trail */
-        int x, y; polar(CX, CY, 22.0f, a - (float)t * 0.11f, &x, &y);
-        if (t == 0) { for (int r = 0; r <= 3; r++) gfx_circle(g, x, y, r, GFX_ON); }
-        else if (t < 4 || (t & 1)) gfx_px(g, x, y, GFX_ON);
+    w3_t w; vp(&w, g, 19.0f, 6.0f);
+    w3_view(&w, 0.4f, u->rot[0], 0.38f);
+    float lv = 1.0f + clampf(v->level * 2.0f, 0.0f, 1.0f) * 0.05f;
+    w3_xf x = W3_XF(0, 0, 0, 0, 0, 0, lv);
+    w3_sphere(&w, &x, 1.0f, 3, 4, 20, W3_AUTO);
+    w3_view(&w, 0.4f, 0.0f, 0.38f);                               /* the orbit ring, with a slow bead and a normal-speed bead */
+    w3_disc(&w, NULL, 1.3f, 32, W3_FAINT);
+    for (int b = 0; b < 2; b++) {
+        float a = b ? u->rot[1] : u->rot[0], sx, sy;
+        if (w3_project(&w, w3_pt(&w, NULL, (v3){ cosf(a) * 1.3f, 0, sinf(a) * 1.3f }), &sx, &sy)) {
+            int ix = (int)lroundf(sx), iy = (int)lroundf(sy);
+            if (b) gfx_px(g, ix, iy, GFX_ON); else gfx_frect(g, ix - 1, iy - 1, 3, 3, GFX_ON);
+        }
     }
-    int gx, gy; polar(CX, CY, 11.0f, u->rot[1], &gx, &gy); gfx_circle(g, gx, gy, 1, GFX_ON);   /* normal-speed reference */
-    for (int i = 0; i < 12; i++) {                                   /* clock ticks */
-        int x0, y0, x1, y1; float t = (float)i * PI_F / 6.0f;
-        polar(CX, CY, 26.0f, t, &x0, &y0); polar(CX, CY, i % 3 == 0 ? 29.0f : 27.0f, t, &x1, &y1); gfx_line(g, x0, y0, x1, y1, GFX_ON);
-    }
-    gfx_text(g, 9, 56, q ? "X1/4" : "X1/2", GFX_ON);
-    float sw = clampf(v->level * 2.5f, 0, 1) * 50.0f;
-    gfx_arc(g, CX, CY, 16, 270.0f - sw, 270.0f + sw, GFX_ON);
+    gfx_text(g, 7, 56, q ? "X1/4" : "X1/2", GFX_ON);
 }
 
 static void scene_kill(gfx_t *g, perf_t *p, const perf_vis_t *v, float tsec) {
-    int m = (int)perf_pval(p, PF_KILL, 0), blink = ((int)(tsec * 5.0f)) & 1;
-    for (int i = 0; i < 16; i += 2) {                               /* hazard stripes */
-        gfx_line(g, 6 + i * 5, 12, 16 + i * 5, 16, GFX_ON); gfx_line(g, 6 + i * 5, 59, 16 + i * 5, 55, GFX_ON);
+    int m = (int)perf_pval(p, PF_KILL, 0);
+    float ks = (float)(v->k / (double)MARK_SR), e = ease_out(ks / 0.35f);
+    w3_t w; vp(&w, g, 17.0f, 6.0f);
+    w3_view(&w, 0.5f, tsec * 0.6f + e * 1.2f, 0.0f);
+    if (m == 0) {                                                  /* ALL: the cube implodes to a point */
+        float s = 1.0f - e;
+        if (s > 0.02f) w3_box(&w, NULL, s, s, s, W3_AUTO);
+        gfx_cross(g, CX, 36, 2, GFX_ON);
+    } else {                                                       /* LOW / HIGH: that half collapses flat */
+        float hk = 0.04f + (1.0f - e) * 0.96f;
+        float hl = m == 1 ? hk : 1.0f, hh = m == 1 ? 1.0f : hk;
+        w3_xf lo = W3_XF(0, -hl * 0.5f, 0, 0, 0, 0, 1.0f), hi = W3_XF(0, hh * 0.5f, 0, 0, 0, 0, 1.0f);
+        w3_box(&w, &lo, 0.9f, hl * 0.5f, 0.9f, m == 1 ? (hk < 0.1f ? W3_DOT : W3_AUTO) : W3_AUTO);
+        w3_box(&w, &hi, 0.9f, hh * 0.5f, 0.9f, m == 2 ? (hk < 0.1f ? W3_DOT : W3_AUTO) : W3_AUTO);
     }
-    if (m == 0) {
-        gfx_rect(g, 13, 18, 62, 34, GFX_ON);
-        for (int d = -1; d <= 1; d++) { gfx_line(g, 18 + d, 21, 70 + d, 49, GFX_ON); gfx_line(g, 70 + d, 21, 18 + d, 49, GFX_ON); }
-        if (blink) gfx_rect(g, 11, 16, 66, 38, GFX_ON);
-    } else {                                                         /* the spectrum, with the killed side crossed out */
-        for (int i = 0; i < 12; i++) {
-            int h = 6 + (int)((i * 7 + (int)(tsec * 6.0f) * 5 + (i & 1) * 9) % 20) + (int)lroundf(v->level * 8.0f);
-            int x = 14 + i * 5, killed = m == 1 ? i < 4 : i >= 8;
-            if (!killed) gfx_frect(g, x, 52 - h, 4, h, GFX_ON);
-            else { gfx_dline(g, x, 52, x, 52 - h, 1, 3, GFX_ON); gfx_dline(g, x + 3, 52, x + 3, 52 - h, 1, 3, GFX_ON); }
-        }
-        int x0 = m == 1 ? 12 : 54, x1 = x0 + 21;
-        gfx_rect(g, x0, 18, 22, 35, GFX_ON);
-        gfx_line(g, x0, 18, x1, 52, GFX_ON); gfx_line(g, x1, 18, x0, 52, GFX_ON);
-        if (blink) gfx_rect(g, x0 - 2, 16, 26, 39, GFX_ON);
+    float ph = fmodf(ks, 0.9f) / 0.9f;                             /* shock ring on the floor */
+    w3_view(&w, 0.8f, 0.0f, 0.0f);
+    if (ks > 0.25f || m != 0) {
+        w3_disc(&w, NULL, 0.35f + ph * 1.6f, 24, ph < 0.5f ? W3_DOT : W3_FAINT);
+        float ph2 = fmodf(ph + 0.5f, 1.0f);
+        w3_disc(&w, NULL, 0.35f + ph2 * 1.6f, 24, ph2 < 0.5f ? W3_DOT : W3_FAINT);
     }
 }
 
@@ -469,20 +351,22 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     if (v.fx == PF_TSTOP || v.fx == PF_TSTART) u->rot[0] += dt * clampf(spd, 0, 1) * 7.0f;
     else if (v.fx == PF_VINYL) u->rot[0] += dt * spd * 3.5f;
     else if (v.fx == PF_REVERSE) u->rot[0] -= dt * 2.4f;
+    else if (v.fx == PF_PITCH) u->rot[0] += dt * 0.9f * powf(2.0f, perf_pval(p, PF_PITCH, 0) / 12.0f);
+    else if (v.fx == PF_STUTTER) u->rot[1] += dt * (1.2f + 5.0f * clampf((float)(v.k / (perf_pval(p, PF_STUTTER, 0) * v.beat)), 0.0f, 1.0f));
     else if (v.fx == PF_FREEZE) u->rot[0] += dt * 1.0f;
-    else if (v.fx == PF_HALF) { u->rot[0] += dt * spd * 3.0f; u->rot[1] += dt * 3.0f; }
+    else if (v.fx == PF_HALF) { u->rot[0] += dt * spd * 1.6f; u->rot[1] += dt * 1.6f; }
     frame(g);
     title(g, perf_name(v.fx), tgt);
     switch (v.fx) {
-    case PF_BEATREP: scene_beatrep(g, p, &v); break;
-    case PF_STUTTER: scene_stutter(g, p, &v); break;
-    case PF_PITCH:   scene_pitch(g, p, &v); break;
+    case PF_BEATREP: scene_beatrep(g, p, &v, tsec); break;
+    case PF_STUTTER: scene_stutter(g, u, p, &v, tsec); break;
+    case PF_PITCH:   scene_pitch(g, u, p, &v); break;
     case PF_CRUSH:   scene_crush(g, p, &v, tsec); break;
     case PF_TSTOP: case PF_TSTART: scene_tape(g, u, &v); break;
     case PF_REVERSE: scene_reverse(g, u, &v); break;
     case PF_VINYL:   scene_vinyl(g, u, p, &v); break;
     case PF_LP: case PF_HP: scene_filter(g, p, &v, v.fx == PF_HP, tsec); break;
-    case PF_GATE:    scene_gate(g, p, &v); break;
+    case PF_GATE:    scene_gate(g, p, &v, tsec); break;
     case PF_DELAY:   scene_delay(g, p, &v); break;
     case PF_FREEZE:  scene_freeze(g, u, p, &v); break;
     case PF_RETRIG:  scene_retrig(g, p, &v); break;
