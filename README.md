@@ -43,7 +43,7 @@ make test-synth     # compila para el Mac y ejecuta los tests (67 comprobaciones
 make arm-synth      # compila para la Move -> build/movy-looper-module.tar.gz
 ```
 
-Para `arm-synth` hace falta `aarch64-linux-gnu-gcc` (`brew install aarch64-elf-gcc` no vale; usa el toolchain `aarch64-linux-gnu`) o Docker en marcha. Segundos maximos por pista: `make arm-synth MARK_SECONDS=60` (por defecto 30; 6 pistas x 60 s ~ 74 MB).
+Para `arm-synth` hace falta `aarch64-linux-gnu-gcc` (toolchain `aarch64-linux-gnu`, ya instalado con brew en este Mac) o Docker en marcha. Segundos maximos por pista: `make arm-synth MARK_SECONDS=60` (por defecto 30; 6 pistas x 60 s ~ 74 MB).
 
 Nota tecnica: el motor solo enruta las pistas 1-5; `scripts/patch-core.sh` genera `build/mark_core6.c` (copia con 2 lineas ampliadas a 6 pistas). `src/mark_core.c` queda intacto.
 
