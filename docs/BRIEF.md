@@ -16,7 +16,7 @@ Row 1 is the bottom row. Notes are declared as drum voices in the hierarchy (`pa
 
 | | col 1 (MASTER) | col 2–7 (tracks 1–6) | col 8 (REC SETTINGS) |
 |---|---|---|---|
-| row 4 | UNDO/REDO | FX on/off | Count-in on/off |
+| row 4 | MODE (MIX/START/END/FX/PAN; undo = Move's Undo button) | FX on/off | Count-in on/off |
 | row 3 | ARM auto-rec (toggle) | MUTE (keeps running silently, re-enters in place) | Rec Action: REC→PLAY / REC→DUB |
 | row 2 | STOP ALL | STOP (tap = stop; tap on a stopped track = CLEAR, UNDO restores) | Fixed length: free/1/2/4/8 bars (cycles) |
 | row 1 | ALL START/STOP | REC→PLAY→DUB→PLAY… (per Rec Action) | Quantize on/off |

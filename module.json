@@ -24,6 +24,9 @@
       "step_buttons_param": "step",
       "step_leds_param": "step_leds",
       "loop_knob_param": "loop_knob",
+      "knob_capture_param": "knob_capture",
+      "knob_delta_param": "knob_delta",
+      "undo_param": "undo_cmd",
       "levels": {
         "root": {
           "name": "Looper 606",
@@ -636,7 +639,7 @@
           "knobs": []
         },
         "v13": {
-          "name": "Undo/Redo",
+          "name": "Mode",
           "note": 48,
           "knobs": []
         },

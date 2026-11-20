@@ -102,6 +102,15 @@ static int disp_mark(void) {
     disp(); const char *p = strchr(dbuf, '|') + 1; size_t n = strcspn(p, "|");
     const char *c = memchr(p, ',', n); return c ? atoi(c + 1) : -1;
 }
+static int disp_end(void) {                      /* third pos sub-field: end marker, -1 when none */
+    disp(); const char *p = strchr(dbuf, '|') + 1; size_t n = strcspn(p, "|");
+    const char *c = memchr(p, ',', n); if (!c) return -1;
+    c = memchr(c + 1, ',', n - (size_t)(c + 1 - p)); return c ? atoi(c + 1) : -1;
+}
+static int pad_led(int note) {
+    char b[100]; A->get_param(S, "pad_leds", b, sizeof b);
+    char hx[3] = { b[(note - 36) * 2], b[(note - 36) * 2 + 1], 0 }; return (int)strtol(hx, NULL, 16);
+}
 static const char *disp_head(void) { disp(); return strrchr(dbuf, '|') + 1; }
 static int disp_peak(int bin) {                 /* peak byte of one overview bin, -1 when none */
     disp(); const char *p = strchr(strchr(dbuf, '|') + 1, '|') + 1;
@@ -127,7 +136,9 @@ static void wait_until_saved(const char *dir, const char *f, int ms) {
 #define M_ALL   note_of(1, 0)
 #define M_STOPALL note_of(2, 0)
 #define M_ARM   note_of(3, 0)
-#define M_UNDO  note_of(4, 0)
+#define M_MODE  note_of(4, 0)
+#define UNDO()  setstr("undo_cmd", "undo")
+#define REDO()  setstr("undo_cmd", "redo")
 #define R_QUANT note_of(1, 7)
 #define R_FIXLEN note_of(2, 7)
 #define R_RECACT note_of(3, 7)
@@ -232,7 +243,7 @@ int main(int argc, char **argv) {
     tap(STOP(2)); CHECK(state(2) == S_STOP);
     down(STOP(2)); run(500); up(STOP(2)); CHECK(state(2) != S_EMPTY);   /* holding row 2 never clears */
     seti("delete_pad", MUTE(2) - 36); CHECK(state(2) == S_EMPTY);       /* Movy Delete + any pad of the column = CLEAR */
-    seti("delete_pad", M_UNDO - 36); seti("delete_pad", 99);            /* master column / junk: ignored */
+    seti("delete_pad", M_MODE - 36); seti("delete_pad", 99);            /* master column / junk: ignored */
 
     /* --- count-in --- */
     tap(R_COUNTIN); CHECK(geti("count_in") == 1);
@@ -267,7 +278,7 @@ int main(int argc, char **argv) {
     tap(FX(2)); CHECK(geti("t2_fx_on") == 0);
 
     /* --- undo pad runs without crashing and reports availability --- */
-    tap(M_UNDO); run(20);
+    UNDO(); run(20);
 
     /* --- clock: first clock logged --- */
     clock_run(50); CHECK(got_clock_log);
@@ -336,12 +347,12 @@ int main(int argc, char **argv) {
     tap(STOP(1)); CHECK(state(1) == S_STOP);
     seti("delete_pad", FX(1) - 36); CHECK(state(1) == S_EMPTY); CHECK(geti("t1_len") == 0);
     CHECK(geti("undo_avail") == 1);
-    tap(M_UNDO); run(2);
+    UNDO(); run(2);
     CHECK(state(1) == S_STOP); CHECK(geti("t1_len") == len1);
     tap(STOP(1)); run(2); CHECK(state(1) == S_PLAY);
     out_peak = 0; run(200); CHECK(out_peak > 500);                  /* audio really came back */
-    tap(M_UNDO); CHECK(state(1) == S_EMPTY);                        /* redo = clear again */
-    tap(M_UNDO); CHECK(state(1) == S_STOP && geti("t1_len") == len1);
+    REDO(); CHECK(state(1) == S_EMPTY);                             /* redo = clear again */
+    UNDO(); CHECK(state(1) == S_STOP && geti("t1_len") == len1);
 
     /* --- user sequence: rec, rec, STOP, STOP must PLAY (with / without note-off) --- */
     for (int with_off = 0; with_off < 2; with_off++) {
@@ -445,7 +456,7 @@ int main(int argc, char **argv) {
         tap(M_ARM); STATUS(); CHECK(!strcmp(txt, "ARM OFF"));
         fresh(&host); seti("quantize", 0); tap(M_ARM); run(400);
         tap(REC(2)); STATUS(); CHECK(!strcmp(txt, "ARMED 2")); CHECK(LEDOF(RACKPAD(1, 2)) == (0x80 | 3));
-        tap(M_UNDO); STATUS(); CHECK(!strcmp(txt, "UNDO/REDO"));
+        UNDO(); STATUS(); CHECK(!strcmp(txt, "NOTHING TO UNDO"));
 
         /* colour rules: no track identity, master or settings colour is red or green */
         fresh(&host); seti("quantize", 0);
@@ -570,10 +581,11 @@ int main(int argc, char **argv) {
         /* a recording of N bars closes by itself: 1 bar @120 = 2 s; 3 bars = 6 s */
         setstr("step", "0");
         tap(REC(1)); run(600); CHECK(state(1) == S_REC); run(200); CHECK(state(1) == S_PLAY);
+        seti("cur_track", 3);                                         /* an empty track selected: steps = next-rec length */
         setstr("step", "2");
         tap(REC(2)); run(2000); CHECK(state(2) == S_REC); run(100); CHECK(state(2) == S_PLAY);
         CHECK(gett(2, "len") > 3 * gett(1, "len") * 95 / 100 && gett(2, "len") < 3 * gett(1, "len") * 105 / 100);
-        setstr("step", "2");
+        seti("cur_track", 3); setstr("step", "2");
         /* the setup page's enum is the same value */
         seti("rec_len", 6); CHECK(geti("rec_len") == 6 && step_led(5) == 120);
         seti("rec_len", 99); CHECK(geti("rec_len") == 16);
@@ -640,12 +652,12 @@ int main(int argc, char **argv) {
         CHECK(disp_peak(64) > 0);                                     /* the dub is at buffer L/2... */
         CHECK(disp_peak(10) > 100 && disp_peak(100) == 0);            /* ...and the rest of the loop is as recorded */
         /* undo of the dub restores the quiet half, clear + undo restores the start */
-        tap(M_UNDO); run(200); CHECK(disp_peak(64) == 0);
-        tap(M_UNDO); run(200);
+        UNDO(); run(200); CHECK(disp_peak(64) == 0);
+        REDO(); run(200);
         seti("delete_pad", REC(1) - 36); CHECK(state(1) == S_EMPTY);
         CHECK(gett(1, "off") == 0 && disp_mark() == -1);
-        tap(M_UNDO); CHECK(state(1) == S_STOP); CHECK(abs(gett(1, "off") - 44100) <= 3);
-        seti("delete_pad", REC(1) - 36); tap(M_UNDO);
+        UNDO(); CHECK(state(1) == S_STOP); CHECK(abs(gett(1, "off") - 44100) <= 3);
+        seti("delete_pad", REC(1) - 36); UNDO();
         /* a moved start is shown on the display even after the readout fades */
         in_mode = IN_SINE; run(1200); in_mode = IN_SILENCE;
         CHECK(abs(disp_mark() - 63) <= 2 && strncmp(disp_head(), "START", 5) != 0);
@@ -737,6 +749,205 @@ int main(int argc, char **argv) {
         tap(REC(1)); run(100); tap(REC(1)); run(2); usleep(900000);
         { char path[400]; snprintf(path, sizeof path, "%s/t5.wav", dir); struct stat st; CHECK(stat(path, &st) == 0 && st.st_size == 4); }
         fresh(&host);
+    }
+
+    /* --- step buttons on a recorded clip: length in bars (trim / repeat), undo, LEDs --- */
+    {
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+        setstr("step", "0");                                          /* next-rec length 1 bar */
+        tap(REC(1)); run(344); in_mode = IN_SILENCE; run(350); run(4);
+        long L = gett(1, "len"), B = 88200;                           /* one bar @120 bpm */
+        CHECK(state(1) == S_PLAY && L > 88000 && L < 88800 && gett(1, "full") == L);
+        CHECK(step_led(0) == 120);                                    /* the selected clip is 1 bar: step 1 white */
+        setstr("step", "3");                                          /* clip 1 -> 4 bars: the content repeats */
+        long L4 = gett(1, "len");
+        CHECK(labs(L4 - 4 * B) < 2 && gett(1, "full") == L4);
+        CHECK(!strcmp(status_text(), "LEN 1: 4 BARS"));
+        CHECK(geti("rec_len") == 1);                                  /* the next-rec length is untouched */
+        CHECK(step_led(3) == 120 && step_led(1) == 123 && step_led(4) == 119);
+        CHECK(disp_peak(4) > 100 && disp_peak(24) == 0 && disp_peak(36) > 100 && disp_peak(56) == 0 && disp_peak(100) > 100);
+        CHECK(strstr(disp_head(), "4 BARS") != NULL);
+        /* shorter: non-destructive trim */
+        setstr("step", "1");                                          /* 2 bars */
+        CHECK(labs(gett(1, "len") - 2 * B) < 2 && gett(1, "full") == L4);
+        CHECK(!strcmp(status_text(), "LEN 1: 2 BARS") && step_led(1) == 120);
+        setstr("step", "3");                                          /* longer again: audio is back, no new copy */
+        CHECK(gett(1, "len") == L4 && gett(1, "full") == L4);
+        CHECK(disp_peak(100) > 100 && disp_peak(24) == 0);
+        /* undo = the previous length, redo = the new one */
+        setstr("step", "0"); CHECK(labs(gett(1, "len") - B) < 2);
+        UNDO(); CHECK(gett(1, "len") == L4);
+        REDO(); CHECK(labs(gett(1, "len") - B) < 2);
+        UNDO();
+        /* pressing the step the clip already is leaves it (and its undo) alone */
+        setstr("step", "3"); CHECK(!strcmp(status_text(), "LEN 1: 4 BARS")); CHECK(gett(1, "len") == L4);
+        /* beyond the recorded 4 bars: 8 bars = repeat to fill */
+        setstr("step", "7");
+        CHECK(labs(gett(1, "len") - 8 * B) < 2 && gett(1, "full") == gett(1, "len"));
+        CHECK(disp_peak(2) > 100 && disp_peak(10) == 0 && disp_peak(18) > 100 && disp_peak(114) > 100);
+        UNDO(); CHECK(gett(1, "len") == L4 && gett(1, "full") == L4);
+        /* out of range (bpm 20: 16 bars = 192 s > the 120 s track): refused */
+        seti("bpm_override", 20);
+        setstr("step", "15"); CHECK(!strcmp(status_text(), "LEN 1: TOO LONG")); CHECK(gett(1, "len") == L4);
+        seti("bpm_override", 0);
+        /* DUB + step: back to PLAY, the overdub still undoes */
+        tap(REC(1)); CHECK(state(1) == S_DUB);
+        setstr("step", "1"); CHECK(state(1) == S_PLAY && labs(gett(1, "len") - 2 * B) < 2);
+        run(50); out_peak = 0; run(100); CHECK(out_peak > 100);       /* still sounding */
+        /* the start offset follows the new length; undo brings it back */
+        setstr("step", "3"); setstr("loop_knob", "1:12"); long off = gett(1, "off");
+        CHECK(off > 0);
+        setstr("step", "0"); CHECK(gett(1, "off") < gett(1, "len"));
+        UNDO(); CHECK(gett(1, "off") == off && gett(1, "len") == L4);
+        /* reverse + varispeed keep working on a resized clip */
+        sett(1, "rev", 1); sett(1, "spd", 2);
+        setstr("step", "1"); run(50); out_peak = 0; run(100); CHECK(out_peak > 100);
+        CHECK(gett(1, "off") < gett(1, "len") && state(1) == S_PLAY);
+        sett(1, "rev", 0); sett(1, "spd", 1);
+        /* the selected track decides: an empty one still sets the next-rec length */
+        seti("cur_track", 4); setstr("step", "5");
+        CHECK(geti("rec_len") == 6 && !strcmp(status_text(), "LEN 6 BARS") && step_led(5) == 120);
+        CHECK(labs(gett(1, "len") - 2 * B) < 2);
+        seti("cur_track", 1); CHECK(step_led(5) == 119);              /* clip 1 is 2 bars (not 6): LEDs follow the selection */
+        seti("rec_len", 0);
+    }
+
+    /* --- a resized clip is saved with its new length --- */
+    {
+        char blob[8192];
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+        setstr("step", "0"); tap(REC(1)); run(700); run(4);
+        setstr("step", "2");                                          /* 3 bars */
+        long L3 = gett(1, "len"); CHECK(L3 > 3 * 88000 && L3 < 3 * 88800);
+        char dir[300]; snprintf(dir, sizeof dir, "%s/%s", pdir, getstr("loop_id"));
+        char jp[400], js[1024] = ""; snprintf(jp, sizeof jp, "%s/loops.json", dir);
+        char want[40]; snprintf(want, sizeof want, "\"l1\":%ld", L3);
+        for (int w = 0; w < 80; w++) {
+            usleep(50000);
+            FILE *f = fopen(jp, "rb"); if (f) { size_t n = fread(js, 1, sizeof js - 1, f); js[n] = 0; fclose(f); }
+            if (strstr(js, want)) break;
+        }
+        CHECK(strstr(js, want) != NULL);
+        setstr("step", "0");                                          /* trimmed to 1 bar: len is saved, the audio is kept */
+        snprintf(want, sizeof want, "\"l1\":%d", gett(1, "len"));
+        for (int w = 0; w < 80; w++) {
+            usleep(50000); js[0] = 0;
+            FILE *f = fopen(jp, "rb"); if (f) { size_t n = fread(js, 1, sizeof js - 1, f); js[n] = 0; fclose(f); }
+            if (strstr(js, want)) break;
+        }
+        CHECK(strstr(js, want) != NULL);
+        long L1 = gett(1, "len");
+        A->get_param(S, "state", blob, sizeof blob);
+        fresh(&host);
+        A->set_param(S, "state", blob);
+        for (int w = 0; w < 60 && state(1) == S_EMPTY; w++) usleep(50000);
+        CHECK(state(1) == S_STOP && gett(1, "len") == L1 && gett(1, "full") == L3);
+        setstr("step", "2"); CHECK(gett(1, "len") == L3);             /* the trimmed part is still there */
+    }
+
+    /* --- MODE pad: MIX > START > END > FX > PAN, knob capture, per-mode knobs --- */
+    {
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+        CHECK(strstr(getstr("ui_hierarchy"), "\"knob_capture_param\":\"knob_capture\"") != NULL);
+        CHECK(strstr(sbuf, "\"knob_delta_param\":\"knob_delta\"") != NULL && strstr(sbuf, "\"undo_param\":\"undo_cmd\"") != NULL);
+        CHECK(geti("knob_capture") == 0 && pad_led(M_MODE) == 122);
+        static const int col[5] = { 122, 14, 7, 23, 17 };
+        static const char *const nm[5] = { "MIX", "START", "END", "FX", "PAN" };
+        for (int k = 1; k <= 5; k++) {
+            tap(M_MODE);
+            int m = k % 5; char want[24]; snprintf(want, sizeof want, "MODE %s", nm[m]);
+            CHECK(!strcmp(status_text(), want));
+            CHECK(geti("knob_capture") == (m != 0) && pad_led(M_MODE) == col[m]);
+            CHECK(pad_led(M_MODE) != 127 && pad_led(M_MODE) != 126);  /* never red / green */
+        }
+        CHECK(geti("knob_capture") == 0);
+        /* the pad no longer undoes anything */
+        tap(REC(1)); run(100); tap(REC(1)); run(2);
+        CHECK(geti("undo_avail") == 1); tap(M_MODE); tap(M_MODE); tap(M_MODE); tap(M_MODE); tap(M_MODE);
+        CHECK(state(1) == S_PLAY && gett(1, "len") > 0);
+        /* knob_delta does nothing in MIX */
+        setstr("knob_delta", "1:4"); CHECK(gett(1, "off") == 0 && geti("t1_level") == 100);
+        /* UNDO / REDO come from undo_cmd only; nothing to redo yet */
+        REDO(); CHECK(!strcmp(status_text(), "NOTHING TO REDO"));
+        setstr("undo_cmd", "bogus"); CHECK(state(1) == S_PLAY);
+        UNDO(); CHECK(state(1) == S_EMPTY && !strcmp(status_text(), "UNDO"));
+        REDO(); CHECK(state(1) == S_STOP && !strcmp(status_text(), "REDO"));
+        UNDO(); UNDO(); CHECK(!strcmp(status_text(), "NOTHING TO UNDO") && state(1) == S_EMPTY);
+        REDO();
+        tap(STOP(1)); run(2); setstr("step", "0");
+
+        /* START: knob N = start offset of track N (grid 1/16, Shift fine) */
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+        setstr("step", "0"); tap(REC(1)); run(700); run(4);
+        long L = gett(1, "len"); CHECK(state(1) == S_PLAY);
+        tap(M_MODE);                                                  /* START */
+        CHECK(disp_mark() == 0 && strncmp(disp_head(), "START 1", 7) == 0);   /* the marker is shown even at 0 */
+        setstr("knob_delta", "1:8");
+        CHECK(abs(gett(1, "off") - 44100) <= 3 && !strcmp(status_text(), "START 1 +8/16"));
+        CHECK(!strcmp(disp_head(), "START 1 +8/16") && abs(disp_mark() - 63) <= 2);
+        setstr("knob_delta", "1:1:1");                                /* fine: 1/64 note */
+        CHECK(abs(gett(1, "off") - 44100 - 1378) <= 3);
+        setstr("knob_delta", "1:1"); CHECK(abs(gett(1, "off") - 44100 - 5512) <= 3);   /* back on the 1/16 grid */
+        setstr("knob_delta", "2:3"); CHECK(!strcmp(status_text(), "START 2 EMPTY") && gett(2, "off") == 0);
+        setstr("knob_delta", "9:1"); setstr("knob_delta", "x"); setstr("knob_delta", "1:0");
+        setstr("loop_knob", "1:-8");                                  /* Loop + knob still works in any mode */
+        CHECK(gett(1, "off") < 20000);
+
+        /* END: knob N = loop end/length of track N */
+        tap(M_MODE);
+        setstr("knob_delta", "1:-4");                                 /* -4/16 */
+        CHECK(labs(gett(1, "len") - 66150) < 2 && gett(1, "full") == L);
+        CHECK(!strcmp(status_text(), "END 1 12/16") && !strcmp(disp_head(), "END 1 12/16"));
+        CHECK(abs(disp_end() - 96) <= 2);                             /* end marker on the whole-buffer view */
+        CHECK(disp_mark() >= 0);                                      /* start marker too (offset != 0 earlier or fine) */
+        setstr("knob_delta", "1:-2");                                 /* a burst of turns = ONE undo step */
+        UNDO(); CHECK(labs(gett(1, "len") - L) < 8);
+        REDO(); CHECK(labs(gett(1, "len") - 55125) < 2);
+        UNDO();
+        setstr("knob_delta", "1:-16"); setstr("knob_delta", "1:-16");   /* never below one 1/16 note */
+        CHECK(gett(1, "len") >= 5512 && gett(1, "len") <= 5513);
+        setstr("knob_delta", "1:-16"); CHECK(gett(1, "len") >= 5512);
+        setstr("knob_delta", "1:16"); setstr("knob_delta", "1:16");
+        CHECK(gett(1, "len") > 5512 * 8);
+        setstr("knob_delta", "1:16"); setstr("knob_delta", "1:16"); setstr("knob_delta", "1:16");   /* past the recorded end: repeats */
+        CHECK(gett(1, "len") > L && gett(1, "full") == gett(1, "len"));
+        UNDO(); CHECK(gett(1, "full") == L);
+        setstr("knob_delta", "2:1"); CHECK(!strcmp(status_text(), "END 2 EMPTY"));
+        tap(M_MODE); tap(M_MODE); tap(M_MODE);                        /* FX, PAN, MIX */
+        CHECK(geti("knob_capture") == 0);
+        tap(M_MODE); tap(M_MODE); tap(M_MODE);                        /* START, END, FX */
+        CHECK(!strcmp(status_text(), "MODE FX"));
+
+        /* FX: knob N = FX amount of track N, Shift = FX type */
+        int a0 = gett(2, "fxp");
+        setstr("knob_delta", "2:5"); CHECK(gett(2, "fxp") == a0 + 10);
+        setstr("knob_delta", "2:-100"); CHECK(gett(2, "fxp") == 0);
+        for (int i = 0; i < 8; i++) setstr("knob_delta", "2:-1:1");   /* down to Off first (clamped) */
+        CHECK(gett(2, "fx") == 0 && gett(2, "fx_on") == 0 && !strcmp(status_text(), "FX 2 OFF"));
+        setstr("knob_delta", "2:1:1"); CHECK(gett(2, "fx") == 1 && gett(2, "fx_on") == 1 && !strcmp(status_text(), "FX 2 LPF"));
+        setstr("knob_delta", "2:1:1"); CHECK(gett(2, "fx") == 2);
+        for (int i = 0; i < 9; i++) setstr("knob_delta", "2:1:1");
+        CHECK(gett(2, "fx") == 6);
+        setstr("knob_delta", "2:-1:1"); setstr("knob_delta", "2:-1:1");
+        for (int i = 0; i < 9; i++) setstr("knob_delta", "2:-1:1");
+        CHECK(gett(2, "fx") == 0 && gett(2, "fx_on") == 0);
+        setstr("knob_delta", "3:5"); CHECK(gett(3, "fxp") == 100 || gett(3, "fxp") == a0 + 10);
+        CHECK(!strncmp(disp_head(), "FX 3 ", 5));
+
+        /* PAN */
+        tap(M_MODE);
+        CHECK(!strcmp(status_text(), "MODE PAN"));
+        setstr("knob_delta", "3:-5"); CHECK(gett(3, "pan") == 40 && !strcmp(status_text(), "PAN 3 L20"));
+        setstr("knob_delta", "3:-100"); CHECK(gett(3, "pan") == 0);
+        setstr("knob_delta", "3:100"); CHECK(gett(3, "pan") == 100 && !strcmp(status_text(), "PAN 3 R100"));
+        setstr("knob_delta", "3:-25"); CHECK(gett(3, "pan") == 50 && !strcmp(status_text(), "PAN 3 C"));
+        setstr("knob_delta", "1:-5"); setstr("knob_delta", "1:5");
+        CHECK(!strcmp(disp_head(), "PAN 1 C"));
+        /* knobs 7 and 8 stay input volume and master in every mode */
+        setstr("knob_delta", "7:-2"); CHECK(geti("in_gain") == 90);
+        setstr("knob_delta", "8:-3"); CHECK(geti("master") == 85);
+        setstr("knob_delta", "8:100"); CHECK(geti("master") == 200);
+        tap(M_MODE); CHECK(geti("knob_capture") == 0);
     }
 
     /* --- nothing crashes on garbage --- */

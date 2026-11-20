@@ -10,8 +10,11 @@ Pad 1 = abajo a la izquierda. Fila 1 = la de abajo.
 
 ```
         MASTER   T1     T2     T3     T4     T5     T6     AJUSTES REC
-fila 4  UNDO/    FX     FX     FX     FX     FX     FX     Count-in
-        REDO     on/off on/off on/off on/off on/off on/off on/off
+fila 4  MODO     FX     FX     FX     FX     FX     FX     Count-in
+        MIX>     on/off on/off on/off on/off on/off on/off on/off
+        START>
+        END>FX>
+        PAN
 fila 3  ARM      MUTE   MUTE   MUTE   MUTE   MUTE   MUTE   Rec Action
         (rev.)                                              REC>PLAY/DUB
 fila 2  STOP     PLAY/  PLAY/  PLAY/  PLAY/  PLAY/  PLAY/  Largo fijo
@@ -21,10 +24,18 @@ fila 1  TODO     REC/   REC/   REC/   REC/   REC/   REC/   Quantize
         STOP
 ```
 
+**UNDO / REDO** ya no es un pad: es el boton ↩ Undo del Move (y Shift+Undo = rehacer) cuando la pista activa es el Looper (Movy lo reenvia con `undo_param`); en las demas pistas Undo sigue siendo el de Movy. Deshace el ultimo overdub, grabacion, CLEAR o cambio de largo (un nivel).
+
+**MODO** (pad de arriba de la columna 1) cicla MIX > START > END > FX > PAN > MIX. Color del pad: blanco = MIX, cian = START, amarillo = END, magenta = FX, azul = PAN (nunca verde ni rojo). La pantalla muestra el modo y el valor, p. ej. `START 1 +3/16`, `END 2 3B 5/16`, `FX 3 LPF 60`, `PAN 1 L20`. En MIX los knobs 1-6 son los volumenes; en los demas modos el knob N edita la pista N (Movy los captura con `knob_capture_param`; K7 = volumen de entrada y K8 = master en todos):
+- **START**: inicio del clip (rejilla 1/16, Shift = fino 1/64), como Loop + knob. Marca de inicio siempre visible en la onda.
+- **END**: fin/largo del loop (rejilla 1/16, Shift = fino, nunca menos de 1/16). Acortar no destruye (el audio se conserva; alargar de nuevo lo recupera); pasar de lo grabado repite el contenido. La onda muestra todo lo grabado con marca de inicio y de fin. Una racha de giros = un solo paso de Undo.
+- **FX**: cantidad de FX de la pista (Shift + knob = tipo de FX).
+- **PAN**: panoramica.
+
 Colores: verde = reproduciendo, rojo = grabando, violeta = overdub, naranja parpadeante = ARM/armada. Las filas MUTE/FX (y STOP, parada) usan el color de cada pista (azul, cian, amarillo, magenta, blanco, naranja); mute = gris. La columna 1 y la 8 no usan ni verde ni rojo.
 
 - **REC/DUB** (fila 1): pista vacia -> graba; segundo toque -> cierra la grabacion (PLAY, o DUB si Rec Action = REC>DUB); PLAY -> DUB; DUB -> PLAY; pista parada -> empieza a sonar directamente en DUB. Se ve en rojo (rec) / violeta (dub).
-- **PLAY/STOP** (fila 2): pista parada -> PLAY; sonando/DUB -> STOP; grabando -> cierra la grabacion y para. **Borrar pista (CLEAR): mantener Delete (X) del Move y tocar cualquier pad de la columna de esa pista** (Movy lo reenvia al modulo con `delete_pad_param`). UNDO lo deshace; UNDO otra vez = rehacer el borrado; UNDO es de un solo nivel. Verde = suena, color de pista = parada con clip, apagado = vacia.
+- **PLAY/STOP** (fila 2): pista parada -> PLAY; sonando/DUB -> STOP; grabando -> cierra la grabacion y para. **Borrar pista (CLEAR): mantener Delete (X) del Move y tocar cualquier pad de la columna de esa pista** (Movy lo reenvia al modulo con `delete_pad_param`). El boton **Undo** del Move lo deshace; Shift+Undo = rehacer el borrado; UNDO es de un solo nivel. Verde = suena, color de pista = parada con clip, apagado = vacia.
 - **MUTE**: silencia la pista pero sigue girando, y al quitar el mute vuelve en su sitio.
 - **ARM** (columna 1, fila 3): un toque (pulsar y soltar) activa/desactiva el modo "grabar al detectar sonido": al pulsar REC en una pista vacia queda *armada* y empieza a grabar sola cuando la entrada supera el umbral. Tocar REC otra vez cancela. ARMADA parpadea en naranja.
 - **REVERSE**: manten pulsado ARM y toca cualquier pad de una pista (fila 1 o fila 2): esa pista cambia de sentido (nunca graba, reproduce ni para). Al soltar ARM tras usarlo asi, ARM no cambia. Mientras ARM esta pulsado, los pads de fila 2 se iluminan en blanco (invertida) o color de pista (normal).
@@ -33,9 +44,13 @@ Todos los gestos actuan al note-on.
 - **Count-in**: al grabar en una pista vacia espera 4 tiempos antes de empezar.
 - **Largo fijo**: cada toque cicla libre -> 1 -> 2 -> 4 -> 8 compases (desde cualquier valor pasa al siguiente de esa lista); la grabacion se cierra sola. Los 16 botones de paso eligen cualquier largo de 1 a 16 (ver abajo).
 
-## Botones de paso = largo de grabacion (build `module-leds` v3 de Movy)
+## Botones de paso = largo (build `module-leds` v4 de Movy)
 
-Los 16 botones bajo los pads: el paso N fija un largo de N compases para las proximas grabaciones; volver a pulsar el paso elegido = largo libre. Los LEDs muestran el largo (paso N blanco, 1..N-1 tenues, resto apagado; libre = todo apagado) y el aviso es `LEN 4 BARS` / `LEN FREE`. Es el mismo ajuste que el pad de la columna 8 y que `Fixed Length` de Setup (que ahora llega a 16 compases). En una pista con este modulo los pasos NO son del secuenciador de Movy (Shift+paso, Mute+paso y la vista Session siguen igual).
+Los 16 botones bajo los pads actuan sobre la **pista seleccionada** (el ultimo pad de pista tocado):
+- **Con clip**: el paso N pone el loop a N compases (al tempo actual). Mas corto = recorte no destructivo (el audio se conserva; alargar de nuevo lo recupera); mas largo que lo grabado = el contenido se repite hasta llenarlo (estilo RC-505, hasta lo que cabe en la pista: si no, `LEN 1: TOO LONG`). Overdub, reverse, velocidad e inicio siguen alineados (el inicio se reajusta al nuevo largo) y el nuevo largo se guarda con los loops. Aviso `LEN 1: 4 BARS`. Undo (boton del Move) devuelve el largo anterior.
+- **Pista vacia**: el paso N fija un largo de N compases para las proximas grabaciones; volver a pulsar el paso elegido = largo libre. Aviso `LEN 4 BARS` / `LEN FREE`.
+
+Los LEDs muestran el largo del clip seleccionado, o el de las proximas grabaciones si esta vacia (paso N blanco, 1..N-1 tenues, resto apagado; libre = todo apagado). Es el mismo ajuste que el pad de la columna 8 y que `Fixed Length` de Setup (que ahora llega a 16 compases). En una pista con este modulo los pasos NO son del secuenciador de Movy (Shift+paso, Mute+paso y la vista Session siguen igual).
 
 ## Loop + knob = inicio del clip
 
@@ -64,7 +79,7 @@ Los loops sobreviven a cerrar/recargar Movy y a apagar la Move.
 ## Compilar y probar
 
 ```
-make test-synth     # compila para el Mac y ejecuta los tests (346 comprobaciones)
+make test-synth     # compila para el Mac y ejecuta los tests (463 comprobaciones)
 make arm-synth      # compila para la Move -> build/looper-606-module.tar.gz
 ```
 
@@ -106,4 +121,7 @@ A Movy without the feature ignores both params; nothing else changes.
 - `step`: write-only, step button index 0..15 (Movy sends it instead of a sequencer step).
 - `step_leds`: 32 hex digits, one palette byte per step button.
 - `loop_knob`: write-only `"N:delta[:1]"` while Loop is held (N = knob 1..8, `:1` = Shift/fine).
+- `knob_capture` (read, 0/1) and `knob_delta` (write `"N:delta[:1]"`): while `knob_capture` is 1 for the active track, Movy sends every knob turn (Move and Twister) to `knob_delta` instead of the hierarchy.
+- `undo_cmd` (write `"undo"` / `"redo"`): Move's Undo / Shift+Undo on this track.
+- `display`: the pos field may be `"<pos>,<start>,<end>"` (end marker; -1 = none).
 - `display`: the pos field is `"<pos>"` or `"<pos>,<start marker column>"`.

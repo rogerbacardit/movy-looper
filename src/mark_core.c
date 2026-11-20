@@ -1507,6 +1507,55 @@ static void track_setlen16(mark_t *m, int ti, int n16) {
     m->edit_rev++;
 }
 
+/* L606 loop length from the step buttons / END knob: set the loop to `nl`
+ * frames. Shorter = non-destructive trim (audio kept, full_len stays, so
+ * lengthening again restores it). Longer than full_len = the recorded content
+ * is repeated to fill (RC-505 style), full_len follows. One undo level (kind 3)
+ * restores the previous len/full_len/start; `coalesce` keeps the original
+ * "before" when the last undo entry is already a length change of this track
+ * (a knob turn is many small steps = one undo). Returns 1 when it changed. */
+static int track_set_length(mark_t *m, int ti, uint32_t nl, int coalesce) {
+    mk_track_t *t = &m->t[ti];
+    if (m->io_busy || m->swap_track == ti) return 0;
+    if (t->len == 0 || t->full_len == 0 || t->st == MK_REC || !t->buf) return 0;
+    if (nl < 64) nl = 64;
+    if (nl > m->track_frames) return 0;
+    if (nl == t->len) return 0;
+    if (t->st == MK_DUB) {               /* the write head would cross the new edge */
+        t->st = MK_PLAY;
+        end_dub_capture(m, ti);
+    }
+    int keep = coalesce && m->undo_track == ti && m->undo_kind == 3 && !m->undo_redo;
+    if (!keep) {
+        if (m->swap_track >= 0) m->swap_track = -1;
+        m->undo_track = ti;
+        m->undo_kind = 3;
+        m->undo_redo = 0;
+        m->undo_capturing = 0;
+        m->undo_count = 0;
+        m->undo_saved_len = t->len;
+        m->undo_saved_full = t->full_len;
+        m->undo_saved_off = t->off;
+    }
+    if (nl > t->full_len) {              /* repeat the recorded loop to fill */
+        uint32_t src = t->full_len, f = src;
+        while (f < nl) {
+            uint32_t n = src - (f % src);
+            if (n > nl - f) n = nl - f;
+            memcpy(t->buf + (size_t)f * MARK_CH, t->buf + (size_t)(f % src) * MARK_CH,
+                   (size_t)n * (size_t)MARK_BPF);
+            f += n;
+        }
+        t->full_len = nl;
+    }
+    t->len = nl;
+    t->off %= nl;
+    if (t->pos >= (double)nl) t->pos = fmod(t->pos, (double)nl);
+    t->crev++;
+    m->edit_rev++;
+    return 1;
+}
+
 /* L606 clip start: set the loop's start point (frames into the buffer, taken
  * modulo the loop length). Refused while the buffer is being written (REC,
  * DUB, an undo swap) so the dub/undo regions stay contiguous. */
@@ -1626,6 +1675,20 @@ static void undo_press(mark_t *m) {
             m->undo_redo = 0;
             if (!any_content(m)) m->grid_unit = 0.0;
         }
+        m->edit_rev++;
+        return;
+    }
+    if (m->undo_kind == 3) {          /* L606: undo / redo of a length change */
+        if (t->st == MK_REC) return;
+        if (t->st == MK_DUB) { t->st = MK_PLAY; end_dub_capture(m, m->undo_track); }
+        uint32_t l = t->len, f = t->full_len, o = t->off;
+        t->len = m->undo_saved_len;
+        t->full_len = m->undo_saved_full;
+        t->off = m->undo_saved_off;
+        m->undo_saved_len = l; m->undo_saved_full = f; m->undo_saved_off = o;
+        if (t->len && t->pos >= (double)t->len) t->pos = fmod(t->pos, (double)t->len);
+        m->undo_redo = !m->undo_redo;
+        t->crev++;
         m->edit_rev++;
         return;
     }
@@ -2610,6 +2673,12 @@ void mark_set_param(mark_t *m, const char *key, const char *val) {
         if (!strcmp(k, "trim"))  { track_trim(m, ti, atoi(val)); return; }
         if (!strcmp(k, "len16")) { track_setlen16(m, ti, atoi(val)); return; }
         if (!strcmp(k, "off"))   { track_set_off(m, ti, atol(val)); return; }
+        if (!strcmp(k, "setlen")) {          /* "<frames>" or "<frames>:1" (coalesce undo) */
+            long fr = atol(val);
+            const char *c = strchr(val, ':');
+            if (fr > 0) track_set_length(m, ti, (uint32_t)fr, c && atoi(c + 1));
+            return;
+        }
         if (!strcmp(k, "level")) { t->level = clampi(atoi(val), 0, 200); m->edit_rev++; return; }
         if (!strcmp(k, "pan"))   { t->pan = clampi(atoi(val), 0, 100); update_track_gains(t); m->edit_rev++; return; }
         if (!strcmp(k, "rev")) {
@@ -2818,10 +2887,11 @@ static int g_fxp(const mk_track_t *t)   { return t->fxp; }
  * *pos = playhead 0..bins-1. Strided: at most ~256 frames are read per bin, so
  * a 120 s loop costs ~65k reads whatever its length. out == NULL skips the scan. Returns 0 when empty.
  * Reads race with the audio thread by design (int16 loads; the UI tolerates it). */
-int mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_frames, int *pos) {
+int mark_track_wave_ex(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_frames, int *pos, int whole) {
     if (!m || ti < 0 || ti >= MARK_TRACKS || bins < 1) return 0;
     const mk_track_t *t = &m->t[ti];
-    uint32_t span = t->st == MK_REC ? (t->rec_target ? t->rec_target : t->rec_len) : t->len;
+    uint32_t whole_len = t->full_len > t->len ? t->full_len : t->len;   /* L606: END view shows what is trimmed too */
+    uint32_t span = t->st == MK_REC ? (t->rec_target ? t->rec_target : t->rec_len) : (whole ? whole_len : t->len);
     if (span_frames) *span_frames = span;
     if (pos) {
         /* L606: the playhead is drawn over the waveform in BUFFER order, so a
@@ -2836,7 +2906,7 @@ int mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_fr
             double x = (double)play_index(t, ip) + (t->rev ? -fr : fr);
             if (x < 0.0) x += (double)t->len;
             else if (x >= (double)t->len) x -= (double)t->len;
-            f = x / (double)t->len;
+            f = x / (double)(whole ? whole_len : t->len);
         }
         int p = (int)(f * bins);
         *pos = p < 0 ? 0 : p >= bins ? bins - 1 : p;
@@ -2844,7 +2914,7 @@ int mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_fr
     if (!out) return span != 0;            /* position/length only: no scan */
     memset(out, 0, (size_t)bins);
     if (!t->buf || span == 0) return 0;
-    uint32_t avail = t->st == MK_REC ? t->rec_len : t->len;
+    uint32_t avail = t->st == MK_REC ? t->rec_len : (whole ? whole_len : t->len);
     for (int b = 0; b < bins; b++) {
         uint64_t a = (uint64_t)span * (uint64_t)b / (uint64_t)bins;
         uint64_t e = (uint64_t)span * (uint64_t)(b + 1) / (uint64_t)bins;
@@ -2865,13 +2935,30 @@ int mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_fr
     return 1;
 }
 
-/* L606: clip start of track ti as a bin 0..bins-1 of the waveform overview, or
- * -1 when the track is empty. */
-int mark_track_start_bin(mark_t *m, int ti, int bins) {
+int mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_frames, int *pos) {
+    return mark_track_wave_ex(m, ti, bins, out, span_frames, pos, 0);
+}
+
+/* L606: loop end of track ti as a bin of the WHOLE-buffer overview (whole = 1
+ * view of mark_track_wave_ex), or -1 when empty. */
+int mark_track_end_bin(mark_t *m, int ti, int bins) {
     if (!m || ti < 0 || ti >= MARK_TRACKS || bins < 1) return -1;
     const mk_track_t *t = &m->t[ti];
     if (t->len == 0 || t->st == MK_REC) return -1;
-    int b = (int)((uint64_t)t->off * (uint64_t)bins / t->len);
+    uint32_t whole_len = t->full_len > t->len ? t->full_len : t->len;
+    int b = (int)((uint64_t)t->len * (uint64_t)bins / whole_len);
+    return b < 0 ? 0 : b >= bins ? bins - 1 : b;
+}
+
+/* L606: clip start of track ti as a bin 0..bins-1 of the waveform overview, or
+ * -1 when the track is empty. */
+int mark_track_start_bin(mark_t *m, int ti, int bins) { return mark_track_start_bin_ex(m, ti, bins, 0); }
+int mark_track_start_bin_ex(mark_t *m, int ti, int bins, int whole) {
+    if (!m || ti < 0 || ti >= MARK_TRACKS || bins < 1) return -1;
+    const mk_track_t *t = &m->t[ti];
+    if (t->len == 0 || t->st == MK_REC) return -1;
+    uint32_t whole_len = t->full_len > t->len ? t->full_len : t->len;
+    int b = (int)((uint64_t)t->off * (uint64_t)bins / (whole ? whole_len : t->len));
     return b < 0 ? 0 : b >= bins ? bins - 1 : b;
 }
 
@@ -2889,6 +2976,7 @@ int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
         if (!strcmp(k, "spd"))   return snprintf(buf, (size_t)buf_len, "%d", t->spd);
         if (!strcmp(k, "len"))   return snprintf(buf, (size_t)buf_len, "%u", t->len);
         if (!strcmp(k, "off"))   return snprintf(buf, (size_t)buf_len, "%u", t->off);
+        if (!strcmp(k, "full"))  return snprintf(buf, (size_t)buf_len, "%u", t->full_len > t->len ? t->full_len : t->len);
         if (!strcmp(k, "state")) return snprintf(buf, (size_t)buf_len, "%d", t->st);
         if (!strcmp(k, "fx"))    return snprintf(buf, (size_t)buf_len, "%d", t->fx);
         if (!strcmp(k, "fx_on")) return snprintf(buf, (size_t)buf_len, "%d", t->fx_on);

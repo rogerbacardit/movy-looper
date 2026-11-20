@@ -141,6 +141,10 @@ int  mark_get_param(mark_t *m, const char *key, char *buf, int buf_len);
 int  mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_frames, int *pos);
 /* Clip start of track ti as a bin of the overview (-1 = empty). */
 int  mark_track_start_bin(mark_t *m, int ti, int bins);
+/* L606 END view: whole = 1 spans the whole recorded buffer (trimmed part included). */
+int  mark_track_wave_ex(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_frames, int *pos, int whole);
+int  mark_track_start_bin_ex(mark_t *m, int ti, int bins, int whole);
+int  mark_track_end_bin(mark_t *m, int ti, int bins);
 
 /* Persistence (L606): loop audio as <dir>/tN.wav + <dir>/loops.json, written and
  * read by the CALLER's background thread (never the audio thread). The audio

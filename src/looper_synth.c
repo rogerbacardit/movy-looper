@@ -48,7 +48,7 @@ enum act {
     A_FX,         /* arg = track: track FX on/off                       */
     A_ALL,        /* all start/stop                                     */
     A_STOPALL,    /* stop every track                                   */
-    A_UNDO,       /* undo / redo                                        */
+    A_MODE,       /* knob mode: MIX > START > END > FX > PAN > MIX      */
     A_ARM,        /* arm auto-rec toggle; held = reverse modifier       */
     A_COUNTIN,    /* count-in on/off                                    */
     A_RECACT,     /* rec action: rec->play / rec->dub                   */
@@ -60,7 +60,7 @@ typedef struct { uint8_t act, arg; const char *label; } pad_def_t;
 #define P(a, n, l) { (a), (n), (l) }
 
 static const pad_def_t PAD_GRID[4][8] = {
-  /* row 4 (top) */ { P(A_UNDO,0,"Undo/Redo"), P(A_FX,1,"FX 1"), P(A_FX,2,"FX 2"),
+  /* row 4 (top) */ { P(A_MODE,0,"Mode"), P(A_FX,1,"FX 1"), P(A_FX,2,"FX 2"),
                       P(A_FX,3,"FX 3"), P(A_FX,4,"FX 4"), P(A_FX,5,"FX 5"),
                       P(A_FX,6,"FX 6"), P(A_COUNTIN,0,"Count-in") },
   /* row 3       */ { P(A_ARM,0,"Arm/Reverse"), P(A_MUTE,1,"Mute 1"), P(A_MUTE,2,"Mute 2"),
@@ -83,6 +83,12 @@ static const pad_def_t PAD_GRID[4][8] = {
  * any of 1..16 directly (pressing the chosen one again = free). */
 #define MAX_BARS 16
 static const int CYCLE_BARS[4] = { 1, 2, 4, 8 };
+
+/* Knob mode (top pad of column 1). In MIX the knobs are the volumes (Movy's
+ * hierarchy); in every other mode Movy hands the knob turns to knob_delta
+ * (knob_capture = 1) and knob N edits track N. */
+enum { MODE_MIX = 0, MODE_START, MODE_END, MODE_FX, MODE_PAN, N_MODES };
+static const char *const MODE_NAME[N_MODES] = { "MIX", "START", "END", "FX", "PAN" };
 
 /* Shim-level track state enum (tN_state), read-only for the UI. */
 enum { S_EMPTY = 0, S_ARMED, S_REC, S_PLAY, S_DUB, S_STOP, S_MUTE };
@@ -109,6 +115,9 @@ typedef struct {
     int  threshold;                /* -70..-6 dBFS */
     int  count_in;
     int  rec_len;                  /* fixed recording length in bars, 0 = free */
+    int  mode;                     /* MODE_* */
+    int  end_t;                    /* track whose END was last edited (undo coalescing) */
+    long end_until;                /* clock_frames until a new END edit opens a new undo entry */
     int  in_gain;                  /* 0..200 percent */
     int  clock_logged, audio_logged, notes_logged;
     long in_frames;                /* frames rendered so far (diagnostics) */
@@ -129,7 +138,7 @@ typedef struct {
     long     start_until;          /* clock_frames until the START readout fades */
     long     clock_frames;         /* frames rendered since create */
     uint8_t  wave[WAVE_BINS];
-    int      wave_track, wave_st, wave_dirty;
+    int      wave_track, wave_st, wave_dirty, wave_whole;
     uint32_t wave_span;
     long     wave_at;
     unsigned wave_seq;
@@ -280,10 +289,43 @@ static void set_rec_bars(synth_t *s, int bars) {
     else say(s, "LEN %d BARS", s->rec_len);
 }
 
-/* Step button N (0-based) = a fixed length of N+1 bars; the chosen one again = free. */
+/* Frames of one bar (4 beats) at the current tempo. */
+static double bar_frames(synth_t *s) { return (double)MARK_SR * 60.0 / cur_bpm(s) * 4.0; }
+
+static int clip_state(int st) { return st == MK_PLAY || st == MK_DUB || st == MK_STOP; }
+
+/* Whole bars the clip of track t is (within a small tolerance), 0 = not a whole
+ * number of bars (a free length) or longer than the step row. */
+static int clip_bars(synth_t *s, int t) {
+    long len = get_t(s, t, "len");
+    double b = bar_frames(s);
+    long n = lround((double)len / b);
+    if (len <= 0 || n < 1 || n > MAX_BARS || fabs((double)len - (double)n * b) > b / 64.0) return 0;
+    return (int)n;
+}
+
+/* Max loop length the track buffers hold, in frames. */
+static long cap_frames(synth_t *s) { return (long)get_i(s, "track_secs") * (long)MARK_SR; }
+
+/* Step button N (0-based). On the SELECTED track (last touched track pad):
+ *  - with a clip: its length becomes N+1 bars (shorter = non-destructive trim,
+ *    longer = the content repeats to fill), one undo level;
+ *  - otherwise: the fixed length of the next recordings; the chosen one again = free. */
 static void step_press(synth_t *s, int button) {
     if (button < 0 || button >= MAX_BARS) return;
-    set_rec_bars(s, s->rec_len == button + 1 ? 0 : button + 1);
+    int t = s->cur_track, bars = button + 1;
+    if (clip_state(core_state(s, t))) {
+        long nl = lround(bar_frames(s) * bars), len = get_t(s, t, "len");
+        if (nl > cap_frames(s)) { say(s, "LEN %d: TOO LONG", t); return; }
+        if (labs(nl - len) > (long)(bar_frames(s) / 64.0)) {
+            s->end_until = 0;                       /* a new undo entry */
+            set_t(s, t, "setlen", (int)nl);
+        }
+        s->wave_dirty = 1;
+        say(s, bars == 1 ? "LEN %d: 1 BAR" : "LEN %d: %d BARS", t, bars);
+        return;
+    }
+    set_rec_bars(s, s->rec_len == bars ? 0 : bars);
 }
 
 /* Loop button + knob N (1-based): move the clip start of track N by `delta`
@@ -302,10 +344,7 @@ static void sixteenths_label(synth_t *s, long off, char *out, size_t n) {
     }
 }
 
-static void loop_knob(synth_t *s, const char *val) {
-    int n = 0, d = 0, fine = 0;
-    if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
-    if (n < 1 || n > NTRK || d == 0) return;
+static void start_knob(synth_t *s, int n, int d, int fine) {
     int t = n;
     s->cur_track = t;
     s->wave_dirty = 1;
@@ -326,6 +365,124 @@ static void loop_knob(synth_t *s, const char *val) {
     char lab[32];
     sixteenths_label(s, off, lab, sizeof lab);
     say(s, "START %d %s", t, lab);
+}
+
+static void loop_knob(synth_t *s, const char *val) {
+    int n = 0, d = 0, fine = 0;
+    if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
+    if (n < 1 || n > NTRK || d == 0) return;
+    start_knob(s, n, d, fine);
+}
+
+/* Readout of a loop length: "4 BARS", "3B 5/16", "5/16", or seconds off the grid. */
+static void len_label(synth_t *s, long len, char *out, size_t n) {
+    double u = (double)MARK_SR * 60.0 / cur_bpm(s) / 4.0;
+    long k = lround((double)len / u);
+    if (k > 0 && fabs((double)len - (double)k * u) < 2.0) {
+        long bars = k / 16, r = k % 16;
+        if (r == 0) snprintf(out, n, bars == 1 ? "%ld BAR" : "%ld BARS", bars);
+        else if (bars == 0) snprintf(out, n, "%ld/16", r);
+        else snprintf(out, n, "%ldB %ld/16", bars, r);
+    } else {
+        snprintf(out, n, "%.2f S", (double)len / (double)MARK_SR);
+    }
+}
+
+/* END mode: knob N moves the end of track N's loop by `d` grid steps (1/16
+ * note; fine = 1/64). Non-destructive when shortening (the audio stays), the
+ * content repeats when going past what was recorded. Never below one 1/16 note.
+ * A burst of turns is one undo step. */
+static void end_knob(synth_t *s, int t, int d, int fine) {
+    int st = core_state(s, t);
+    s->cur_track = t;
+    s->wave_dirty = 1;
+    if (!clip_state(st)) { say(s, "END %d %s", t, st == MK_EMPTY ? "EMPTY" : "LOCKED"); return; }
+    long len = get_t(s, t, "len");
+    double u = (double)MARK_SR * 60.0 / cur_bpm(s) / (fine ? 16.0 : 4.0);
+    double umin = (double)MARK_SR * 60.0 / cur_bpm(s) / 4.0;
+    d = clampi_(d, -16, 16);
+    long k = lround((double)len / u) + d;
+    long nl = lround((double)k * u);
+    if (nl < (long)umin) nl = (long)umin;
+    if (nl > cap_frames(s)) nl = cap_frames(s);
+    if (nl != len) {
+        int co = s->end_t == t && s->clock_frames < s->end_until;
+        char v[24]; snprintf(v, sizeof v, "%ld:%d", nl, co);
+        char key[24]; snprintf(key, sizeof key, "t%d_setlen", t);
+        mark_set_param(s->m, key, v);
+        s->end_t = t;
+        s->end_until = s->clock_frames + (long)MARK_SR * 3;
+    }
+    char lab[32];
+    len_label(s, get_t(s, t, "len"), lab, sizeof lab);
+    say(s, "END %d %s", t, lab);
+}
+
+static const char *const FX_NAME[7] = { "OFF", "LPF", "HPF", "CRUSH", "DELAY", "PHASER", "RING" };
+
+static void fx_knob(synth_t *s, int t, int d, int fine) {
+    s->cur_track = t;
+    if (fine) {                                       /* Shift: FX type */
+        int ty = clampi_(get_t(s, t, "fx") + (d > 0 ? 1 : -1), 0, 6);
+        set_t(s, t, "fx", ty);
+        set_t(s, t, "fx_on", ty ? 1 : 0);
+        say(s, "FX %d %s", t, FX_NAME[ty]);
+    } else {
+        int a = clampi_(get_t(s, t, "fxp") + d * 2, 0, 100);
+        set_t(s, t, "fxp", a);
+        say(s, "FX %d %s %d", t, FX_NAME[clampi_(get_t(s, t, "fx"), 0, 6)], a);
+    }
+}
+
+static void pan_label(int pan, char *out, size_t n) {
+    if (pan == 50) snprintf(out, n, "C");
+    else if (pan < 50) snprintf(out, n, "L%d", (50 - pan) * 2);
+    else snprintf(out, n, "R%d", (pan - 50) * 2);
+}
+
+static void pan_knob(synth_t *s, int t, int d) {
+    s->cur_track = t;
+    int p = clampi_(get_t(s, t, "pan") + d * 2, 0, 100);
+    set_t(s, t, "pan", p);
+    char lab[8]; pan_label(p, lab, sizeof lab);
+    say(s, "PAN %d %s", t, lab);
+}
+
+/* Movy's knob capture (knob_capture = 1): "N:delta[:fine]", knob N = 1..8. */
+static void knob_delta(synth_t *s, const char *val) {
+    int n = 0, d = 0, fine = 0;
+    if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
+    if (n < 1 || n > 8 || d == 0 || s->mode == MODE_MIX) return;
+    if (n == 7) { s->in_gain = clampi_(s->in_gain + d * 5, 0, 200); say(s, "INPUT %d", s->in_gain); return; }
+    if (n == 8) {
+        int v = clampi_(get_i(s, "master") + d * 5, 0, 200);
+        set_i(s, "master", v); say(s, "MASTER %d", v); return;
+    }
+    switch (s->mode) {
+    case MODE_START: start_knob(s, n, d, fine); break;
+    case MODE_END:   end_knob(s, n, d, fine);   break;
+    case MODE_FX:    fx_knob(s, n, d, fine);    break;
+    case MODE_PAN:   pan_knob(s, n, d);         break;
+    default: break;
+    }
+}
+
+/* Movy's Undo / Shift+Undo (undo_param). One level: undo only when there is
+ * something to undo, redo only right after an undo. */
+static void undo_cmd(synth_t *s, const char *val) {
+    int av = get_i(s, "undo_avail");
+    int redo = !strcmp(val, "redo");
+    if (!redo && strcmp(val, "undo")) return;
+    s->wave_dirty = 1;
+    if (av != (redo ? 2 : 1)) { say(s, redo ? "NOTHING TO REDO" : "NOTHING TO UNDO"); return; }
+    say(s, redo ? "REDO" : "UNDO");
+    trig(s, "undo");
+}
+
+static void mode_cycle(synth_t *s) {
+    s->mode = (s->mode + 1) % N_MODES;
+    s->wave_dirty = 1;
+    say(s, "MODE %s", MODE_NAME[s->mode]);
 }
 
 static void rec_pad(synth_t *s, int t) {
@@ -397,7 +554,7 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         say(s, "STOP ALL");
         for (int k = 1; k <= NTRK; k++) { clear_flags(s, k); trig_t(s, k, "stop"); }
         break;
-    case A_UNDO:    say(s, "UNDO/REDO"); trig(s, "undo"); break;
+    case A_MODE:    mode_cycle(s); break;
     case A_ARM:
         s->arm_held = 1; s->arm_used = 0;      /* toggles on release unless used as modifier */
         break;
@@ -496,6 +653,12 @@ static void take_snap(synth_t *s, snap_t *n) {
     n->rec_action = get_i(s, "rec_action");
 }
 
+/* Mode pad: one colour per mode (never green or red, those are state). */
+static uint8_t mode_color(int mode) {
+    static const uint8_t C[N_MODES] = { L_OFF_WHITE, L_CYAN, L_YELLOW, 23, L_ROYAL_BLUE };
+    return C[mode % N_MODES];
+}
+
 static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
     int t = d->arg, i = t - 1;
     switch (d->act) {
@@ -528,7 +691,7 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
     case A_FX:      return n->fx_on[i] ? TRK_BRIGHT[i] : TRK_VDIM[i];
     case A_ALL:     return n->any_run ? L_WHITE : L_GREY_40;
     case A_STOPALL: return n->any_run ? L_BRIGHT_YELLOW : L_DARK_GREY;
-    case A_UNDO:    return L_ROYAL_BLUE;
+    case A_MODE:    return mode_color(s->mode);
     case A_ARM:     return s->arm ? (LED_BLINK | L_ORANGE) : L_DARK_GREY;
     case A_COUNTIN: return s->count_in ? L_YELLOW : L_DIM_YELLOW;
     case A_RECACT:  return n->rec_action ? L_PURPLE : L_DARK_ROYAL_BLUE;
@@ -550,11 +713,13 @@ static void build_pad_leds(synth_t *s, char *out) {
 /* step_leds: the 16 step buttons show the fixed recording length. Free = all
  * dark; N bars = steps 1..N-1 dim, step N white, the rest dark. 32 hex digits. */
 static void build_step_leds(synth_t *s, char *out) {
+    int bars = s->rec_len;                       /* next recording... */
+    if (clip_state(core_state(s, s->cur_track))) bars = clip_bars(s, s->cur_track);   /* ...or the selected clip */
     for (int i = 0; i < 16; i++) {
         int c = L_DARK_GREY;
-        if (s->rec_len > 0) {
-            if (i + 1 == s->rec_len) c = L_WHITE;
-            else if (i + 1 < s->rec_len) c = L_GREY_40;
+        if (bars > 0) {
+            if (i + 1 == bars) c = L_WHITE;
+            else if (i + 1 < bars) c = L_GREY_40;
         }
         snprintf(out + i * 2, 3, "%02X", c);
     }
@@ -574,10 +739,24 @@ static void build_step_leds(synth_t *s, char *out) {
 static void header_text(synth_t *s, int t, uint32_t span, char *out, size_t n) {
     static const char *const NAME[7] = { "EMPTY", "ARMED", "REC", "PLAY", "DUB", "STOP", "MUTE" };
     int st = shim_state(s, t);
-    if (s->start_t == t && s->clock_frames < s->start_until && span) {   /* clip start readout */
+    if (s->mode == MODE_MIX && s->start_t == t && s->clock_frames < s->start_until && span) {   /* Loop + knob readout */
         char lab[32];
         if (st == S_REC || st == S_DUB) snprintf(out, n, "START %d LOCKED", t);
         else { sixteenths_label(s, get_t(s, t, "off"), lab, sizeof lab); snprintf(out, n, "START %d %s", t, lab); }
+        return;
+    }
+    if (s->mode != MODE_MIX) {                 /* knob mode: "START 1 +3/16" */
+        const char *mn = MODE_NAME[s->mode];
+        char v[32] = "-";
+        if (span && st != S_REC) {
+            switch (s->mode) {
+            case MODE_START: sixteenths_label(s, get_t(s, t, "off"), v, sizeof v); break;
+            case MODE_END:   len_label(s, get_t(s, t, "len"), v, sizeof v); break;
+            case MODE_FX:    snprintf(v, sizeof v, "%s %d", FX_NAME[clampi_(get_t(s, t, "fx"), 0, 6)], get_t(s, t, "fxp")); break;
+            default:         pan_label(get_t(s, t, "pan"), v, sizeof v); break;
+            }
+        }
+        snprintf(out, n, "%s %d %s", mn, t, v);
         return;
     }
     if (span == 0) { snprintf(out, n, "%s %d", NAME[st], t); return; }
@@ -593,18 +772,19 @@ static void header_text(synth_t *s, int t, uint32_t span, char *out, size_t n) {
 static void build_display(synth_t *s, char *out, size_t n) {
     int t = s->cur_track, st = shim_state(s, t);
     uint32_t span = 0; int pos = 0;
-    mark_track_wave(s->m, t - 1, WAVE_BINS, NULL, &span, &pos);
+    int whole = s->mode == MODE_END;               /* END view: the whole buffer, trimmed part too */
+    mark_track_wave_ex(s->m, t - 1, WAVE_BINS, NULL, &span, &pos, whole);
     int busy = (st == S_REC || st == S_DUB);
     long every = busy ? MARK_SR / 4 : MARK_SR * 2;
-    if (s->wave_dirty || t != s->wave_track || st != s->wave_st || span != s->wave_span
+    if (s->wave_dirty || whole != s->wave_whole || t != s->wave_track || st != s->wave_st || span != s->wave_span
         || s->in_frames - s->wave_at >= every) {
         uint8_t w[WAVE_BINS];
-        mark_track_wave(s->m, t - 1, WAVE_BINS, w, &span, &pos);
-        if (t != s->wave_track || span != s->wave_span || memcmp(w, s->wave, sizeof w)) {
+        mark_track_wave_ex(s->m, t - 1, WAVE_BINS, w, &span, &pos, whole);
+        if (whole != s->wave_whole || t != s->wave_track || span != s->wave_span || memcmp(w, s->wave, sizeof w)) {
             memcpy(s->wave, w, sizeof w);
             s->wave_seq = (s->wave_seq + 1) % 100000u;
         }
-        s->wave_track = t; s->wave_st = st; s->wave_span = span;
+        s->wave_track = t; s->wave_st = st; s->wave_span = span; s->wave_whole = whole;
         s->wave_at = s->in_frames; s->wave_dirty = 0;
     }
     char hdr[48], hx[WAVE_BINS * 2 + 1], posf[24];
@@ -612,9 +792,13 @@ static void build_display(synth_t *s, char *out, size_t n) {
     for (int i = 0; i < WAVE_BINS; i++) snprintf(hx + i * 2, 3, "%02X", s->wave[i]);
     /* pos field: "<pos>" or "<pos>,<start marker column>" (marker shown when the
      * clip start is moved, or while it is being adjusted) */
-    int mark = span ? mark_track_start_bin(s->m, t - 1, WAVE_BINS) : -1;
+    int mark = span ? mark_track_start_bin_ex(s->m, t - 1, WAVE_BINS, whole) : -1;
     int adjusting = s->start_t == t && s->clock_frames < s->start_until;
-    if (mark >= 0 && (adjusting || get_t(s, t, "off") != 0)) snprintf(posf, sizeof posf, "%d,%d", pos, mark);
+    int show_start = mark >= 0 && (adjusting || s->mode == MODE_START || get_t(s, t, "off") != 0);
+    int end = s->mode == MODE_END && span ? mark_track_end_bin(s->m, t - 1, WAVE_BINS) : -1;
+    /* pos field: "<pos>[,<start marker>[,<end marker>]]"; an unshown marker is -1 */
+    if (end >= 0) snprintf(posf, sizeof posf, "%d,%d,%d", pos, show_start ? mark : -1, end);
+    else if (show_start) snprintf(posf, sizeof posf, "%d,%d", pos, mark);
     else snprintf(posf, sizeof posf, "%d", pos);
     snprintf(out, n, "%u|%s|%s|%s", s->wave_seq, posf, span ? hx : "", hdr);
 }
@@ -642,6 +826,7 @@ static void build_hierarchy(synth_t *s) {
     APP("{\"pad_layout\":\"drums\",\"pad_leds_param\":\"pad_leds\","
         "\"status_text_param\":\"status_text\",\"display_param\":\"display\",\"delete_pad_param\":\"delete_pad\","
         "\"step_buttons_param\":\"step\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
+        "\"knob_capture_param\":\"knob_capture\",\"knob_delta_param\":\"knob_delta\",\"undo_param\":\"undo_cmd\","
         "\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
         APP("{\"key\":\"t%d_level\",\"name\":\"Track %d Vol\",\"short_name\":\"T%d\","
@@ -1210,6 +1395,8 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     if (!strcmp(key, "rec_len"))   { s->rec_len = clampi(v, 0, MAX_BARS); return; }
     if (!strcmp(key, "step"))      { step_press(s, v); return; }
     if (!strcmp(key, "loop_knob")) { loop_knob(s, val); return; }
+    if (!strcmp(key, "knob_delta")) { knob_delta(s, val); return; }
+    if (!strcmp(key, "undo_cmd"))  { undo_cmd(s, val); return; }
     if (!strcmp(key, "state"))     { state_set(s, val); return; }
     if (!strcmp(key, "in_gain"))   { s->in_gain = clampi(v, 0, 200); return; }
     if (!strcmp(key, "arm")) {
@@ -1269,6 +1456,8 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
         build_step_leds(s, hx);
         RET("%s", hx);
     }
+    if (!strcmp(key, "knob_capture")) RET("%d", s->mode != MODE_MIX);
+    if (!strcmp(key, "mode"))         RET("%d", s->mode);
     if (!strcmp(key, "loop_id"))      RET("%s", loop_id_now(s));
     if (!strcmp(key, "state"))        return state_get(s, buf, buf_len);
     if (!strcmp(key, "pad_leds")) {
