@@ -168,8 +168,9 @@ typedef struct {
     int      rev, shot;
     int      spd;          /* L606 varispeed: 0 = 1/2x, 1 = 1x, 2 = 2x */
     uint32_t off;          /* L606 clip start: frames into the buffer where the
-                              loop begins (0 <= off < len). Playback reads
-                              (pos + off) mod len; dub writes there too. */
+                              loop begins (0 <= off < len). Playback plays
+                              buffer frames [off, len) only; pos runs
+                              0..len-off. Dub writes there too. */
     uint32_t crev;         /* L606 audio revision: bumps while the buffer is being
                               written (REC/DUB/undo swap); persistence watches it */
     float    g_cur;        /* smoothed level gain */
@@ -210,7 +211,8 @@ struct mark {
     int      undo_kind;
     int      undo_redo;          /* 0 = next undo press undoes, 1 = redoes */
     int      undo_capturing;     /* copy-before-write active (dub gesture) */
-    uint32_t undo_start;         /* loop frame where the dub began */
+    uint32_t undo_start;         /* buffer frame where the dub began */
+    uint32_t undo_roff, undo_rlen; /* L606: region [off, off+rlen) of that dub */
     uint32_t undo_count;         /* frames captured, capped at len */
     uint32_t undo_saved_len;     /* kind 1: length to restore on redo */
     uint32_t undo_saved_full;    /* kind 2: full_len of the parked loop */
@@ -1242,12 +1244,36 @@ static inline double spd_rate(const mk_track_t *t) {
  * repeat frames, and the undo capture assumes a contiguous region. */
 static inline int no_dub(const mk_track_t *t) { return t->rev || t->spd != 1; }
 
-/* L606: buffer frame the playhead frame `ip` (0 <= ip < len) reads/writes:
- * reverse mirrors, then the clip start rotates. */
+/* L606: the loop plays buffer frames [off, len); region length = len - off. */
+static inline uint32_t reg_len(const mk_track_t *t) {
+    return t->len > t->off ? t->len - t->off : 1;
+}
+
+/* Smallest region left after the start: one 1/16 note, 256 frames if the grid
+ * is unknown, never more than the track itself. */
+static uint32_t min_region(const mark_t *m, const mk_track_t *t) {
+    uint32_t mr = 256;
+    if (m->grid_unit > 0.0) mr = (uint32_t)(m->grid_unit / 16.0 + 0.5);
+    if (mr < 64) mr = 64;
+    if (mr > t->len) mr = t->len;
+    return mr;
+}
+
+/* Keep off < len with min_region frames left, and the playhead inside. */
+static void clamp_off(const mark_t *m, mk_track_t *t) {
+    if (t->len == 0) { t->off = 0; return; }
+    uint32_t mr = min_region(m, t);
+    if (t->off > t->len - mr) t->off = t->len - mr;
+    double rl = (double)reg_len(t);
+    if (t->pos >= rl) t->pos = fmod(t->pos, rl);
+}
+
+/* L606: buffer frame the playhead frame `ip` (0 <= ip < len-off) reads/writes:
+ * reverse mirrors inside the region, then the clip start is added. */
 static inline uint32_t play_index(const mk_track_t *t, uint32_t ip) {
-    uint32_t rp = t->rev ? (t->len - 1 - ip) : ip;
-    if (t->off) { rp += t->off; if (rp >= t->len) rp -= t->len; }
-    return rp;
+    uint32_t rl = reg_len(t);
+    if (ip >= rl) ip = rl - 1;
+    return t->off + (t->rev ? (rl - 1 - ip) : ip);
 }
 
 static void reset_undo(mark_t *m) {
@@ -1270,7 +1296,9 @@ static void begin_dub_gesture(mark_t *m, int ti) {
     m->undo_kind = 0;
     m->undo_redo = 0;
     m->undo_capturing = 1;
-    m->undo_start = t->len ? play_index(t, (uint32_t)t->pos % t->len) : 0;
+    m->undo_start = t->len ? play_index(t, (uint32_t)t->pos % reg_len(t)) : 0;
+    m->undo_roff = t->off;
+    m->undo_rlen = t->len ? reg_len(t) : 0;
     m->undo_count = 0;
     m->swap_track = -1;
 }
@@ -1477,8 +1505,7 @@ static void track_trim(mark_t *m, int ti, int delta) {
     }
     if (m->undo_track == ti) reset_undo(m);   /* indexes tied to old len */
     t->len = nl;
-    t->off %= nl;
-    if (t->pos >= (double)nl) t->pos = fmod(t->pos, (double)nl);
+    clamp_off(m, t);
     m->edit_rev++;
 }
 
@@ -1502,8 +1529,7 @@ static void track_setlen16(mark_t *m, int ti, int n16) {
     }
     if (m->undo_track == ti) reset_undo(m);
     t->len = nl;
-    t->off %= nl;
-    if (t->pos >= (double)nl) t->pos = fmod(t->pos, (double)nl);
+    clamp_off(m, t);
     m->edit_rev++;
 }
 
@@ -1549,25 +1575,26 @@ static int track_set_length(mark_t *m, int ti, uint32_t nl, int coalesce) {
         t->full_len = nl;
     }
     t->len = nl;
-    t->off %= nl;
-    if (t->pos >= (double)nl) t->pos = fmod(t->pos, (double)nl);
+    clamp_off(m, t);
     t->crev++;
     m->edit_rev++;
     return 1;
 }
 
-/* L606 clip start: set the loop's start point (frames into the buffer, taken
- * modulo the loop length). Refused while the buffer is being written (REC,
+/* L606 clip start: set the loop's start point (buffer frame, clamped to
+ * 0..len-min_region; the audio left of it never plays). Refused while the buffer is being written (REC,
  * DUB, an undo swap) so the dub/undo regions stay contiguous. */
 static void track_set_off(mark_t *m, int ti, long frames) {
     mk_track_t *t = &m->t[ti];
     if (m->io_busy || m->swap_track == ti) return;
     if (t->len == 0 || t->st == MK_REC || t->st == MK_DUB) return;
-    long l = (long)t->len;
-    long o = frames % l;
-    if (o < 0) o += l;
+    long o = frames;
+    long mx = (long)t->len - (long)min_region(m, t);
+    if (o > mx) o = mx;
+    if (o < 0) o = 0;
     if ((uint32_t)o == t->off) return;
     t->off = (uint32_t)o;
+    clamp_off(m, t);
     t->crev++;
     m->edit_rev++;
 }
@@ -1686,7 +1713,7 @@ static void undo_press(mark_t *m) {
         t->full_len = m->undo_saved_full;
         t->off = m->undo_saved_off;
         m->undo_saved_len = l; m->undo_saved_full = f; m->undo_saved_off = o;
-        if (t->len && t->pos >= (double)t->len) t->pos = fmod(t->pos, (double)t->len);
+        clamp_off(m, t);
         m->undo_redo = !m->undo_redo;
         t->crev++;
         m->edit_rev++;
@@ -1741,7 +1768,8 @@ static void swap_step(mark_t *m) {
     if (m->swap_pos + n > m->undo_count) n = m->undo_count - m->swap_pos;
     t->crev++;
     for (uint32_t k = 0; k < n; k++) {
-        uint32_t idx = (m->undo_start + m->swap_pos + k) % t->len;
+        uint32_t rl = m->undo_rlen ? m->undo_rlen : 1;
+        uint32_t idx = m->undo_roff + (m->undo_start - m->undo_roff + m->swap_pos + k) % rl;
         tbuf_swap(t->buf, idx, m->undo_buf, idx);
     }
     m->swap_pos += n;
@@ -2249,6 +2277,7 @@ int mark_persist_load(mark_t *m, const char *dir) {
         t->full_len = (uint32_t)got;
         t->len = (uint32_t)(lens[i] > 0 && lens[i] <= got ? lens[i] : got);
         t->off = offs[i] > 0 && (uint32_t)offs[i] < t->len ? (uint32_t)offs[i] : 0;
+        clamp_off(m, t);
         t->crev++;
         t->st = MK_STOP;                              /* set last: render gates on it */
         restored++;
@@ -2501,8 +2530,9 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
             if (m->swap_track == i)   /* undo swap in flight: track muted */
                 continue;
 
+            const uint32_t rlen = reg_len(t);
             uint32_t ip = (uint32_t)t->pos;
-            if (ip >= t->len) ip = t->len - 1;
+            if (ip >= rlen) ip = rlen - 1;
             uint32_t rp = play_index(t, ip);
             float l, r;
             if (t->spd == 1) {
@@ -2512,12 +2542,12 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
                  * frames around the (fractional) head, wrapping at the loop
                  * end. Reverse mirrors the head. */
                 double hp = t->pos;
-                if (hp >= (double)t->len) hp = (double)t->len - 1.0;
-                double x = t->rev ? ((double)t->len - 1.0 - hp) : hp;
+                if (hp >= (double)rlen) hp = (double)rlen - 1.0;
+                double x = t->rev ? ((double)rlen - 1.0 - hp) : hp;
                 if (x < 0.0) x = 0.0;
-                if (t->off) { x += (double)t->off; if (x >= (double)t->len) x -= (double)t->len; }
+                x += (double)t->off;
                 uint32_t i0 = (uint32_t)x;
-                uint32_t i1 = i0 + 1 >= t->len ? 0 : i0 + 1;
+                uint32_t i1 = i0 + 1 >= t->len ? t->off : i0 + 1;
                 float fr = (float)(x - (double)i0), l1, r1;
                 tbuf_load(t->buf, i0, &l, &r);
                 tbuf_load(t->buf, i1, &l1, &r1);
@@ -2531,7 +2561,7 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
                 /* dub runs at spd 1 / no reverse (no_dub), so rp is the buffer
                  * frame under the playhead, clip start included. */
                 if (m->undo_capturing && m->undo_track == i &&
-                    m->undo_count < t->len) {
+                    m->undo_count < rlen) {
                     tbuf_copy(m->undo_buf, rp, t->buf, rp);
                     m->undo_count++;
                 }
@@ -2563,9 +2593,9 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
             }
 
             t->pos += spd_rate(t);
-            if (t->pos >= (double)t->len) {
-                t->pos -= (double)t->len;
-                if (t->pos >= (double)t->len || t->pos < 0.0) t->pos = 0.0;
+            if (t->pos >= (double)rlen) {
+                t->pos -= (double)rlen;
+                if (t->pos >= (double)rlen || t->pos < 0.0) t->pos = 0.0;
                 if (t->shot) {       /* one-shot: play once, then stop */
                     if (t->st == MK_DUB) end_dub_capture(m, i);
                     t->st = MK_STOP;
@@ -2900,12 +2930,13 @@ int mark_track_wave_ex(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span
         double f = 0.0;
         if (t->st == MK_REC) f = span ? (double)t->rec_len / (double)span : 0.0;
         else if (t->len) {
+            uint32_t rl = reg_len(t);
             uint32_t ip = (uint32_t)t->pos;
-            if (ip >= t->len) ip = t->len - 1;
+            if (ip >= rl) ip = rl - 1;
             double fr = t->pos - (double)ip;
             double x = (double)play_index(t, ip) + (t->rev ? -fr : fr);
-            if (x < 0.0) x += (double)t->len;
-            else if (x >= (double)t->len) x -= (double)t->len;
+            if (x < (double)t->off) x = (double)t->off;
+            else if (x >= (double)t->len) x = (double)t->len - 1e-3;
             f = x / (double)(whole ? whole_len : t->len);
         }
         int p = (int)(f * bins);
@@ -3043,7 +3074,7 @@ int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
         for (int i = 0; i < MARK_TRACKS && n < buf_len - 8; i++) {
             int v = 0;
             if (m->t[i].len > 0)
-                v = (int)(m->t[i].pos * 128.0 / (double)m->t[i].len);
+                v = (int)(m->t[i].pos * 128.0 / (double)reg_len(&m->t[i]));
             if (v > 127) v = 127;
             n = nclamp(n + snprintf(buf + n, (size_t)(buf_len - n), "%s%d",
                                     i ? "," : "", v), buf_len);
@@ -3074,7 +3105,7 @@ int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
         for (int i = 0; i < MARK_TRACKS; i++) {
             int v = 0;
             if (m->t[i].len > 0)
-                v = (int)(m->t[i].pos * 128.0 / (double)m->t[i].len);
+                v = (int)(m->t[i].pos * 128.0 / (double)reg_len(&m->t[i]));
             if (v > 127) v = 127;
             n = nclamp(n + snprintf(buf + n, (size_t)(buf_len - n), "%s%d",
                                     i ? "," : "", v), buf_len);
@@ -3175,7 +3206,7 @@ int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
         int on = (base && !m->transport_paused) ? 1 : 0;
         int tick = -1;
         if (on && base->len > 0) {
-            tick = (int)(base->pos * 128.0 / (double)base->len);
+            tick = (int)(base->pos * 128.0 / (double)reg_len(base));
             if (tick > 127) tick = 127;
         }
         double fpt = frames_per_tick_now(m);

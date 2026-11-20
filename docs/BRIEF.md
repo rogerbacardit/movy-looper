@@ -16,12 +16,12 @@ Row 1 is the bottom row. Notes are declared as drum voices in the hierarchy (`pa
 
 | | col 1 (MASTER) | col 2–7 (tracks 1–6) | col 8 (REC SETTINGS) |
 |---|---|---|---|
-| row 4 | MODE (MIX/START/END/FX/PAN; undo = Move's Undo button) | FX on/off | Count-in on/off |
+| row 4 | SHIFT (hold) | track selector (PISTA view) | Count-in on/off |
 | row 3 | ARM auto-rec (toggle) | MUTE (keeps running silently, re-enters in place) | Rec Action: REC→PLAY / REC→DUB |
 | row 2 | STOP ALL | STOP (tap = stop; tap on a stopped track = CLEAR, UNDO restores) | Fixed length: free/1/2/4/8 bars (cycles) |
 | row 1 | ALL START/STOP | REC→PLAY→DUB→PLAY… (per Rec Action) | Quantize on/off |
 
-- **REVERSE:** tap the MASTER pad in row 3 (ARM) and, within 1 s, a track's row-1 pad (ARM is restored). All gestures are note-on only.
+- **REVERSE:** SHIFT + a track's row-1 pad (v0.6.0); ARM held + pad stays as an alias. All gestures are note-on only.
 - **Pad ↔ note table:** a single array in the code, so it is easy to change. Verify Movy's pad → voice order (`schwung-movy/src/keyboard/drum-grid.ts`, banks 4×4: v01–16 on the left, v17–32 on the right).
 
 ## Auto-rec (in the shim, not in the core)
@@ -64,5 +64,11 @@ The cause of today's "0 params" is that Movy reads params from module.json. Dupl
 
 - **Reverse playhead:** `mark_track_wave` maps the playhead through the same buffer index the render reads (`play_index`: reverse mirror, then clip start), so the display runs right-to-left on a reversed track and follows varispeed and a moved start.
 - **Step buttons = length:** `rec_len` is now a number of bars 0..16 (0 = free). Column-8 pad cycles 1/2/4/8/free from any value; step N sets N bars (again = free); `step_leds` shows it.
-- **Clip start:** per-track `off` (frames) in the core. Reads and dub writes use `(pos + off) mod len`; undo capture indexes the buffer frame; CLEAR/UNDO parks and restores `off`; trim/len16 re-normalise it. Refused in REC/DUB/swap. The shim turns `loop_knob "N:delta[:fine]"` into a grid move (1/16, fine 1/64 note).
+- **Clip start (v0.4.1, real trim):** per-track `off` (buffer frame) is the start of the clip like an Ableton clip: the loop plays buffer frames `[off, len)` only and jumps back to `off`; audio left of `off` never sounds. `len` stays the END point, effective loop length is `len - off` (`reg_len`); `pos` runs 0..len-off, `play_index` = `off + (rev ? mirror : ip)` inside the region. Dub writes/undo capture use the same region (undo saves `undo_roff/rlen`). `off` is clamped to `len - min_region` (1/16 note, 256 frames if the grid is unknown); setlen/trim/undo re-clamp it and the playhead. Knob moves clamp at 0 and at the end (no wrap). Saved `off` keeps its meaning, so old saves load. (Before 0.4.1 `off` rotated the loop.) CLEAR/UNDO parks and restores `off`. Refused in REC/DUB/swap. The shim turns `loop_knob "N:delta[:fine]"` into a grid move (1/16, fine 1/64 note).
 - **Persistence:** see README "Persistencia de los loops". Core: `mark_persist_sig/save/load` (WAV + `loops.json`, no `io_busy` on save, never on the audio thread); shim: one worker thread, loop id in the `state` blob. Mark's `session_dir` is no longer set (its `state` getter would `fopen()` session slots on Movy's audio callback).
+
+## v0.6.0: selector de pista, vista PISTA, SHIFT
+
+- Row 4 cols 2-7 = track selector (tap = select and knobs become that track's; tap again = MIX). While selected, `knob_capture` = 1 and `knob_delta "N:d"` drives: K1 IN (start), K2 OUT (end), K3 vol, K4 pan, K5 FX type (OFF first, 3 clicks/step), K6 FX amount, K7 speed, K8 reverse. Toast `T3 IN +8/16`, header `PISTA 3 <last readout>`. `cur_track` is locked to the selection while PISTA is active; pedals 3/4 move both.
+- Col 1 row 4 = looper SHIFT (hold). SHIFT + K1/K2 fine; + row 4 = FX on/off; + row 1 = reverse; + row 3 = SOLO (restores previous mutes); + col 8 row 4 = count-in 1/2 bars (not persisted), + col 8 row 3 = threshold cycle -54..-30 dB. The MODE pad and its START/END/FX/PAN modes are gone. ARM + pad = reverse stays as an alias.
+- Selection, view and solo are not persisted.

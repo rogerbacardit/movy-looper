@@ -2,7 +2,7 @@
   "id": "looper-606",
   "name": "Looper 606",
   "abbrev": "L606",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "6-track live looper (Mark engine by Tim Cox, modified) as a sound generator: pads drive rec/play/overdub/mute, knobs mix",
   "dsp": "dsp.so",
   "api_version": 2,
@@ -27,6 +27,7 @@
       "knob_capture_param": "knob_capture",
       "knob_delta_param": "knob_delta",
       "undo_param": "undo_cmd",
+      "pedal_param": "pedal",
       "levels": {
         "root": {
           "name": "Looper 606",
@@ -639,22 +640,22 @@
           "knobs": []
         },
         "v13": {
-          "name": "Mode",
+          "name": "Shift",
           "note": 48,
           "knobs": []
         },
         "v14": {
-          "name": "FX 1",
+          "name": "Select 1",
           "note": 49,
           "knobs": []
         },
         "v15": {
-          "name": "FX 2",
+          "name": "Select 2",
           "note": 50,
           "knobs": []
         },
         "v16": {
-          "name": "FX 3",
+          "name": "Select 3",
           "note": 51,
           "knobs": []
         },
@@ -719,17 +720,17 @@
           "knobs": []
         },
         "v29": {
-          "name": "FX 4",
+          "name": "Select 4",
           "note": 64,
           "knobs": []
         },
         "v30": {
-          "name": "FX 5",
+          "name": "Select 5",
           "note": 65,
           "knobs": []
         },
         "v31": {
-          "name": "FX 6",
+          "name": "Select 6",
           "note": 66,
           "knobs": []
         },

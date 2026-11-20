@@ -45,10 +45,10 @@ enum act {
     A_REC,        /* arg = track: REC->PLAY->DUB (per Rec Action)      */
     A_STOP,       /* arg = track: row 2 PLAY/STOP                         */
     A_MUTE,       /* arg = track: mute (keeps running silently)         */
-    A_FX,         /* arg = track: track FX on/off                       */
+    A_SEL,        /* arg = track: row 4 TRACK SELECTOR (PISTA view)     */
     A_ALL,        /* all start/stop                                     */
     A_STOPALL,    /* stop every track                                   */
-    A_MODE,       /* knob mode: MIX > START > END > FX > PAN > MIX      */
+    A_SHIFT,      /* looper SHIFT (hold), top pad of column 1           */
     A_ARM,        /* arm auto-rec toggle; held = reverse modifier       */
     A_COUNTIN,    /* count-in on/off                                    */
     A_RECACT,     /* rec action: rec->play / rec->dub                   */
@@ -60,9 +60,9 @@ typedef struct { uint8_t act, arg; const char *label; } pad_def_t;
 #define P(a, n, l) { (a), (n), (l) }
 
 static const pad_def_t PAD_GRID[4][8] = {
-  /* row 4 (top) */ { P(A_MODE,0,"Mode"), P(A_FX,1,"FX 1"), P(A_FX,2,"FX 2"),
-                      P(A_FX,3,"FX 3"), P(A_FX,4,"FX 4"), P(A_FX,5,"FX 5"),
-                      P(A_FX,6,"FX 6"), P(A_COUNTIN,0,"Count-in") },
+  /* row 4 (top) */ { P(A_SHIFT,0,"Shift"), P(A_SEL,1,"Select 1"), P(A_SEL,2,"Select 2"),
+                      P(A_SEL,3,"Select 3"), P(A_SEL,4,"Select 4"), P(A_SEL,5,"Select 5"),
+                      P(A_SEL,6,"Select 6"), P(A_COUNTIN,0,"Count-in") },
   /* row 3       */ { P(A_ARM,0,"Arm/Reverse"), P(A_MUTE,1,"Mute 1"), P(A_MUTE,2,"Mute 2"),
                       P(A_MUTE,3,"Mute 3"), P(A_MUTE,4,"Mute 4"), P(A_MUTE,5,"Mute 5"),
                       P(A_MUTE,6,"Mute 6"), P(A_RECACT,0,"Rec Action") },
@@ -84,11 +84,13 @@ static const pad_def_t PAD_GRID[4][8] = {
 #define MAX_BARS 16
 static const int CYCLE_BARS[4] = { 1, 2, 4, 8 };
 
-/* Knob mode (top pad of column 1). In MIX the knobs are the volumes (Movy's
- * hierarchy); in every other mode Movy hands the knob turns to knob_delta
- * (knob_capture = 1) and knob N edits track N. */
-enum { MODE_MIX = 0, MODE_START, MODE_END, MODE_FX, MODE_PAN, N_MODES };
-static const char *const MODE_NAME[N_MODES] = { "MIX", "START", "END", "FX", "PAN" };
+/* Knob view. MIX (sel = 0): the knobs are the volumes (Movy's root page). PISTA
+ * (sel = 1..6, chosen with the row-4 selector pads): Movy hands the knob turns
+ * to knob_delta (knob_capture = 1) and the 8 knobs edit the selected track:
+ * K1 IN, K2 OUT, K3 vol, K4 pan, K5 FX type, K6 FX amount, K7 speed, K8 reverse.
+ * Enum knobs need DETENTS turn clicks per step. */
+#define DETENTS 3
+static const int THR_CYCLE[5] = { -54, -48, -42, -36, -30 };
 
 /* Shim-level track state enum (tN_state), read-only for the UI. */
 enum { S_EMPTY = 0, S_ARMED, S_REC, S_PLAY, S_DUB, S_STOP, S_MUTE };
@@ -103,6 +105,9 @@ typedef struct {
     int arm;                       /* auto-rec armed mode */
     int  arm_held;                 /* ARM pad is down: modifier for REVERSE */
     int  arm_used;                 /* a track pad was tapped while ARM was held */
+    int  pedal_held[7];            /* Blackstar Live Logic switch n (1..6) is down */
+    int  pedal_fired[7];           /* its 1 s hold action already fired (the tap must not) */
+    long pedal_at[7];              /* clock_frames at its press */
     int  dub_after[NTRK];          /* row-1 on a stopped track: dub as soon as it is playing */
     int  offs_logged;
     int armed[NTRK];               /* waiting for the input threshold */
@@ -115,7 +120,14 @@ typedef struct {
     int  threshold;                /* -70..-6 dBFS */
     int  count_in;
     int  rec_len;                  /* fixed recording length in bars, 0 = free */
-    int  mode;                     /* MODE_* */
+    int  sel;                      /* PISTA view: selected track 1..NTRK, 0 = MIX */
+    int  shift_held;               /* looper SHIFT pad is down */
+    int  knob_acc[9];              /* detent accumulators of the enum knobs */
+    int  last_knob;                /* last PISTA knob touched (display view) */
+    char pista_lab[24];            /* readout of the last PISTA knob ("IN +8/16") */
+    int  solo;                     /* soloed track, 0 = none */
+    int  solo_saved[NTRK];         /* mute flags before the solo */
+    int  count_bars;               /* count-in length in bars, 1 or 2 */
     int  end_t;                    /* track whose END was last edited (undo coalescing) */
     long end_until;                /* clock_frames until a new END edit opens a new undo entry */
     int  in_gain;                  /* 0..200 percent */
@@ -142,6 +154,10 @@ typedef struct {
     uint32_t wave_span;
     long     wave_at;
     unsigned wave_seq;
+    uint8_t  ticks[WAVE_BINS];     /* bar / beat ticks of the display (bin | 0x80 = beat) */
+    int      nticks;
+    uint8_t  phrase[WAVE_BINS];    /* 4-bar (phrase) tick bins */
+    int      nphrase;
     /* Persistence (see "Loop persistence" below). The thread does all file I/O. */
     char     loop_id[2][16];       /* double buffer: the audio thread may read it */
     _Atomic int loop_id_ix;
@@ -330,8 +346,9 @@ static void step_press(synth_t *s, int button) {
 
 /* Loop button + knob N (1-based): move the clip start of track N by `delta`
  * grid units (a 1/16 note at the current tempo; fine = 1/64 note). The start
- * is non-destructive: the engine plays (pos + start) mod len and dubs at the
- * same place, so layers stay aligned. */
+ * is non-destructive: the engine plays buffer frames [start, len) only (the
+ * audio left of the start never sounds) and dubs at the same place; the knob
+ * clamps at 0 and at the end. */
 static void sixteenths_label(synth_t *s, long off, char *out, size_t n) {
     double u = (double)MARK_SR * 60.0 / cur_bpm(s) / 4.0;
     long k = lround((double)off / u);
@@ -344,34 +361,46 @@ static void sixteenths_label(synth_t *s, long off, char *out, size_t n) {
     }
 }
 
-static void start_knob(synth_t *s, int n, int d, int fine) {
+/* Readout of a PISTA knob: toast "T3 IN +8/16" and the display header suffix. */
+static void pista_say(synth_t *s, int t, const char *name, const char *fmt, ...) {
+    char v[24];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(v, sizeof v, fmt, ap);
+    va_end(ap);
+    snprintf(s->pista_lab, sizeof s->pista_lab, "%s %s", name, v);
+    say(s, "T%d %s", t, s->pista_lab);
+}
+
+static void start_knob(synth_t *s, int n, int d, int fine, int pista) {
     int t = n;
     s->cur_track = t;
     s->wave_dirty = 1;
     int st = core_state(s, t);
-    if (st == MK_EMPTY) { say(s, "START %d EMPTY", t); return; }
+    if (st == MK_EMPTY) { if (pista) pista_say(s, t, "IN", "EMPTY"); else say(s, "START %d EMPTY", t); return; }
     s->start_t = t;
     s->start_until = s->clock_frames + (long)MARK_SR * 5 / 2;
-    if (st == MK_REC || st == MK_DUB) { say(s, "START %d LOCKED", t); return; }
+    if (st == MK_REC || st == MK_DUB) { if (pista) pista_say(s, t, "IN", "LOCKED"); else say(s, "START %d LOCKED", t); return; }
     long len = get_t(s, t, "len");
     if (len <= 0) return;
     d = clampi_(d, -16, 16);
     double u = (double)MARK_SR * 60.0 / cur_bpm(s) / (fine ? 16.0 : 4.0);
     long k = lround((double)get_t(s, t, "off") / u) + d;
-    long off = lround((double)k * u) % len;
-    if (off < 0) off += len;
-    if (off > len - 256) off = 0;      /* a detent at the loop start: the grid and the loop length differ by a few frames */
+    long off = lround((double)k * u);
+    if (off > len - 256) off = len - 256;   /* clamp: the clip start never passes the end (the core keeps >= 1/16 note) */
+    if (off < 0) off = 0;
     set_t(s, t, "off", (int)off);
+    off = get_t(s, t, "off");               /* the core may clamp further */
     char lab[32];
     sixteenths_label(s, off, lab, sizeof lab);
-    say(s, "START %d %s", t, lab);
+    if (pista) pista_say(s, t, "IN", "%s", lab); else say(s, "START %d %s", t, lab);
 }
 
 static void loop_knob(synth_t *s, const char *val) {
     int n = 0, d = 0, fine = 0;
     if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
     if (n < 1 || n > NTRK || d == 0) return;
-    start_knob(s, n, d, fine);
+    start_knob(s, n, d, fine, 0);
 }
 
 /* Readout of a loop length: "4 BARS", "3B 5/16", "5/16", or seconds off the grid. */
@@ -388,7 +417,7 @@ static void len_label(synth_t *s, long len, char *out, size_t n) {
     }
 }
 
-/* END mode: knob N moves the end of track N's loop by `d` grid steps (1/16
+/* PISTA K2 (OUT): moves the end of track N's loop by `d` grid steps (1/16
  * note; fine = 1/64). Non-destructive when shortening (the audio stays), the
  * content repeats when going past what was recorded. Never below one 1/16 note.
  * A burst of turns is one undo step. */
@@ -396,7 +425,7 @@ static void end_knob(synth_t *s, int t, int d, int fine) {
     int st = core_state(s, t);
     s->cur_track = t;
     s->wave_dirty = 1;
-    if (!clip_state(st)) { say(s, "END %d %s", t, st == MK_EMPTY ? "EMPTY" : "LOCKED"); return; }
+    if (!clip_state(st)) { pista_say(s, t, "OUT", st == MK_EMPTY ? "EMPTY" : "LOCKED"); return; }
     long len = get_t(s, t, "len");
     double u = (double)MARK_SR * 60.0 / cur_bpm(s) / (fine ? 16.0 : 4.0);
     double umin = (double)MARK_SR * 60.0 / cur_bpm(s) / 4.0;
@@ -415,24 +444,10 @@ static void end_knob(synth_t *s, int t, int d, int fine) {
     }
     char lab[32];
     len_label(s, get_t(s, t, "len"), lab, sizeof lab);
-    say(s, "END %d %s", t, lab);
+    pista_say(s, t, "OUT", "%s", lab);
 }
 
 static const char *const FX_NAME[7] = { "OFF", "LPF", "HPF", "CRUSH", "DELAY", "PHASER", "RING" };
-
-static void fx_knob(synth_t *s, int t, int d, int fine) {
-    s->cur_track = t;
-    if (fine) {                                       /* Shift: FX type */
-        int ty = clampi_(get_t(s, t, "fx") + (d > 0 ? 1 : -1), 0, 6);
-        set_t(s, t, "fx", ty);
-        set_t(s, t, "fx_on", ty ? 1 : 0);
-        say(s, "FX %d %s", t, FX_NAME[ty]);
-    } else {
-        int a = clampi_(get_t(s, t, "fxp") + d * 2, 0, 100);
-        set_t(s, t, "fxp", a);
-        say(s, "FX %d %s %d", t, FX_NAME[clampi_(get_t(s, t, "fx"), 0, 6)], a);
-    }
-}
 
 static void pan_label(int pan, char *out, size_t n) {
     if (pan == 50) snprintf(out, n, "C");
@@ -440,30 +455,84 @@ static void pan_label(int pan, char *out, size_t n) {
     else snprintf(out, n, "R%d", (pan - 50) * 2);
 }
 
-static void pan_knob(synth_t *s, int t, int d) {
-    s->cur_track = t;
-    int p = clampi_(get_t(s, t, "pan") + d * 2, 0, 100);
-    set_t(s, t, "pan", p);
-    char lab[8]; pan_label(p, lab, sizeof lab);
-    say(s, "PAN %d %s", t, lab);
+/* Track volume; a muted track keeps its level in saved_level until unmuted. */
+static int track_level_get(synth_t *s, int t) { return s->muted[t - 1] ? s->saved_level[t - 1] : get_t(s, t, "level"); }
+static void track_level_set(synth_t *s, int t, int v) {
+    v = clampi_(v, 0, 200);
+    if (s->muted[t - 1]) s->saved_level[t - 1] = v; else set_t(s, t, "level", v);
 }
 
-/* Movy's knob capture (knob_capture = 1): "N:delta[:fine]", knob N = 1..8. */
+static void fx_set_type(synth_t *s, int t, int ty) {
+    ty = clampi_(ty, 0, 6);
+    set_t(s, t, "fx", ty);
+    set_t(s, t, "fx_on", ty ? 1 : 0);
+}
+
+/* Enum knob: DETENTS clicks make one step; returns -1/0/+1. */
+static int knob_step(synth_t *s, int n, int d) {
+    if ((d > 0) != (s->knob_acc[n] > 0) && s->knob_acc[n] != 0) s->knob_acc[n] = 0;   /* turned back: restart */
+    s->knob_acc[n] += d;
+    if (s->knob_acc[n] >= DETENTS) { s->knob_acc[n] = 0; return 1; }
+    if (s->knob_acc[n] <= -DETENTS) { s->knob_acc[n] = 0; return -1; }
+    return 0;
+}
+
+static void pista_select(synth_t *s, int t) {
+    s->sel = t;
+    if (t) s->cur_track = t;
+    s->last_knob = 0; s->pista_lab[0] = 0;
+    memset(s->knob_acc, 0, sizeof s->knob_acc);
+    s->wave_dirty = 1;
+}
+
+/* Movy's knob capture (knob_capture = 1 while PISTA is active): "N:delta[:fine]".
+ * Knobs act on the selected track; SHIFT (or Movy's fine flag) = fine IN/OUT. */
 static void knob_delta(synth_t *s, const char *val) {
     int n = 0, d = 0, fine = 0;
     if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
-    if (n < 1 || n > 8 || d == 0 || s->mode == MODE_MIX) return;
-    if (n == 7) { s->in_gain = clampi_(s->in_gain + d * 5, 0, 200); say(s, "INPUT %d", s->in_gain); return; }
-    if (n == 8) {
-        int v = clampi_(get_i(s, "master") + d * 5, 0, 200);
-        set_i(s, "master", v); say(s, "MASTER %d", v); return;
+    if (n < 1 || n > 8 || d == 0 || s->sel == 0) return;
+    int t = s->sel;
+    fine = fine || s->shift_held;
+    if (n != s->last_knob) s->wave_dirty = 1;
+    s->last_knob = n;
+    s->cur_track = t;
+    switch (n) {
+    case 1: start_knob(s, t, d, fine, 1); break;
+    case 2: end_knob(s, t, d, fine); break;
+    case 3: { int v = clampi_(track_level_get(s, t) + d * 5, 0, 200); track_level_set(s, t, v); pista_say(s, t, "VOL", "%d", v); break; }
+    case 4: {
+        int p = clampi_(get_t(s, t, "pan") + d * 2, 0, 100);
+        set_t(s, t, "pan", p);
+        char lab[8]; pan_label(p, lab, sizeof lab);
+        pista_say(s, t, "PAN", "%s", lab);
+        break;
     }
-    switch (s->mode) {
-    case MODE_START: start_knob(s, n, d, fine); break;
-    case MODE_END:   end_knob(s, n, d, fine);   break;
-    case MODE_FX:    fx_knob(s, n, d, fine);    break;
-    case MODE_PAN:   pan_knob(s, n, d);         break;
-    default: break;
+    case 5: {
+        int k = knob_step(s, n, d);
+        int ty = get_t(s, t, "fx_on") ? clampi_(get_t(s, t, "fx"), 0, 6) : 0;   /* FX off reads as OFF */
+        if (k) { ty = clampi_(ty + k, 0, 6); fx_set_type(s, t, ty); }
+        pista_say(s, t, "FX", "%s", FX_NAME[ty]);
+        break;
+    }
+    case 6: {
+        int a = clampi_(get_t(s, t, "fxp") + d * 2, 0, 100);
+        set_t(s, t, "fxp", a);
+        pista_say(s, t, "AMT", "%d", a);
+        break;
+    }
+    case 7: {
+        static const char *const SPD[3] = { "1/2X", "1X", "2X" };
+        int k = knob_step(s, n, d);
+        if (k) set_t(s, t, "spd", clampi_(get_t(s, t, "spd") + k, 0, 2));
+        pista_say(s, t, "SPD", "%s", SPD[clampi_(get_t(s, t, "spd"), 0, 2)]);
+        break;
+    }
+    default: {
+        int k = knob_step(s, n, d);
+        if (k) set_t(s, t, "rev", k > 0 ? 1 : 0);
+        pista_say(s, t, "REV", "%s", get_t(s, t, "rev") ? "ON" : "OFF");
+        break;
+    }
     }
 }
 
@@ -479,12 +548,6 @@ static void undo_cmd(synth_t *s, const char *val) {
     trig(s, "undo");
 }
 
-static void mode_cycle(synth_t *s) {
-    s->mode = (s->mode + 1) % N_MODES;
-    s->wave_dirty = 1;
-    say(s, "MODE %s", MODE_NAME[s->mode]);
-}
-
 static void rec_pad(synth_t *s, int t) {
     int i = t - 1;
     if (s->armed[i])        { s->armed[i] = 0; say(s, "CANCEL %d", t); return; }
@@ -492,7 +555,7 @@ static void rec_pad(synth_t *s, int t) {
     if (core_state(s, t) == MK_EMPTY && !core_pending(s, t)) {
         if (s->arm) { s->armed[i] = 1; say(s, "ARMED %d", t); return; }
         if (s->count_in) {
-            s->countin[i] = (long)((double)MARK_SR * 60.0 / cur_bpm(s) * 4.0);
+            s->countin[i] = (long)((double)MARK_SR * 60.0 / cur_bpm(s) * 4.0 * s->count_bars);
             say(s, "COUNT-IN %d", t);
             return;
         }
@@ -513,10 +576,45 @@ static void arm_reverse(synth_t *s, int t) {
     say(s, get_t(s, t, "rev") ? "REV %d ON" : "REV %d OFF", t);
 }
 
+/* SOLO: mute every other track; again on the same track restores the mutes
+ * it found. Switching to another track keeps the original saved mutes. */
+static void solo_toggle(synth_t *s, int t) {
+    if (s->solo == t) {
+        for (int k = 1; k <= NTRK; k++) set_mute(s, k, s->solo_saved[k - 1]);
+        s->solo = 0;
+        say(s, "UNSOLO %d", t);
+        return;
+    }
+    if (!s->solo) for (int k = 0; k < NTRK; k++) s->solo_saved[k] = s->muted[k];
+    s->solo = t;
+    for (int k = 1; k <= NTRK; k++) set_mute(s, k, k != t);
+    say(s, "SOLO %d", t);
+}
+
+/* SHIFT + column 8: secondary settings. Rows 2 and 1 are free for now. */
+static void shift_setting(synth_t *s, int act) {
+    if (act == A_COUNTIN) {
+        s->count_bars = s->count_bars == 1 ? 2 : 1;
+        say(s, s->count_bars == 1 ? "COUNT-IN 1 BAR" : "COUNT-IN 2 BARS");
+    } else if (act == A_RECACT) {
+        int next = THR_CYCLE[0];
+        for (int i = 0; i < 5; i++) if (THR_CYCLE[i] > s->threshold) { next = THR_CYCLE[i]; break; }
+        s->threshold = next;
+        say(s, "THR %d DB", next);
+    }
+}
+
 static void pad_down(synth_t *s, const pad_def_t *p) {
     int t = p->arg;
+    int sh = s->shift_held;
     s->wave_dirty = 1;
-    if (t >= 1 && t <= NTRK) s->cur_track = t;
+    if (t >= 1 && t <= NTRK && !s->sel) s->cur_track = t;     /* PISTA keeps the waveform on its track */
+    if (sh && (p->act == A_COUNTIN || p->act == A_RECACT || p->act == A_FIXLEN || p->act == A_QUANT)) {
+        shift_setting(s, p->act);
+        return;
+    }
+    if (sh && p->act == A_REC)  { arm_reverse(s, t); return; }
+    if (sh && p->act == A_MUTE) { solo_toggle(s, t); return; }
     switch (p->act) {
     case A_REC:                            /* row 1: REC / DUB (ARM held = reverse) */
         if (s->arm_held) { s->arm_used = 1; arm_reverse(s, t); break; }
@@ -532,13 +630,22 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         break;
     }
     case A_MUTE:
+        s->solo = 0;                       /* a manual mute ends the solo */
         set_mute(s, t, !s->muted[t - 1]);
         say(s, s->muted[t - 1] ? "MUTE %d" : "UNMUTE %d", t);
         break;
-    case A_FX:
-        if (!get_t(s, t, "fx_on") && get_t(s, t, "fx") == 0) set_t(s, t, "fx", 1);
-        toggle_t(s, t, "fx_on");
-        say(s, get_t(s, t, "fx_on") ? "FX %d ON" : "FX %d OFF", t);
+    case A_SEL:
+        if (sh) {                          /* SHIFT + select: FX on/off, keeps type and amount */
+            if (!get_t(s, t, "fx_on") && get_t(s, t, "fx") == 0) set_t(s, t, "fx", 1);
+            toggle_t(s, t, "fx_on");
+            say(s, get_t(s, t, "fx_on") ? "FX %d ON" : "FX %d OFF", t);
+        } else if (s->sel == t) {
+            pista_select(s, 0);
+            say(s, "MIX");
+        } else {
+            pista_select(s, t);
+            say(s, "PISTA %d", t);
+        }
         break;
     case A_ALL: {
         int any = 0;
@@ -554,7 +661,7 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         say(s, "STOP ALL");
         for (int k = 1; k <= NTRK; k++) { clear_flags(s, k); trig_t(s, k, "stop"); }
         break;
-    case A_MODE:    mode_cycle(s); break;
+    case A_SHIFT:   s->shift_held = 1; break;
     case A_ARM:
         s->arm_held = 1; s->arm_used = 0;      /* toggles on release unless used as modifier */
         break;
@@ -583,10 +690,7 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
 /* Gestures act on note-on; CLEAR comes from Movy's Delete + pad (delete_pad). */
 /* Movy's Delete + pad (module declares delete_pad_param): CLEAR the track in
  * that pad's column, whatever row was tapped. Pad index 0..31 = rack pad. */
-static void delete_pad(synth_t *s, int idx) {
-    const pad_def_t *p = pad_for_note(NOTE_BASE + idx);
-    if (!p || p->arg < 1 || p->arg > NTRK) return;
-    int t = p->arg;
+static void clear_track(synth_t *s, int t) {
     s->cur_track = t;
     s->wave_dirty = 1;
     clear_flags(s, t);
@@ -594,13 +698,74 @@ static void delete_pad(synth_t *s, int idx) {
     trig_t(s, t, "clear");
 }
 
-static void pad_up(synth_t *s, const pad_def_t *p) {
-    if (p->act != A_ARM || !s->arm_held) return;
-    s->arm_held = 0;
-    if (s->arm_used) { s->arm_used = 0; return; }   /* was only the modifier */
+static void delete_pad(synth_t *s, int idx) {
+    const pad_def_t *p = pad_for_note(NOTE_BASE + idx);
+    if (!p || p->arg < 1 || p->arg > NTRK) return;
+    clear_track(s, p->arg);
+}
+
+static void arm_toggle(synth_t *s) {
     s->arm = !s->arm;
     if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
     say(s, s->arm ? "ARM ON" : "ARM OFF");
+}
+
+static void pad_up(synth_t *s, const pad_def_t *p) {
+    if (p->act == A_SHIFT) { s->shift_held = 0; return; }
+    if (p->act != A_ARM || !s->arm_held) return;
+    s->arm_held = 0;
+    if (s->arm_used) { s->arm_used = 0; return; }   /* was only the modifier */
+    arm_toggle(s);
+}
+
+/* ---- pedal_param: Blackstar Live Logic (CUSTOM mode), "<n>:d" / "<n>:u" ----
+ * Movy forwards the six switches; every action reuses the pad / undo / clear
+ * paths above. Hold timing runs in process (clock_frames), 1 s = MARK_SR.
+ * 1 REC/DUB/PLAY on the selected track   2 PLAY/STOP (hold: CLEAR)
+ * 3 previous track (hold: ARM toggle)    4 next track
+ * 5 UNDO                                 6 STOP ALL if playing, else ALL START
+ * Switches 2 and 3 have a hold, so their tap fires on release (< 1 s). */
+static void pedal_pad(synth_t *s, int act, int arg) {
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 8; c++)
+            if (PAD_GRID[r][c].act == act && PAD_GRID[r][c].arg == arg) { pad_down(s, &PAD_GRID[r][c]); return; }
+}
+
+static void pedal_step(synth_t *s, int dir) {
+    s->cur_track = (s->cur_track - 1 + dir + NTRK) % NTRK + 1;
+    if (s->sel) pista_select(s, s->cur_track);               /* PISTA follows the pedal */
+    s->wave_dirty = 1;
+    say(s, "TRACK %d", s->cur_track);
+}
+
+static void pedal_set(synth_t *s, const char *val) {
+    int n = val[0] - '0';
+    if (n < 1 || n > 6 || val[1] != ':' || (val[2] != 'd' && val[2] != 'u')) return;
+    if (val[2] == 'd') {
+        s->pedal_held[n] = 1; s->pedal_fired[n] = 0; s->pedal_at[n] = s->clock_frames;
+        switch (n) {
+        case 1: pedal_pad(s, A_REC, s->cur_track); break;
+        case 4: pedal_step(s, 1); break;
+        case 5: undo_cmd(s, "undo"); break;
+        case 6: pedal_pad(s, A_ALL, 0); break;
+        default: break;
+        }
+        return;
+    }
+    if (!s->pedal_held[n]) return;
+    s->pedal_held[n] = 0;
+    if (s->pedal_fired[n]) return;
+    if (n == 2) pedal_pad(s, A_STOP, s->cur_track);
+    else if (n == 3) pedal_step(s, -1);
+}
+
+static void pedal_tick(synth_t *s) {
+    for (int n = 2; n <= 3; n++) {
+        if (!s->pedal_held[n] || s->pedal_fired[n] || s->clock_frames - s->pedal_at[n] < MARK_SR) continue;
+        s->pedal_fired[n] = 1;
+        s->wave_dirty = 1;
+        if (n == 2) clear_track(s, s->cur_track); else arm_toggle(s);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -653,12 +818,6 @@ static void take_snap(synth_t *s, snap_t *n) {
     n->rec_action = get_i(s, "rec_action");
 }
 
-/* Mode pad: one colour per mode (never green or red, those are state). */
-static uint8_t mode_color(int mode) {
-    static const uint8_t C[N_MODES] = { L_OFF_WHITE, L_CYAN, L_YELLOW, 23, L_ROYAL_BLUE };
-    return C[mode % N_MODES];
-}
-
 static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
     int t = d->arg, i = t - 1;
     switch (d->act) {
@@ -686,12 +845,15 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
         }
     }
     case A_MUTE:
+        if (s->solo == t) return LED_BLINK | TRK_BRIGHT[i];
         if (s->muted[i]) return L_DARK_GREY;
         return n->st[i] == MK_EMPTY ? TRK_VDIM[i] : TRK_BRIGHT[i];
-    case A_FX:      return n->fx_on[i] ? TRK_BRIGHT[i] : TRK_VDIM[i];
+    case A_SEL:                            /* selector: identity colour, selected = bright; SHIFT held shows FX state */
+        if (s->shift_held) return n->fx_on[i] ? L_WHITE : TRK_VDIM[i];
+        return s->sel == t ? TRK_BRIGHT[i] : TRK_VDIM[i];
     case A_ALL:     return n->any_run ? L_WHITE : L_GREY_40;
     case A_STOPALL: return n->any_run ? L_BRIGHT_YELLOW : L_DARK_GREY;
-    case A_MODE:    return mode_color(s->mode);
+    case A_SHIFT:   return s->shift_held ? L_WHITE : L_GREY_40;
     case A_ARM:     return s->arm ? (LED_BLINK | L_ORANGE) : L_DARK_GREY;
     case A_COUNTIN: return s->count_in ? L_YELLOW : L_DIM_YELLOW;
     case A_RECACT:  return n->rec_action ? L_PURPLE : L_DARK_ROYAL_BLUE;
@@ -739,24 +901,15 @@ static void build_step_leds(synth_t *s, char *out) {
 static void header_text(synth_t *s, int t, uint32_t span, char *out, size_t n) {
     static const char *const NAME[7] = { "EMPTY", "ARMED", "REC", "PLAY", "DUB", "STOP", "MUTE" };
     int st = shim_state(s, t);
-    if (s->mode == MODE_MIX && s->start_t == t && s->clock_frames < s->start_until && span) {   /* Loop + knob readout */
+    if (!s->sel && s->start_t == t && s->clock_frames < s->start_until && span) {   /* Loop + knob readout */
         char lab[32];
         if (st == S_REC || st == S_DUB) snprintf(out, n, "START %d LOCKED", t);
         else { sixteenths_label(s, get_t(s, t, "off"), lab, sizeof lab); snprintf(out, n, "START %d %s", t, lab); }
         return;
     }
-    if (s->mode != MODE_MIX) {                 /* knob mode: "START 1 +3/16" */
-        const char *mn = MODE_NAME[s->mode];
-        char v[32] = "-";
-        if (span && st != S_REC) {
-            switch (s->mode) {
-            case MODE_START: sixteenths_label(s, get_t(s, t, "off"), v, sizeof v); break;
-            case MODE_END:   len_label(s, get_t(s, t, "len"), v, sizeof v); break;
-            case MODE_FX:    snprintf(v, sizeof v, "%s %d", FX_NAME[clampi_(get_t(s, t, "fx"), 0, 6)], get_t(s, t, "fxp")); break;
-            default:         pan_label(get_t(s, t, "pan"), v, sizeof v); break;
-            }
-        }
-        snprintf(out, n, "%s %d %s", mn, t, v);
+    if (s->sel) {                              /* PISTA view: "PISTA 3 IN +3/16" */
+        if (s->pista_lab[0]) snprintf(out, n, "PISTA %d %s", t, s->pista_lab);
+        else snprintf(out, n, "PISTA %d %s", t, NAME[st]);
         return;
     }
     if (span == 0) { snprintf(out, n, "%s %d", NAME[st], t); return; }
@@ -769,10 +922,48 @@ static void header_text(synth_t *s, int t, uint32_t span, char *out, size_t n) {
         snprintf(out, n, "%s %d - %.1f S", NAME[st], t, (double)span / (double)MARK_SR);
 }
 
+/* Bar / beat ticks over the display view (4/4 at the current tempo), counted
+ * from the clip start so bar 1 begins at `off`. Returns the tick count.
+ * Beat ticks need >= 4 px per beat; else bars only (>= 3 px per bar); else
+ * every 4th bar if that is >= 3 px apart; else none. Every 4th bar (bars 1, 5,
+ * 9... = beats k % 16 == 0, also before the start) is a phrase tick, written to
+ * `ph` (count in *nph) and not repeated in `out`. */
+static int build_ticks(synth_t *s, int t, uint32_t span, int st, uint8_t *out, uint8_t *ph, int *nph) {
+    *nph = 0;
+    if (!span) return 0;
+    double beat = (double)MARK_SR * 60.0 / cur_bpm(s);
+    if (!(beat > 0.0)) return 0;
+    double off = st == S_REC ? 0.0 : (double)get_t(s, t, "off");
+    double px_beat = beat * WAVE_BINS / (double)span;
+    int step = 1, minor = 0;                         /* step in beats; minor = draw beat ticks */
+    if (px_beat >= 4.0) minor = 1;
+    else if (px_beat * 4.0 >= 3.0) step = 4;
+    else if (px_beat * 16.0 >= 3.0) step = 16;
+    else return 0;
+    long k0 = (long)ceil(-off / beat), k1 = (long)floor(((double)span - beat * 0.02 - off) / beat);   /* a tick on the very end is the next repeat's start */
+    int n = 0;
+    uint8_t seen[WAVE_BINS]; memset(seen, 0, sizeof seen);   /* 1 = beat, 2 = bar, 3 = phrase */
+    for (long k = k0; k <= k1; k++) {
+        long km = ((k % 4) + 4) % 4;
+        int bar = km == 0;
+        if (bar) { if (((k % step) + step) % step) continue; }
+        else if (!minor) continue;
+        int b = (int)((off + (double)k * beat) * WAVE_BINS / (double)span);
+        if (b < 0 || b >= WAVE_BINS) continue;
+        int lv = !bar ? 1 : (((k % 16) + 16) % 16 == 0 ? 3 : 2);
+        if (seen[b] < lv) seen[b] = (uint8_t)lv;
+    }
+    for (int b = 0; b < WAVE_BINS; b++) {
+        if (seen[b] == 3) ph[(*nph)++] = (uint8_t)b;
+        else if (seen[b]) out[n++] = (uint8_t)(b | (seen[b] == 1 ? 0x80 : 0));
+    }
+    return n;
+}
+
 static void build_display(synth_t *s, char *out, size_t n) {
     int t = s->cur_track, st = shim_state(s, t);
     uint32_t span = 0; int pos = 0;
-    int whole = s->mode == MODE_END;               /* END view: the whole buffer, trimmed part too */
+    int whole = s->sel && s->last_knob == 2;               /* END view: the whole buffer, trimmed part too */
     mark_track_wave_ex(s->m, t - 1, WAVE_BINS, NULL, &span, &pos, whole);
     int busy = (st == S_REC || st == S_DUB);
     long every = busy ? MARK_SR / 4 : MARK_SR * 2;
@@ -787,20 +978,37 @@ static void build_display(synth_t *s, char *out, size_t n) {
         s->wave_track = t; s->wave_st = st; s->wave_span = span; s->wave_whole = whole;
         s->wave_at = s->in_frames; s->wave_dirty = 0;
     }
-    char hdr[48], hx[WAVE_BINS * 2 + 1], posf[24];
+    char hdr[48], hx[WAVE_BINS * 2 + 1], posf[24], tk[WAVE_BINS * 4 + 4];
     header_text(s, t, span, hdr, sizeof hdr);
+    for (char *c = hdr; *c; c++) if (*c == '|') *c = '/';      /* '|' separates the display fields */
+    {
+        uint8_t tb[WAVE_BINS], pb[WAVE_BINS];
+        int np, nt = build_ticks(s, t, span, st, tb, pb, &np);
+        if (nt != s->nticks || np != s->nphrase || memcmp(tb, s->ticks, (size_t)nt) || memcmp(pb, s->phrase, (size_t)np)) {
+            memcpy(s->ticks, tb, (size_t)nt); s->nticks = nt;
+            memcpy(s->phrase, pb, (size_t)np); s->nphrase = np;
+            s->wave_seq = (s->wave_seq + 1) % 100000u;
+        }
+        for (int i = 0; i < s->nticks; i++) snprintf(tk + i * 2, 3, "%02X", s->ticks[i]);
+        tk[s->nticks * 2] = 0;
+        if (s->nphrase) {
+            char *q = tk + s->nticks * 2; *q++ = '/';
+            for (int i = 0; i < s->nphrase; i++) { snprintf(q, 3, "%02X", s->phrase[i]); q += 2; }
+            *q = 0;
+        }
+    }
     for (int i = 0; i < WAVE_BINS; i++) snprintf(hx + i * 2, 3, "%02X", s->wave[i]);
     /* pos field: "<pos>" or "<pos>,<start marker column>" (marker shown when the
      * clip start is moved, or while it is being adjusted) */
     int mark = span ? mark_track_start_bin_ex(s->m, t - 1, WAVE_BINS, whole) : -1;
     int adjusting = s->start_t == t && s->clock_frames < s->start_until;
-    int show_start = mark >= 0 && (adjusting || s->mode == MODE_START || get_t(s, t, "off") != 0);
-    int end = s->mode == MODE_END && span ? mark_track_end_bin(s->m, t - 1, WAVE_BINS) : -1;
+    int show_start = mark >= 0 && (adjusting || (s->sel && s->last_knob == 1) || get_t(s, t, "off") != 0);
+    int end = whole && span ? mark_track_end_bin(s->m, t - 1, WAVE_BINS) : -1;
     /* pos field: "<pos>[,<start marker>[,<end marker>]]"; an unshown marker is -1 */
     if (end >= 0) snprintf(posf, sizeof posf, "%d,%d,%d", pos, show_start ? mark : -1, end);
     else if (show_start) snprintf(posf, sizeof posf, "%d,%d", pos, mark);
     else snprintf(posf, sizeof posf, "%d", pos);
-    snprintf(out, n, "%u|%s|%s|%s", s->wave_seq, posf, span ? hx : "", hdr);
+    snprintf(out, n, "%u|%s|%s|%s|%s", s->wave_seq, posf, span ? hx : "", hdr, tk);
 }
 
 /* ------------------------------------------------------------------ */
@@ -827,7 +1035,7 @@ static void build_hierarchy(synth_t *s) {
         "\"status_text_param\":\"status_text\",\"display_param\":\"display\",\"delete_pad_param\":\"delete_pad\","
         "\"step_buttons_param\":\"step\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
         "\"knob_capture_param\":\"knob_capture\",\"knob_delta_param\":\"knob_delta\",\"undo_param\":\"undo_cmd\","
-        "\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
+        "\"pedal_param\":\"pedal\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
         APP("{\"key\":\"t%d_level\",\"name\":\"Track %d Vol\",\"short_name\":\"T%d\","
             "\"type\":\"int\",\"min\":0,\"max\":200,\"default\":100,\"step\":5},", t, t, t);
@@ -1149,6 +1357,7 @@ static void *gen_create(const char *module_dir, const char *json_defaults) {
     s->cur_track = 1;
     s->bpm_src_logged = -1;
     s->threshold = DEFAULT_THRESHOLD;
+    s->count_bars = 1;
     s->in_gain = 100;
     for (int i = 0; i < NTRK; i++) {
         s->countin[i] = -1; s->saved_level[i] = 100;
@@ -1242,6 +1451,7 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
     }
     mark_process(s->m, buf, out, frames);
     s->clock_frames += frames;
+    pedal_tick(s);
     for (int t = 1; t <= NTRK; t++) {
         int pnd = core_state(s, t) == MK_EMPTY && core_pending(s, t);
         if (pnd != s->pend_seen[t - 1]) {
@@ -1397,6 +1607,7 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     if (!strcmp(key, "loop_knob")) { loop_knob(s, val); return; }
     if (!strcmp(key, "knob_delta")) { knob_delta(s, val); return; }
     if (!strcmp(key, "undo_cmd"))  { undo_cmd(s, val); return; }
+    if (!strcmp(key, "pedal"))     { pedal_set(s, val); return; }
     if (!strcmp(key, "state"))     { state_set(s, val); return; }
     if (!strcmp(key, "in_gain"))   { s->in_gain = clampi(v, 0, 200); return; }
     if (!strcmp(key, "arm")) {
@@ -1447,7 +1658,7 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "in_peak"))      RET("%d", s->in_peak_now);
     if (!strcmp(key, "status_text"))  RET("%u:%s", s->status_seq, s->status_text);
     if (!strcmp(key, "display")) {
-        char d[WAVE_BINS * 2 + 96];
+        char d[WAVE_BINS * 4 + 128];
         build_display(s, d, sizeof d);
         RET("%s", d);
     }
@@ -1456,8 +1667,8 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
         build_step_leds(s, hx);
         RET("%s", hx);
     }
-    if (!strcmp(key, "knob_capture")) RET("%d", s->mode != MODE_MIX);
-    if (!strcmp(key, "mode"))         RET("%d", s->mode);
+    if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0);
+    if (!strcmp(key, "sel"))          RET("%d", s->sel);
     if (!strcmp(key, "loop_id"))      RET("%s", loop_id_now(s));
     if (!strcmp(key, "state"))        return state_get(s, buf, buf_len);
     if (!strcmp(key, "pad_leds")) {

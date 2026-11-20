@@ -10,11 +10,8 @@ Pad 1 = abajo a la izquierda. Fila 1 = la de abajo.
 
 ```
         MASTER   T1     T2     T3     T4     T5     T6     AJUSTES REC
-fila 4  MODO     FX     FX     FX     FX     FX     FX     Count-in
-        MIX>     on/off on/off on/off on/off on/off on/off on/off
-        START>
-        END>FX>
-        PAN
+fila 4  SHIFT    SELEC  SELEC  SELEC  SELEC  SELEC  SELEC  Count-in
+        (mant.)  pista  pista  pista  pista  pista  pista  on/off
 fila 3  ARM      MUTE   MUTE   MUTE   MUTE   MUTE   MUTE   Rec Action
         (rev.)                                              REC>PLAY/DUB
 fila 2  STOP     PLAY/  PLAY/  PLAY/  PLAY/  PLAY/  PLAY/  Largo fijo
@@ -26,22 +23,45 @@ fila 1  TODO     REC/   REC/   REC/   REC/   REC/   REC/   Quantize
 
 **UNDO / REDO** ya no es un pad: es el boton ↩ Undo del Move (y Shift+Undo = rehacer) cuando la pista activa es el Looper (Movy lo reenvia con `undo_param`); en las demas pistas Undo sigue siendo el de Movy. Deshace el ultimo overdub, grabacion, CLEAR o cambio de largo (un nivel).
 
-**MODO** (pad de arriba de la columna 1) cicla MIX > START > END > FX > PAN > MIX. Color del pad: blanco = MIX, cian = START, amarillo = END, magenta = FX, azul = PAN (nunca verde ni rojo). La pantalla muestra el modo y el valor, p. ej. `START 1 +3/16`, `END 2 3B 5/16`, `FX 3 LPF 60`, `PAN 1 L20`. En MIX los knobs 1-6 son los volumenes; en los demas modos el knob N edita la pista N (Movy los captura con `knob_capture_param`; K7 = volumen de entrada y K8 = master en todos):
-- **START**: inicio del clip (rejilla 1/16, Shift = fino 1/64), como Loop + knob. Marca de inicio siempre visible en la onda.
-- **END**: fin/largo del loop (rejilla 1/16, Shift = fino, nunca menos de 1/16). Acortar no destruye (el audio se conserva; alargar de nuevo lo recupera); pasar de lo grabado repite el contenido. La onda muestra todo lo grabado con marca de inicio y de fin. Una racha de giros = un solo paso de Undo.
-- **FX**: cantidad de FX de la pista (Shift + knob = tipo de FX).
-- **PAN**: panoramica.
+**Selector de pista (fila 4, columnas 2-7) y vista PISTA.** Tocar el pad de una pista la selecciona: los 8 knobs pasan a ser de esa pista (Movy los captura con `knob_capture_param`) y la onda la sigue. Tocar la pista ya seleccionada vuelve a MIX (knobs = volumenes, como siempre). Cada pad usa el color de la pista, tenue; la seleccionada, brillante (nunca verde ni rojo). La pantalla muestra `PISTA 3` y el ultimo valor tocado, y cada giro lanza un aviso tipo `T3 IN +8/16`. Con la vista PISTA activa, los pedales 3/4 mueven tambien la seleccion, y los pads de otras pistas no cambian la pista de la onda.
 
-Colores: verde = reproduciendo, rojo = grabando, violeta = overdub, naranja parpadeante = ARM/armada. Las filas MUTE/FX (y STOP, parada) usan el color de cada pista (azul, cian, amarillo, magenta, blanco, naranja); mute = gris. La columna 1 y la 8 no usan ni verde ni rojo.
+| Knob | Vista PISTA (pista seleccionada) |
+|---|---|
+| K1 | IN: inicio del clip (rejilla 1/16; SHIFT = fino 1/64) |
+| K2 | OUT: fin/largo del loop (rejilla 1/16; SHIFT = fino 1/64; nunca menos de 1/16; acortar no destruye; una racha de giros = un paso de Undo; la onda muestra todo lo grabado con marcas de inicio y fin) |
+| K3 | Volumen de la pista |
+| K4 | Pan |
+| K5 | Tipo de FX: OFF / LPF / HPF / CRUSH / DELAY / PHASER / RING (3 clics por paso) |
+| K6 | Cantidad de FX |
+| K7 | Velocidad 1/2x / 1x / 2x (3 clics por paso) |
+| K8 | Reverse off / on (3 clics) |
+
+En MIX (nada seleccionado): K1-K6 volumenes de las pistas, K7 entrada, K8 master. Ya no existe el pad MODO (START/END/PAN/FX global desaparecen: sus funciones estan en los knobs de la vista PISTA).
+
+**SHIFT** (pad de arriba de la columna 1, mantener):
+
+| SHIFT + | Efecto |
+|---|---|
+| K1 / K2 (en vista PISTA) | IN / OUT fino (1/64) |
+| pad fila 4 de una pista | FX on/off de esa pista (mantiene tipo y cantidad; mientras SHIFT esta pulsado el pad se ve blanco si tiene FX) |
+| pad fila 1 de una pista | Reverse de esa pista (nunca graba) |
+| pad fila 3 de una pista | SOLO: silencia las demas; otra vez = quita el solo y restaura los mutes anteriores (el pad de la pista en solo parpadea) |
+| columna 8 fila 4 | Count-in: cicla 1 / 2 compases |
+| columna 8 fila 3 | Umbral de ARM: -54 / -48 / -42 / -36 / -30 dB (aviso `THR -36 DB`) |
+| columna 8 filas 2 y 1 | sin funcion por ahora |
+
+El pad SHIFT es gris tenue y blanco mientras se mantiene.
+
+Colores: verde = reproduciendo, rojo = grabando, violeta = overdub, naranja parpadeante = ARM/armada. Las filas MUTE/selector (y STOP, parada) usan el color de cada pista (azul, cian, amarillo, magenta, blanco, naranja); mute = gris. La columna 1 y la 8 no usan ni verde ni rojo.
 
 - **REC/DUB** (fila 1): pista vacia -> graba; segundo toque -> cierra la grabacion (PLAY, o DUB si Rec Action = REC>DUB); PLAY -> DUB; DUB -> PLAY; pista parada -> empieza a sonar directamente en DUB. Se ve en rojo (rec) / violeta (dub).
 - **PLAY/STOP** (fila 2): pista parada -> PLAY; sonando/DUB -> STOP; grabando -> cierra la grabacion y para. **Borrar pista (CLEAR): mantener Delete (X) del Move y tocar cualquier pad de la columna de esa pista** (Movy lo reenvia al modulo con `delete_pad_param`). El boton **Undo** del Move lo deshace; Shift+Undo = rehacer el borrado; UNDO es de un solo nivel. Verde = suena, color de pista = parada con clip, apagado = vacia.
 - **MUTE**: silencia la pista pero sigue girando, y al quitar el mute vuelve en su sitio.
 - **ARM** (columna 1, fila 3): un toque (pulsar y soltar) activa/desactiva el modo "grabar al detectar sonido": al pulsar REC en una pista vacia queda *armada* y empieza a grabar sola cuando la entrada supera el umbral. Tocar REC otra vez cancela. ARMADA parpadea en naranja.
-- **REVERSE**: manten pulsado ARM y toca cualquier pad de una pista (fila 1 o fila 2): esa pista cambia de sentido (nunca graba, reproduce ni para). Al soltar ARM tras usarlo asi, ARM no cambia. Mientras ARM esta pulsado, los pads de fila 2 se iluminan en blanco (invertida) o color de pista (normal).
+- **REVERSE**: SHIFT + pad de fila 1 (o K8 en la vista PISTA). Alias antiguo: manten pulsado ARM y toca un pad de pista (fila 1 o 2); al soltar ARM tras usarlo asi, ARM no cambia, y mientras esta pulsado los pads de fila 2 se iluminan en blanco (invertida) o color de pista (normal).
 
 Todos los gestos actuan al note-on.
-- **Count-in**: al grabar en una pista vacia espera 4 tiempos antes de empezar.
+- **Count-in**: al grabar en una pista vacia espera 1 compas (4 tiempos) antes de empezar; SHIFT + el pad lo cambia a 2 compases (no se guarda).
 - **Largo fijo**: cada toque cicla libre -> 1 -> 2 -> 4 -> 8 compases (desde cualquier valor pasa al siguiente de esa lista); la grabacion se cierra sola. Los 16 botones de paso eligen cualquier largo de 1 a 16 (ver abajo).
 
 ## Botones de paso = largo (build `module-leds` v4 de Movy)
@@ -79,7 +99,7 @@ Los loops sobreviven a cerrar/recargar Movy y a apagar la Move.
 ## Compilar y probar
 
 ```
-make test-synth     # compila para el Mac y ejecuta los tests (463 comprobaciones)
+make test-synth     # compila para el Mac y ejecuta los tests (585 comprobaciones)
 make arm-synth      # compila para la Move -> build/looper-606-module.tar.gz
 ```
 
@@ -100,6 +120,21 @@ Nota tecnica: el motor soporta `MARK_TRACKS=6` de forma nativa (ya no hay parche
 - Entrada de audio: el log dice `input source = ...` al crear e `input peak after 1 s = N`. Si pone SILENT, el host no entrega audio en el buzon: el modulo no puede arreglarlo (ver docs/BRIEF.md, "Entrada de audio en Movy standalone").
 - Keep-alive: Movy duerme una pista cuya salida lleva ~1 s en silencio; mientras haya pistas en uso el modulo suma un dither de +-6 LSB (-74 dBFS) para que el looper siga corriendo.
 - Que el orden de notas de los pads coincida (el log guarda las primeras 8 notas pulsadas; pad 1 = nota 36).
+
+## Pedalera Blackstar Live Logic
+
+Pedalera en el hub USB-A del Move, en modo **CUSTOM** (no PATCH). Necesita el build `module-leds` de Movy, que reenvia los 6 interruptores al looper con `pedal_param` (`pedal` = `"<n>:d"` / `"<n>:u"`). Siempre actua sobre la pista seleccionada del looper (`cur_track`, la que siguen la pantalla y la onda); el aviso es `TRACK n`.
+
+| Interruptor | Toque | Mantener 1 s |
+|---|---|---|
+| 1 | REC/DUB/PLAY de la pista seleccionada (como el pad de la fila 1) | - |
+| 2 | PLAY/STOP de la pista seleccionada (como el pad de la fila 2) | CLEAR de la pista seleccionada (se puede deshacer) |
+| 3 | pista anterior (1..6, da la vuelta) | ARM auto-rec on/off (a 1 s, sin soltar) |
+| 4 | pista siguiente (da la vuelta) | - |
+| 5 | UNDO (como el boton Undo del Move) | - |
+| 6 | STOP ALL si algo suena, si no ALL START | - |
+
+Los interruptores 1, 4, 5 y 6 actuan al pisar. El 2 y el 3 tienen gesto de mantener, asi que su toque actua al soltar (si se solto antes de 1 s); un mantenido nunca dispara ademas el toque.
 
 ## Pad colours and status text in Movy (needs the `module-leds` Movy build)
 
