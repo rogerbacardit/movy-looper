@@ -152,6 +152,9 @@ typedef struct {
     uint8_t  wave[WAVE_BINS];
     int      wave_track, wave_st, wave_dirty, wave_whole;
     uint32_t wave_span;
+    uint32_t wave_lo, wave_hi;     /* buffer window of the cached peaks (0,0 = legacy REC/empty view) */
+    int      zoom_t, zoom_pt, zoom_fine;   /* zoom on track zoom_t's IN (0) or OUT (1) point */
+    long     zoom_until;           /* clock_frames until the zoom ends */
     long     wave_at;
     unsigned wave_seq;
     uint8_t  ticks[WAVE_BINS];     /* bar / beat ticks of the display (bin | 0x80 = beat) */
@@ -372,6 +375,13 @@ static void pista_say(synth_t *s, int t, const char *name, const char *fmt, ...)
     say(s, "T%d %s", t, s->pista_lab);
 }
 
+/* Zoom the display on the IN (pt 0) or OUT (pt 1) point of track t for ~2.5 s. */
+static void zoom_on(synth_t *s, int t, int pt, int fine) {
+    s->zoom_t = t; s->zoom_pt = pt; s->zoom_fine = fine;
+    s->zoom_until = s->clock_frames + (long)MARK_SR * 5 / 2;
+    s->wave_dirty = 1;
+}
+
 static void start_knob(synth_t *s, int n, int d, int fine, int pista) {
     int t = n;
     s->cur_track = t;
@@ -393,6 +403,7 @@ static void start_knob(synth_t *s, int n, int d, int fine, int pista) {
     off = get_t(s, t, "off");               /* the core may clamp further */
     char lab[32];
     sixteenths_label(s, off, lab, sizeof lab);
+    zoom_on(s, t, 0, fine);
     if (pista) pista_say(s, t, "IN", "%s", lab); else say(s, "START %d %s", t, lab);
 }
 
@@ -444,8 +455,12 @@ static void end_knob(synth_t *s, int t, int d, int fine) {
     }
     char lab[32];
     len_label(s, get_t(s, t, "len"), lab, sizeof lab);
+    zoom_on(s, t, 1, fine);
     pista_say(s, t, "OUT", "%s", lab);
 }
+
+/* Speed readouts, indexed like the core's spd (1/4 1/2 3/4 1 1.5 2 4 x). */
+static const char *const SPD_LABEL[MK_SPD_N] = { "x1/4", "x1/2", "x3/4", "x1", "x1.5", "x2", "x4" };
 
 static const char *const FX_NAME[7] = { "OFF", "LPF", "HPF", "CRUSH", "DELAY", "PHASER", "RING" };
 
@@ -521,10 +536,9 @@ static void knob_delta(synth_t *s, const char *val) {
         break;
     }
     case 7: {
-        static const char *const SPD[3] = { "1/2X", "1X", "2X" };
         int k = knob_step(s, n, d);
-        if (k) set_t(s, t, "spd", clampi_(get_t(s, t, "spd") + k, 0, 2));
-        pista_say(s, t, "SPD", "%s", SPD[clampi_(get_t(s, t, "spd"), 0, 2)]);
+        if (k) set_t(s, t, "spd", clampi_(get_t(s, t, "spd") + k, 0, MK_SPD_N - 1));
+        pista_say(s, t, "SPD", "%s", SPD_LABEL[clampi_(get_t(s, t, "spd"), 0, MK_SPD_N - 1)]);
         break;
     }
     default: {
@@ -898,17 +912,18 @@ static void build_step_leds(synth_t *s, char *out) {
  *   header  free text, last so it may hold anything: "PLAY 1 - 4 BARS"
  * Peaks are cached; only the playhead is read on every call.
  */
-static void header_text(synth_t *s, int t, uint32_t span, char *out, size_t n) {
+static void header_text(synth_t *s, int t, uint32_t span, int zoomed, char *out, size_t n) {
     static const char *const NAME[7] = { "EMPTY", "ARMED", "REC", "PLAY", "DUB", "STOP", "MUTE" };
     int st = shim_state(s, t);
+    const char *zs = zoomed ? " ZOOM" : "";
     if (!s->sel && s->start_t == t && s->clock_frames < s->start_until && span) {   /* Loop + knob readout */
         char lab[32];
         if (st == S_REC || st == S_DUB) snprintf(out, n, "START %d LOCKED", t);
-        else { sixteenths_label(s, get_t(s, t, "off"), lab, sizeof lab); snprintf(out, n, "START %d %s", t, lab); }
+        else { sixteenths_label(s, get_t(s, t, "off"), lab, sizeof lab); snprintf(out, n, "START %d %s%s", t, lab, zs); }
         return;
     }
-    if (s->sel) {                              /* PISTA view: "PISTA 3 IN +3/16" */
-        if (s->pista_lab[0]) snprintf(out, n, "PISTA %d %s", t, s->pista_lab);
+    if (s->sel) {                              /* PISTA view: "PISTA 3 IN +3/16 ZOOM" */
+        if (s->pista_lab[0]) snprintf(out, n, "PISTA %d %s%s", t, s->pista_lab, zs);
         else snprintf(out, n, "PISTA %d %s", t, NAME[st]);
         return;
     }
@@ -922,25 +937,26 @@ static void header_text(synth_t *s, int t, uint32_t span, char *out, size_t n) {
         snprintf(out, n, "%s %d - %.1f S", NAME[st], t, (double)span / (double)MARK_SR);
 }
 
-/* Bar / beat ticks over the display view (4/4 at the current tempo), counted
- * from the clip start so bar 1 begins at `off`. Returns the tick count.
- * Beat ticks need >= 4 px per beat; else bars only (>= 3 px per bar); else
- * every 4th bar if that is >= 3 px apart; else none. Every 4th bar (bars 1, 5,
- * 9... = beats k % 16 == 0, also before the start) is a phrase tick, written to
- * `ph` (count in *nph) and not repeated in `out`. */
-static int build_ticks(synth_t *s, int t, uint32_t span, int st, uint8_t *out, uint8_t *ph, int *nph) {
+/* Bar / beat ticks over the view window [lo, hi) of the buffer (4/4 at the
+ * current tempo), counted from `origin` (the clip start, 0 while recording) so
+ * bar 1 begins there; bin = (frame - lo) * 128 / (hi - lo). Returns the tick
+ * count. Beat ticks need >= 4 px per beat; else bars only (>= 3 px per bar);
+ * else every 4th bar if that is >= 3 px apart; else none. Every 4th bar (bars
+ * 1, 5, 9... = beats k % 16 == 0, also before the origin) is a phrase tick,
+ * written to `ph` (count in *nph) and not repeated in `out`. */
+static int build_ticks(synth_t *s, double origin, uint32_t lo, uint32_t hi, uint8_t *out, uint8_t *ph, int *nph) {
     *nph = 0;
-    if (!span) return 0;
+    if (hi <= lo) return 0;
+    double span = (double)(hi - lo);
     double beat = (double)MARK_SR * 60.0 / cur_bpm(s);
     if (!(beat > 0.0)) return 0;
-    double off = st == S_REC ? 0.0 : (double)get_t(s, t, "off");
-    double px_beat = beat * WAVE_BINS / (double)span;
+    double px_beat = beat * WAVE_BINS / span;
     int step = 1, minor = 0;                         /* step in beats; minor = draw beat ticks */
     if (px_beat >= 4.0) minor = 1;
     else if (px_beat * 4.0 >= 3.0) step = 4;
     else if (px_beat * 16.0 >= 3.0) step = 16;
     else return 0;
-    long k0 = (long)ceil(-off / beat), k1 = (long)floor(((double)span - beat * 0.02 - off) / beat);   /* a tick on the very end is the next repeat's start */
+    long k0 = (long)ceil(((double)lo - origin) / beat), k1 = (long)floor(((double)hi - beat * 0.02 - origin) / beat);   /* a tick on the very end is the next repeat's start */
     int n = 0;
     uint8_t seen[WAVE_BINS]; memset(seen, 0, sizeof seen);   /* 1 = beat, 2 = bar, 3 = phrase */
     for (long k = k0; k <= k1; k++) {
@@ -948,7 +964,7 @@ static int build_ticks(synth_t *s, int t, uint32_t span, int st, uint8_t *out, u
         int bar = km == 0;
         if (bar) { if (((k % step) + step) % step) continue; }
         else if (!minor) continue;
-        int b = (int)((off + (double)k * beat) * WAVE_BINS / (double)span);
+        int b = (int)((origin + (double)k * beat - (double)lo) * WAVE_BINS / span);
         if (b < 0 || b >= WAVE_BINS) continue;
         int lv = !bar ? 1 : (((k % 16) + 16) % 16 == 0 ? 3 : 2);
         if (seen[b] < lv) seen[b] = (uint8_t)lv;
@@ -960,30 +976,74 @@ static int build_ticks(synth_t *s, int t, uint32_t span, int st, uint8_t *out, u
     return n;
 }
 
+/* The view window [lo, hi) in buffer frames for track t, or 0 when the
+ * legacy whole-clip view applies (recording, empty). Sets *zoomed.
+ *  - IN/OUT being adjusted (and 2.5 s after): 2 bars (1/2 bar when fine)
+ *    centred on the point, clamped to [0, total); the whole buffer when the
+ *    clip is not longer than the window.
+ *  - PISTA otherwise: the whole buffer; MIX: the playing region IN..OUT. */
+static int view_window(synth_t *s, int t, uint32_t *lo, uint32_t *hi, int *zoomed) {
+    *zoomed = 0;
+    int st = core_state(s, t);
+    long len = get_t(s, t, "len"), off = get_t(s, t, "off"), full = get_t(s, t, "full");
+    if (st == MK_REC || len <= 0) return 0;
+    long total = full > len ? full : len;
+    if (s->zoom_t == t && s->clock_frames < s->zoom_until) {
+        long w = lround(bar_frames(s) * (s->zoom_fine ? 0.5 : 2.0));
+        if (w < 64) w = 64;
+        if (w < total) {
+            long c = s->zoom_pt ? len : off;
+            long l = c - w / 2;
+            if (l > total - w) l = total - w;
+            if (l < 0) l = 0;
+            *lo = (uint32_t)l; *hi = (uint32_t)(l + w); *zoomed = 1;
+            return 1;
+        }
+        *lo = 0; *hi = (uint32_t)total;
+        return 1;
+    }
+    if (s->sel) { *lo = 0; *hi = (uint32_t)total; return 1; }
+    if (off < 0 || off >= len) off = 0;
+    *lo = (uint32_t)off; *hi = (uint32_t)len;
+    return 1;
+}
+
+static int bin_of(uint32_t f, uint32_t lo, uint32_t hi) {
+    return (int)((uint64_t)(f - lo) * WAVE_BINS / (hi - lo));
+}
+
 static void build_display(synth_t *s, char *out, size_t n) {
     int t = s->cur_track, st = shim_state(s, t);
-    uint32_t span = 0; int pos = 0;
-    int whole = s->sel && s->last_knob == 2;               /* END view: the whole buffer, trimmed part too */
-    mark_track_wave_ex(s->m, t - 1, WAVE_BINS, NULL, &span, &pos, whole);
+    uint32_t span = 0, lo = 0, hi = 0; int pos = 0, zoomed = 0;
+    int win = view_window(s, t, &lo, &hi, &zoomed);
+    if (!win) lo = hi = 0;
+    int whole = !win && s->sel && s->last_knob == 2;       /* legacy view flag (REC/empty only) */
+    if (win) { span = hi - lo; mark_track_wave_win(s->m, t - 1, WAVE_BINS, NULL, lo, hi, &pos); }
+    else mark_track_wave_ex(s->m, t - 1, WAVE_BINS, NULL, &span, &pos, whole);
     int busy = (st == S_REC || st == S_DUB);
     long every = busy ? MARK_SR / 4 : MARK_SR * 2;
     if (s->wave_dirty || whole != s->wave_whole || t != s->wave_track || st != s->wave_st || span != s->wave_span
-        || s->in_frames - s->wave_at >= every) {
+        || lo != s->wave_lo || hi != s->wave_hi || s->in_frames - s->wave_at >= every) {
         uint8_t w[WAVE_BINS];
-        mark_track_wave_ex(s->m, t - 1, WAVE_BINS, w, &span, &pos, whole);
-        if (whole != s->wave_whole || t != s->wave_track || span != s->wave_span || memcmp(w, s->wave, sizeof w)) {
+        if (win) mark_track_wave_win(s->m, t - 1, WAVE_BINS, w, lo, hi, &pos);
+        else mark_track_wave_ex(s->m, t - 1, WAVE_BINS, w, &span, &pos, whole);
+        if (whole != s->wave_whole || t != s->wave_track || span != s->wave_span || lo != s->wave_lo || hi != s->wave_hi
+            || memcmp(w, s->wave, sizeof w)) {
             memcpy(s->wave, w, sizeof w);
             s->wave_seq = (s->wave_seq + 1) % 100000u;
         }
         s->wave_track = t; s->wave_st = st; s->wave_span = span; s->wave_whole = whole;
+        s->wave_lo = lo; s->wave_hi = hi;
         s->wave_at = s->in_frames; s->wave_dirty = 0;
     }
     char hdr[48], hx[WAVE_BINS * 2 + 1], posf[24], tk[WAVE_BINS * 4 + 4];
-    header_text(s, t, span, hdr, sizeof hdr);
+    header_text(s, t, span, zoomed, hdr, sizeof hdr);
     for (char *c = hdr; *c; c++) if (*c == '|') *c = '/';      /* '|' separates the display fields */
     {
         uint8_t tb[WAVE_BINS], pb[WAVE_BINS];
-        int np, nt = build_ticks(s, t, span, st, tb, pb, &np);
+        int np, nt;
+        if (win) nt = build_ticks(s, (double)get_t(s, t, "off"), lo, hi, tb, pb, &np);
+        else nt = build_ticks(s, 0.0, 0, span, tb, pb, &np);   /* recording: from the start */
         if (nt != s->nticks || np != s->nphrase || memcmp(tb, s->ticks, (size_t)nt) || memcmp(pb, s->phrase, (size_t)np)) {
             memcpy(s->ticks, tb, (size_t)nt); s->nticks = nt;
             memcpy(s->phrase, pb, (size_t)np); s->nphrase = np;
@@ -998,15 +1058,28 @@ static void build_display(synth_t *s, char *out, size_t n) {
         }
     }
     for (int i = 0; i < WAVE_BINS; i++) snprintf(hx + i * 2, 3, "%02X", s->wave[i]);
-    /* pos field: "<pos>" or "<pos>,<start marker column>" (marker shown when the
-     * clip start is moved, or while it is being adjusted) */
-    int mark = span ? mark_track_start_bin_ex(s->m, t - 1, WAVE_BINS, whole) : -1;
-    int adjusting = s->start_t == t && s->clock_frames < s->start_until;
-    int show_start = mark >= 0 && (adjusting || (s->sel && s->last_knob == 1) || get_t(s, t, "off") != 0);
-    int end = whole && span ? mark_track_end_bin(s->m, t - 1, WAVE_BINS) : -1;
-    /* pos field: "<pos>[,<start marker>[,<end marker>]]"; an unshown marker is -1 */
-    if (end >= 0) snprintf(posf, sizeof posf, "%d,%d,%d", pos, show_start ? mark : -1, end);
-    else if (show_start) snprintf(posf, sizeof posf, "%d,%d", pos, mark);
+    /* Outside the zoom window the format has no "hidden" playhead value, so it
+     * is pinned to the edge it left through (-1 = before, -2 = after). */
+    if (pos == -1) pos = 0;
+    else if (pos == -2) pos = WAVE_BINS - 1;
+    /* pos field: "<pos>[,<start marker>[,<end marker>]]"; an unshown marker is -1.
+     * Markers are in window coordinates; shown in PISTA view (whole buffer),
+     * while zoomed, and in MIX once the start is moved (never: MIX starts at IN). */
+    int mark = -1, end = -1;
+    if (win) {
+        long off = get_t(s, t, "off"), len = get_t(s, t, "len");
+        int markers = s->sel || (s->zoom_t == t && s->clock_frames < s->zoom_until);
+        if (markers && off >= (long)lo && off < (long)hi) mark = bin_of((uint32_t)off, lo, hi);
+        if (markers && len > (long)lo && len <= (long)hi) { end = bin_of((uint32_t)len, lo, hi); if (end >= WAVE_BINS) end = WAVE_BINS - 1; }
+        if (mark >= WAVE_BINS) mark = WAVE_BINS - 1;
+    } else {
+        mark = span ? mark_track_start_bin_ex(s->m, t - 1, WAVE_BINS, whole) : -1;
+        int adjusting = s->start_t == t && s->clock_frames < s->start_until;
+        if (!(adjusting || (s->sel && s->last_knob == 1) || get_t(s, t, "off") != 0)) mark = -1;
+        end = whole && span ? mark_track_end_bin(s->m, t - 1, WAVE_BINS) : -1;
+    }
+    if (end >= 0) snprintf(posf, sizeof posf, "%d,%d,%d", pos, mark, end);
+    else if (mark >= 0) snprintf(posf, sizeof posf, "%d,%d", pos, mark);
     else snprintf(posf, sizeof posf, "%d", pos);
     snprintf(out, n, "%u|%s|%s|%s|%s", s->wave_seq, posf, span ? hx : "", hdr, tk);
 }
@@ -1064,7 +1137,7 @@ static void build_hierarchy(synth_t *s) {
         "{\"key\":\"trk_shot\",\"name\":\"One-shot\",\"short_name\":\"1SHOT\",\"type\":\"enum\","
         "\"options\":%s,\"default\":0},"
         "{\"key\":\"trk_spd\",\"name\":\"Speed\",\"short_name\":\"SPD\",\"type\":\"enum\","
-        "\"options\":[\"1/2x\",\"1x\",\"2x\"],\"default\":1}],"
+        "\"options\":[\"x1/4\",\"x1/2\",\"x3/4\",\"x1\",\"x1.5\",\"x2\",\"x4\"],\"default\":3}],"
         "\"knobs\":[\"fx_type\",\"fx_amt\",\"trk_pan\",\"trk_rev\",\"trk_shot\",\"trk_spd\"]},",
         fxopts, onoff, onoff);
 
@@ -1312,7 +1385,7 @@ static int state_get(synth_t *s, char *buf, int buf_len) {
     }
     int w = snprintf(buf + n, (size_t)(buf_len - n),
         ",\"l6id\":\"%s\",\"l6rl\":%d,\"l6ci\":%d,\"l6thdb\":%d,\"l6ig\":%d,"
-        "\"l6sp\":\"%s\",\"l6mu\":\"%s\",\"l6lv\":\"%s\"}",
+        "\"l6sq\":\"%s\",\"l6mu\":\"%s\",\"l6lv\":\"%s\"}",
         loop_id_now(s), s->rec_len, s->count_in, s->threshold, s->in_gain, sp, mu, lv);
     if (w < 0 || w >= buf_len - n) { buf[n] = '}'; buf[n + 1] = 0; return n + 1; }
     return n + w;
@@ -1329,7 +1402,11 @@ static void state_set(synth_t *s, const char *val) {
         s->threshold = clampi_((int)jnum(val, "l6thdb", s->threshold), -70, -6);
         s->in_gain   = clampi_((int)jnum(val, "l6ig", s->in_gain), 0, 200);
         for (int t = 1; t <= NTRK; t++) {
-            set_t(s, t, "spd", clampi_(jcsv(val, "l6sp", t - 1, 1), 0, 2));
+            /* l6sq = 7-step index (0.6.1); l6sp = old 0/1/2 (1/2x,1x,2x) -> index 1/3/5 */
+            static const int OLD_SPD[3] = { 1, 3, 5 };
+            int sp = strstr(val, "\"l6sq\":") ? clampi_(jcsv(val, "l6sq", t - 1, MK_SPD_1X), 0, MK_SPD_N - 1)
+                                              : OLD_SPD[clampi_(jcsv(val, "l6sp", t - 1, 1), 0, 2)];
+            set_t(s, t, "spd", sp);
             if (jcsv(val, "l6mu", t - 1, 0)) {
                 s->muted[t - 1] = 1;
                 s->saved_level[t - 1] = clampi_(jcsv(val, "l6lv", t - 1, 100), 0, 200);
@@ -1624,7 +1701,7 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     if (!strcmp(key, "trk_pan"))  { set_t(s, s->cur_track, "pan", v); return; }
     if (!strcmp(key, "trk_rev"))  { set_t(s, s->cur_track, "rev", v ? 1 : 0); return; }
     if (!strcmp(key, "trk_shot")) { set_t(s, s->cur_track, "shot", v ? 1 : 0); return; }
-    if (!strcmp(key, "trk_spd"))  { set_t(s, s->cur_track, "spd", clampi(v, 0, 2)); return; }
+    if (!strcmp(key, "trk_spd"))  { set_t(s, s->cur_track, "spd", clampi(v, 0, MK_SPD_N - 1)); return; }
     if (is_trk_key(key, &t, &k)) {
         if (!strcmp(k, "state")) return;                   /* read-only */
         if (!strcmp(k, "level") && s->muted[t - 1]) {      /* applied on unmute */

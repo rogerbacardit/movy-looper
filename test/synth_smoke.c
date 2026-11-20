@@ -418,18 +418,18 @@ int main(int argc, char **argv) {
     /* --- varispeed 1/2 / 1 / 2 (tape style) and reverse --- */
     fresh(&host); seti("quantize", 0); seti("monitor", 0);
     tap(REC(1)); run(500); tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
-    CHECK(geti("trk_spd") == 1);
+    CHECK(geti("trk_spd") == 3);
     int base_c = crossings(300);
     CHECK(base_c > 50);
-    seti("trk_spd", 2); CHECK(geti("t1_spd") == 2);
+    seti("trk_spd", 5); CHECK(geti("t1_spd") == 5);
     int c2 = crossings(300);   CHECK(c2 > base_c * 17 / 10 && c2 < base_c * 23 / 10);
     tap(REC(1)); CHECK(state(1) == S_PLAY);                         /* no overdub while varispeed */
-    seti("trk_spd", 0); CHECK(geti("t1_spd") == 0);
+    seti("trk_spd", 1); CHECK(geti("t1_spd") == 1);
     int ch = crossings(300);   CHECK(ch > base_c * 4 / 10 && ch < base_c * 6 / 10);
-    seti("trk_rev", 1); seti("trk_spd", 2);
+    seti("trk_rev", 1); seti("trk_spd", 5);
     int cr = crossings(300);   CHECK(cr > base_c * 17 / 10 && cr < base_c * 23 / 10);
     out_peak = 0; run(100); CHECK(out_peak > 500);                  /* reverse + varispeed audible */
-    seti("trk_rev", 0); seti("trk_spd", 1);
+    seti("trk_rev", 0); seti("trk_spd", 3);
     int c1 = crossings(300);   CHECK(c1 > base_c * 9 / 10 && c1 < base_c * 11 / 10);
     tap(REC(1)); CHECK(state(1) == S_DUB); tap(REC(1));             /* overdub back at 1x */
 
@@ -564,11 +564,12 @@ int main(int argc, char **argv) {
         CHECK(abs(barbins[0] - 32) <= 1 && abs(barbins[2] - 96) <= 1);
         /* clip start moved half a bar: the grid follows it, in both directions */
         setstr("loop_knob", "1:8");
+        run(1000);                                                  /* let the Loop+knob zoom end: MIX shows IN..OUT */
         n = disp_ticks(tk); nb = 0; np = disp_phrase(ph);
         for (int i = 0; i < n; i++) if (!(tk[i] & 0x80)) barbins[nb++] = tk[i];
-        CHECK(nb == 3 && abs(barbins[0] - 48) <= 1 && abs(barbins[2] - 112) <= 1);
-        CHECK(np == 1 && abs(ph[0] - 16) <= 1);                        /* bar 1 = off */
-        CHECK((tk[0] & 0x80) && (tk[0] & 0x7F) <= 1);                 /* a beat tick before the clip start (bin ~0) */
+        CHECK(nb == 3 && abs(barbins[0] - 37) <= 1 && abs(barbins[2] - 110) <= 1);      /* region = 3.5 bars scaled to 128, bars counted from IN */
+        CHECK(np == 1 && ph[0] == 0);                                  /* bar 1 = IN = bin 0 */
+        CHECK(!(tk[0] & 0x80) || (tk[0] & 0x7F) >= 8);                /* nothing before IN: the view starts there */
         /* 8-bar loop at 120 bpm: phrase ticks at bars 1 and 5 (bins 0, 64), the other 6 are bar ticks */
         setstr("loop_knob", "1:0");
         fresh(&host); seti("quantize", 0); in_mode = IN_SINE; bpm_val = 120.0f;
@@ -580,10 +581,11 @@ int main(int argc, char **argv) {
         for (int i = 0; i < n; i++) if (!(tk[i] & 0x80)) bars++;
         CHECK(np == 2 && ph[0] == 0 && abs(ph[1] - 64) <= 1);
         CHECK(bars == 6);
-        setstr("loop_knob", "1:8");                                    /* off moved half a bar: the grid follows */
+        setstr("loop_knob", "1:8");                                    /* off moved half a bar: the view starts at IN */
+        run(1000);
         n = disp_ticks(tk); np = disp_phrase(ph);
-        CHECK(np == 2 && abs(ph[0] - 8) <= 1 && abs(ph[1] - 72) <= 1);
-        setstr("loop_knob", "1:0");
+        CHECK(np == 2 && ph[0] == 0 && abs(ph[1] - 68) <= 1);         /* 7.5 bars over 128 px: bar 5 at 4/7.5 */
+        setstr("loop_knob", "1:0"); run(1000);
         /* slower than 4 px per beat -> bars only (60 bpm keeps 4 bars x 4 beats = 16 beats over 128 px?) */
         bpm_val = 480.0f; run(2); n = disp_ticks(tk);                 /* 1 beat = 5512 frames; px/beat ~ 2 -> bars only */
         beats = 0; for (int i = 0; i < n; i++) if (tk[i] & 0x80) beats++;
@@ -605,7 +607,7 @@ int main(int argc, char **argv) {
         p1 = disp_pos(); run(5); p2 = disp_pos();
         int back = (p1 - p2 + 128) % 128;
         CHECK(back >= 1 && back <= 5);                              /* reversed: right to left */
-        seti("trk_spd", 2);
+        seti("trk_spd", 5);
         p1 = disp_pos(); run(5); p2 = disp_pos();
         back = (p1 - p2 + 128) % 128;
         CHECK(back >= 3 && back <= 9);                              /* 2x reverse: about twice as fast, still leftwards */
@@ -613,11 +615,11 @@ int main(int argc, char **argv) {
         p1 = disp_pos(); run(5); p2 = disp_pos();
         fwd = (p2 - p1 + 128) % 128;
         CHECK(fwd >= 3 && fwd <= 9);                                /* 2x forward */
-        seti("trk_spd", 0);
+        seti("trk_spd", 1);
         p1 = disp_pos(); run(10); p2 = disp_pos();
         fwd = (p2 - p1 + 128) % 128;
         CHECK(fwd >= 1 && fwd <= 5);                                /* 1/2x: 10 blocks = 5 blocks at 1x */
-        seti("trk_spd", 1);
+        seti("trk_spd", 3);
     }
 
     /* --- step buttons = fixed recording length --- */
@@ -708,7 +710,7 @@ int main(int argc, char **argv) {
         tap(STOP(1)); tap(STOP(1)); run(2);
         out_peak = 0; run(3000); CHECK(out_peak < 100);               /* 4+ cycles: the loud half never sounds */
         seti("trk_rev", 0);
-        seti("trk_spd", 2); out_peak = 0; run(3000); CHECK(out_peak < 100); seti("trk_spd", 1);
+        seti("trk_spd", 5); out_peak = 0; run(3000); CHECK(out_peak < 100); seti("trk_spd", 3);
         tap(STOP(1)); tap(STOP(1)); run(2);
         out_peak = 0; run(3000); CHECK(out_peak < 100);               /* forward: the same, over several cycles */
 
@@ -721,18 +723,21 @@ int main(int argc, char **argv) {
         CHECK(abs(gett(1, "off") - 44100) <= 3);
         tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
         tap(STOP(1)); run(1);
+        tap(FX(1));                                                   /* PISTA: whole buffer, bins = buffer position */
         CHECK(disp_peak(64) > 0);                                     /* the dub is at buffer L/2... */
         CHECK(disp_peak(10) > 100 && disp_peak(100) == 0);            /* ...and the rest of the loop is as recorded */
         /* undo of the dub restores the quiet half, clear + undo restores the start */
         UNDO(); run(200); CHECK(disp_peak(64) == 0);
         REDO(); run(200);
+        tap(FX(1)); CHECK(geti("sel") == 0);
         seti("delete_pad", REC(1) - 36); CHECK(state(1) == S_EMPTY);
         CHECK(gett(1, "off") == 0 && disp_mark() == -1);
         UNDO(); CHECK(state(1) == S_STOP); CHECK(abs(gett(1, "off") - 44100) <= 3);
         seti("delete_pad", REC(1) - 36); UNDO();
         /* a moved start is shown on the display even after the readout fades */
         in_mode = IN_SINE; run(1200); in_mode = IN_SILENCE;
-        CHECK(abs(disp_mark() - 63) <= 2 && strncmp(disp_head(), "START", 5) != 0);
+        CHECK(disp_mark() == -1 && strncmp(disp_head(), "START", 5) != 0);   /* MIX shows IN..OUT only: no marker */
+        tap(FX(1)); CHECK(abs(disp_mark() - 63) <= 2); tap(FX(1));          /* the PISTA overview marks IN */
     }
 
     /* --- clip start is a real trim: [off, len) only, cycle = len - off --- */
@@ -928,10 +933,10 @@ int main(int argc, char **argv) {
         setstr("step", "0"); CHECK(gett(1, "off") < gett(1, "len"));
         UNDO(); CHECK(gett(1, "off") == off && gett(1, "len") == L4);
         /* reverse + varispeed keep working on a resized clip */
-        sett(1, "rev", 1); sett(1, "spd", 2);
+        sett(1, "rev", 1); sett(1, "spd", 5);
         setstr("step", "1"); run(50); out_peak = 0; run(100); CHECK(out_peak > 100);
         CHECK(gett(1, "off") < gett(1, "len") && state(1) == S_PLAY);
-        sett(1, "rev", 0); sett(1, "spd", 1);
+        sett(1, "rev", 0); sett(1, "spd", 3);
         /* the selected track decides: an empty one still sets the next-rec length */
         seti("cur_track", 4); setstr("step", "5");
         CHECK(geti("rec_len") == 6 && !strcmp(status_text(), "LEN 6 BARS") && step_led(5) == 120);
@@ -1053,13 +1058,19 @@ int main(int argc, char **argv) {
         setstr("knob_delta", "5:-3"); CHECK(gett(1, "fx") == 5 && gett(1, "fxp") == 0);   /* type changes keep the amount */
 
         /* K7 speed, K8 reverse */
-        CHECK(gett(1, "spd") == 1);
-        setstr("knob_delta", "7:2"); CHECK(gett(1, "spd") == 1);
-        setstr("knob_delta", "7:1"); CHECK(gett(1, "spd") == 2 && !strcmp(status_text(), "T1 SPD 2X"));
-        setstr("knob_delta", "7:30"); CHECK(gett(1, "spd") == 2);
-        setstr("knob_delta", "7:-3"); setstr("knob_delta", "7:-3"); CHECK(gett(1, "spd") == 0 && !strcmp(status_text(), "T1 SPD 1/2X"));
+        CHECK(gett(1, "spd") == 3);
+        setstr("knob_delta", "7:2"); CHECK(gett(1, "spd") == 3);
+        setstr("knob_delta", "7:1"); CHECK(gett(1, "spd") == 4 && !strcmp(status_text(), "T1 SPD x1.5"));
+        setstr("knob_delta", "7:3"); CHECK(gett(1, "spd") == 5 && !strcmp(status_text(), "T1 SPD x2"));
+        setstr("knob_delta", "7:3"); CHECK(gett(1, "spd") == 6 && !strcmp(status_text(), "T1 SPD x4"));
+        setstr("knob_delta", "7:30"); CHECK(gett(1, "spd") == 6);
+        for (int i = 0; i < 3; i++) setstr("knob_delta", "7:-3");
+        CHECK(gett(1, "spd") == 3 && !strcmp(status_text(), "T1 SPD x1"));
+        setstr("knob_delta", "7:-3"); CHECK(gett(1, "spd") == 2 && !strcmp(status_text(), "T1 SPD x3/4"));
+        setstr("knob_delta", "7:-3"); setstr("knob_delta", "7:-3"); CHECK(gett(1, "spd") == 0 && !strcmp(status_text(), "T1 SPD x1/4"));
         setstr("knob_delta", "7:-3"); CHECK(gett(1, "spd") == 0);
-        setstr("knob_delta", "7:3"); CHECK(gett(1, "spd") == 1);
+        for (int i = 0; i < 3; i++) setstr("knob_delta", "7:3");
+        CHECK(gett(1, "spd") == 3);
         CHECK(gett(1, "rev") == 0);
         setstr("knob_delta", "8:3"); CHECK(gett(1, "rev") == 1 && !strcmp(status_text(), "T1 REV ON"));
         setstr("knob_delta", "8:30"); CHECK(gett(1, "rev") == 1);
@@ -1187,6 +1198,114 @@ int main(int argc, char **argv) {
         /* junk and stray releases are ignored */
         setstr("pedal", "7:d"); setstr("pedal", "0:d"); setstr("pedal", "x"); setstr("pedal", "2:u"); setstr("pedal", "");
         CHECK(state(5) == S_PLAY && geti("cur_track") == 5);
+    }
+
+
+    /* --- 0.6.1: speed ratios 1/4 1/2 3/4 1 1.5 2 4: cycle length, playhead, old-state mapping --- */
+    {
+        static const double RATIO[7] = { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0 };
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE; seti("monitor", 0);
+        tap(REC(1)); run(345); tap(REC(1)); run(4);
+        CHECK(state(1) == S_PLAY && geti("trk_spd") == 3);
+        double reg = (double)(gett(1, "len") - gett(1, "off"));
+        setstr("loop_knob", "1:4"); run(1000);                      /* a clip start: region = len - off, ends the zoom */
+        reg = (double)(gett(1, "len") - gett(1, "off"));
+        for (int rev = 0; rev < 2; rev++)
+            for (int k = 0; k < 7; k++) {
+                if (rev && k != 4 && k != 6 && k != 0) continue;
+                seti("trk_rev", rev); seti("trk_spd", k); run(2);
+                int want = (int)lround(reg / RATIO[k] / 128.0), blocks = 0, wraps = 0, first = -1, last = -1, prev = disp_pos(), mono = 1;
+                for (int b = 0; b < want * 3 + 20 && wraps < 3; b++) {
+                    run(1); blocks++;
+                    int p = disp_pos();
+                    int d = rev ? prev - p : p - prev;
+                    if (d < -64) { if (first < 0) first = blocks; last = blocks; wraps++; }
+                    else if (d < 0) mono = 0;
+                    prev = p;
+                }
+                /* two or more wraps: time between the first and the last / count */
+                int cyc = wraps >= 2 ? (last - first) / (wraps - 1) : 0;
+                CHECK(wraps >= 2 && abs(cyc - want) <= 2 + want / 40);
+                CHECK(mono);                                        /* the head never goes backwards inside the cycle */
+                out_peak = 0; run(want / 2 + 3); CHECK(out_peak > 200);   /* audible at every ratio, rev or not */
+                tap(REC(1)); CHECK(state(1) == (k == 3 && !rev ? S_DUB : S_PLAY));   /* no overdub unless 1x forward */
+                if (state(1) == S_DUB) tap(REC(1));
+            }
+        seti("trk_rev", 0); seti("trk_spd", 3);
+        /* one-shot at 4x stops after region/4 */
+        sett(1, "shot", 1); seti("trk_spd", 6); run(2); tap(STOP(1)); tap(STOP(1)); run(2);
+        int played = 0; for (int b = 0; b < 400 && state(1) == S_PLAY; b++) { run(1); played++; }
+        CHECK(state(1) == S_STOP && abs(played - (int)(reg / 4.0 / 128.0)) <= 3);
+        sett(1, "shot", 0); seti("trk_spd", 3);
+        /* old states: l6sp 0/1/2 = 1/2x, 1x, 2x -> index 1/3/5; the new l6sq index passes through */
+        setstr("state", "{\"l6rl\":0,\"l6sp\":\"0,1,2,2,1,0\"}");
+        CHECK(gett(1, "spd") == 1 && gett(2, "spd") == 3 && gett(3, "spd") == 5 && gett(4, "spd") == 5 && gett(5, "spd") == 3 && gett(6, "spd") == 1);
+        setstr("state", "{\"l6rl\":0,\"l6sq\":\"0,6,2,3,4,5\"}");
+        CHECK(gett(1, "spd") == 0 && gett(2, "spd") == 6 && gett(3, "spd") == 2 && gett(4, "spd") == 3 && gett(5, "spd") == 4 && gett(6, "spd") == 5);
+        A->get_param(S, "state", dbuf, sizeof dbuf);
+        CHECK(strstr(dbuf, "\"l6sq\":\"0,6,2,3,4,5\"") != NULL);
+        fresh(&host);
+        CHECK(geti("t1_spd") == 3);                                 /* default stays 1x */
+    }
+
+    /* --- 0.6.1: waveform zoom on IN / OUT --- */
+    {
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE; bpm_val = 120.0f;
+        for (int i = 0; i < 4; i++) tap(R_FIXLEN);                  /* 8 bars: 705600 frames */
+        tap(REC(1)); run(5600); run(4);
+        CHECK(state(1) == S_PLAY);
+        long BAR = 88200, L8 = gett(1, "len");
+        CHECK(labs(L8 - 8 * BAR) < 100);
+        int tk[200], ph[64], np;
+        tap(FX(1));                                                 /* PISTA 1 */
+        run(1000);
+        /* idle PISTA: the whole buffer, no zoom; both markers, IN at 0 */
+        CHECK(strstr(disp_head(), "ZOOM") == NULL && disp_mark() == 0 && disp_end() == 127);
+        /* IN to bar 4 (four K1 turns of a bar): window = 2 bars centred on it */
+        int seq0; disp(); seq0 = atoi(dbuf);
+        for (int i = 0; i < 4; i++) setstr("knob_delta", "1:16");
+        CHECK(labs(gett(1, "off") - 4 * BAR) <= 4);
+        disp(); CHECK(atoi(dbuf) != seq0);                          /* window changed -> new seq */
+        CHECK(strstr(disp_head(), "IN") && strstr(disp_head(), "ZOOM"));
+        CHECK(abs(disp_mark() - 64) <= 1 && disp_end() == -1);      /* IN centred, OUT (bar 8) outside [3,5) */
+        { int n = disp_ticks(tk), beats = 0; np = disp_phrase(ph);
+          for (int i = 0; i < n; i++) if (tk[i] & 0x80) beats++;
+          CHECK(n == 7 && beats == 6 && np == 1 && abs(ph[0] - 64) <= 1);   /* 2 bars: bar tick at 0, phrase tick at IN (bar 1 of its phrase), 6 beats */
+          CHECK(!(tk[0] & 0x80) && tk[0] <= 1); }
+        /* fine (SHIFT) = half a bar window; IN moves by a 1/64 note */
+        down(M_SHIFT); setstr("knob_delta", "1:1"); up(M_SHIFT);
+        { int n = disp_ticks(tk); CHECK(n <= 3 && strstr(disp_head(), "ZOOM") && disp_mark() >= 0); }
+        /* playhead stays inside 0..127 whatever the window */
+        for (int i = 0; i < 50; i++) { run(100); int p = disp_pos(); CHECK(p >= 0 && p < 128); }
+        /* the timer ends the zoom: whole buffer again, markers in buffer coordinates */
+        run(1000);
+        CHECK(strstr(disp_head(), "ZOOM") == NULL);
+        CHECK(abs(disp_mark() - 64) <= 2 && disp_end() == 127);
+        /* OUT: K2 down a bar -> window [6,8) bars centred on OUT = 7 bars, clamped */
+        setstr("knob_delta", "2:-16");
+        CHECK(labs(gett(1, "len") - 7 * BAR) <= 4);
+        CHECK(strstr(disp_head(), "OUT") && strstr(disp_head(), "ZOOM"));
+        CHECK(abs(disp_end() - 64) <= 1 && disp_mark() == -1);      /* IN (bar 4) is left of the window */
+        { int n = disp_ticks(tk); np = disp_phrase(ph); CHECK(n == 8 && np == 0); }
+        /* clamped at the buffer start: IN at 0.5 bar -> window [0,2) bars, IN at bin 16 */
+        setstr("knob_delta", "2:16"); run(1000);
+        for (int i = 0; i < 6; i++) setstr("knob_delta", "1:-16");
+        CHECK(gett(1, "off") == 0);
+        setstr("knob_delta", "1:8");
+        CHECK(abs(disp_mark() - 32) <= 1 && strstr(disp_head(), "ZOOM"));   /* 0.5 bar into [0,2) bars */
+        { int n = disp_ticks(tk); np = disp_phrase(ph); CHECK(n > 0); }
+        /* MIX: only IN..OUT, scaled to the full width (no zoom, no markers), ticks from IN */
+        run(1000); tap(FX(1)); CHECK(geti("sel") == 0);
+        CHECK(strstr(disp_head(), "ZOOM") == NULL && disp_mark() == -1 && disp_end() == -1);
+        { int n = disp_ticks(tk); np = disp_phrase(ph);
+          int bars = 0; for (int i = 0; i < n; i++) if (!(tk[i] & 0x80)) bars++;
+          /* region = 7.5 bars: bar 1 (IN) and bar 5 are phrase ticks at 0 and 68, bars 2-4 and 6-8 are bar ticks */
+          CHECK(np == 2 && ph[0] == 0 && abs(ph[1] - 68) <= 1 && bars == 6); }
+        /* a short clip never zooms: the whole buffer shows */
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE; bpm_val = 120.0f;
+        tap(R_FIXLEN); tap(REC(1)); run(700); run(4);               /* 1 bar */
+        tap(FX(1)); setstr("knob_delta", "1:4");
+        CHECK(strstr(disp_head(), "ZOOM") == NULL && abs(disp_mark() - 32) <= 1);
     }
 
     /* --- nothing crashes on garbage --- */

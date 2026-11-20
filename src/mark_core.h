@@ -138,6 +138,9 @@ void mark_on_midi(mark_t *m, const uint8_t *msg, int len, int source);
 void mark_set_param(mark_t *m, const char *key, const char *val);
 int  mark_get_param(mark_t *m, const char *key, char *buf, int buf_len);
 /* Peak overview of track ti (0-based) for a screen: see mark_core.c. */
+int  mark_track_wave_win(mark_t *m, int ti, int bins, uint8_t *out, uint32_t lo, uint32_t hi, int *pos);
+#define MK_SPD_N  7
+#define MK_SPD_1X 3
 int  mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_frames, int *pos);
 /* Clip start of track ti as a bin of the overview (-1 = empty). */
 int  mark_track_start_bin(mark_t *m, int ti, int bins);

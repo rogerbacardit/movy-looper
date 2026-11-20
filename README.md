@@ -27,14 +27,16 @@ fila 1  TODO     REC/   REC/   REC/   REC/   REC/   REC/   Quantize
 
 | Knob | Vista PISTA (pista seleccionada) |
 |---|---|
-| K1 | IN: inicio del clip (rejilla 1/16; SHIFT = fino 1/64) |
-| K2 | OUT: fin/largo del loop (rejilla 1/16; SHIFT = fino 1/64; nunca menos de 1/16; acortar no destruye; una racha de giros = un paso de Undo; la onda muestra todo lo grabado con marcas de inicio y fin) |
+| K1 | IN: inicio del clip (rejilla 1/16; SHIFT = fino 1/64). Mientras lo giras (y 2,5 s despues) la onda hace ZOOM: ventana de 2 compases centrada en IN (1/2 compas con SHIFT), cabecera `PISTA 3 IN +8/16 ZOOM` |
+| K2 | OUT: fin/largo del loop (rejilla 1/16; SHIFT = fino 1/64; nunca menos de 1/16; acortar no destruye; una racha de giros = un paso de Undo; la onda muestra todo lo grabado con marcas de inicio y fin; mientras lo giras hace ZOOM de 2 compases centrado en OUT, igual que K1) |
 | K3 | Volumen de la pista |
 | K4 | Pan |
 | K5 | Tipo de FX: OFF / LPF / HPF / CRUSH / DELAY / PHASER / RING (3 clics por paso) |
 | K6 | Cantidad de FX |
-| K7 | Velocidad 1/2x / 1x / 2x (3 clics por paso) |
+| K7 | Velocidad x1/4, x1/2, x3/4, x1, x1.5, x2, x4 (3 clics por paso; por defecto x1; sin overdub si no es x1) |
 | K8 | Reverse off / on (3 clics) |
+
+**Onda:** en vista PISTA (sin tocar IN/OUT) se ve todo el buffer con las marcas IN/OUT; en MIX solo la region que suena (IN..OUT) a todo el ancho, con los compases contados desde IN, asi que el clip cambia de tamano al recortarlo. Al mover IN/OUT (K1/K2 o Loop + knob) la vista hace zoom sobre ese punto (2 compases, 1/2 con fino; el buffer entero si el clip es mas corto) y vuelve sola 2,5 s despues de la ultima vuelta. Los estados guardados antiguos (velocidad 1/2x, 1x, 2x) se cargan como x1/2, x1, x2.
 
 En MIX (nada seleccionado): K1-K6 volumenes de las pistas, K7 entrada, K8 master. Ya no existe el pad MODO (START/END/PAN/FX global desaparecen: sus funciones estan en los knobs de la vista PISTA).
 
@@ -92,7 +94,7 @@ Los loops sobreviven a cerrar/recargar Movy y a apagar la Move.
 ## Knobs (paginas)
 
 - **Mezclador (pagina inicial):** K1-K6 volumen de las pistas 1-6, K7 volumen de entrada, K8 master.
-- **Track** (pista = el ultimo pad tocado): tipo de FX, cantidad de FX, pan, reverse, one-shot, velocidad (1/2x, 1x, 2x, estilo cinta: cambia el tono; funciona con reverse; no se sobregraba con velocidad distinta de 1x).
+- **Track** (pista = el ultimo pad tocado): tipo de FX, cantidad de FX, pan, reverse, one-shot, velocidad (x1/4, x1/2, x3/4, x1, x1.5, x2, x4, estilo cinta: cambia el tono; funciona con reverse; no se sobregraba con velocidad distinta de x1).
 - **Setup:** umbral de ARM, quantize, largo fijo, Rec Action, count-in, BPM manual (0 = automatico), monitor, arm.
 - **Status:** estado de cada pista (solo lectura): Empty / Armed / Rec / Play / Dub / Stop / Mute. Los pads no tienen luces, la pantalla es el unico aviso.
 

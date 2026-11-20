@@ -166,7 +166,7 @@ typedef struct {
     int      level;        /* 0..200, 100 = unity (RC play level) */
     int      pan;          /* 0..100, 50 = center */
     int      rev, shot;
-    int      spd;          /* L606 varispeed: 0 = 1/2x, 1 = 1x, 2 = 2x */
+    int      spd;          /* L606 varispeed index 0..6 = 1/4, 1/2, 3/4, 1, 1.5, 2, 4 x (3 = 1x) */
     uint32_t off;          /* L606 clip start: frames into the buffer where the
                               loop begins (0 <= off < len). Playback plays
                               buffer frames [off, len) only; pos runs
@@ -582,7 +582,7 @@ static mk_track_t *base_playing(mark_t *m) {
     mk_track_t *any = NULL;
     for (int i = 0; i < MARK_TRACKS; i++)
         if (m->t[i].len > 0 && (m->t[i].st == MK_PLAY || m->t[i].st == MK_DUB)) {
-            if (m->t[i].spd == 1) return &m->t[i];   /* L606: grid follows a 1x track */
+            if (m->t[i].spd == MK_SPD_1X) return &m->t[i];   /* L606: grid follows a 1x track */
             if (!any) any = &m->t[i];
         }
     return any;
@@ -981,7 +981,7 @@ mark_t *mark_create_in_dir(const host_api_v1_t *host, const char *module_dir) {
         m->t[i].level = 100;
         m->t[i].pan = 50;
         m->t[i].g_cur = 1.0f;
-        m->t[i].spd = 1;
+        m->t[i].spd = MK_SPD_1X;
         m->t[i].fx = TFX_LPF;      /* a sensible default once switched on */
         m->t[i].fxp = 50;
         m->t[i].fx_dirty = 1;
@@ -1236,13 +1236,14 @@ void mark_on_midi(mark_t *m, const uint8_t *msg, int len, int source) {
 /* ------------------------------------------------------------------ */
 
 /* L606 varispeed: playback rate in frames per output frame. */
+static const double SPD_RATE[MK_SPD_N] = { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0 };
 static inline double spd_rate(const mk_track_t *t) {
-    return t->spd == 0 ? 0.5 : t->spd == 2 ? 2.0 : 1.0;
+    return SPD_RATE[t->spd < 0 || t->spd >= MK_SPD_N ? MK_SPD_1X : t->spd];
 }
 
 /* No overdub on reversed or varispeed tracks: the write head would skip or
  * repeat frames, and the undo capture assumes a contiguous region. */
-static inline int no_dub(const mk_track_t *t) { return t->rev || t->spd != 1; }
+static inline int no_dub(const mk_track_t *t) { return t->rev || t->spd != MK_SPD_1X; }
 
 /* L606: the loop plays buffer frames [off, len); region length = len - off. */
 static inline uint32_t reg_len(const mk_track_t *t) {
@@ -1976,10 +1977,11 @@ static void *io_worker(void *arg) {
                     ? (t->full_len > t->len ? t->full_len : t->len) : 0;
                 fprintf(f, ",\"l%d\":%u,\"F%d\":%u,\"v%d\":%d,\"p%d\":%d,"
                            "\"r%d\":%d,\"s%d\":%d,\"f%d\":%d,\"o%d\":%d,"
-                           "\"g%d\":%d,\"w%d\":%d,\"x%d\":\"%s\"",
+                           "\"g%d\":%d,\"w%d\":%d,\"q%d\":%d,\"x%d\":\"%s\"",
                         i + 1, t->len, i + 1, full, i + 1, t->level,
                         i + 1, t->pan, i + 1, t->rev, i + 1, t->shot,
                         i + 1, t->fx, i + 1, t->fx_on, i + 1, t->fxp,
+                        i + 1, t->spd < MK_SPD_1X ? 0 : t->spd == MK_SPD_1X ? 1 : 2,
                         i + 1, t->spd, i + 1, job->fx_id[i]);
             }
             for (int i = 0; i < MARK_TRACKS; i++)
@@ -2043,7 +2045,12 @@ static void *io_worker(void *arg) {
                 snprintf(k, sizeof(k), "s%d", i + 1);
                 t->shot = json_int(js, k, 0) ? 1 : 0;
                 snprintf(k, sizeof(k), "w%d", i + 1);
-                t->spd = clampi(json_int(js, k, 1), 0, 2);
+                /* "w" = pre-0.6.1 value 0/1/2 (1/2x, 1x, 2x): maps to index 1/3/5;
+                 * "q" = the 7-step index, wins when present */
+                { static const int OLD[3] = { 1, 3, 5 };
+                  t->spd = OLD[clampi(json_int(js, k, 1), 0, 2)];
+                  snprintf(k, sizeof(k), "q%d", i + 1);
+                  t->spd = clampi(json_int(js, k, t->spd), 0, MK_SPD_N - 1); }
                 snprintf(k, sizeof(k), "f%d", i + 1);
                 t->fx = clampi(json_int(js, k, TFX_LPF), 0, TFX_COUNT - 1);
                 snprintf(k, sizeof(k), "o%d", i + 1);
@@ -2535,7 +2542,7 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
             if (ip >= rlen) ip = rlen - 1;
             uint32_t rp = play_index(t, ip);
             float l, r;
-            if (t->spd == 1) {
+            if (t->spd == MK_SPD_1X) {
                 tbuf_load(t->buf, rp, &l, &r);
             } else {
                 /* L606 varispeed read: linear interpolation between the two
@@ -2720,8 +2727,8 @@ void mark_set_param(mark_t *m, const char *key, const char *val) {
             m->edit_rev++;
             return;
         }
-        if (!strcmp(k, "spd")) {            /* L606: 0 = 1/2x, 1 = 1x, 2 = 2x */
-            t->spd = clampi(atoi(val), 0, 2);
+        if (!strcmp(k, "spd")) {            /* L606: index 0..6 = 1/4 1/2 3/4 1 1.5 2 4 x */
+            t->spd = clampi(atoi(val), 0, MK_SPD_N - 1);
             if (no_dub(t) && t->st == MK_DUB) {
                 t->st = MK_PLAY;
                 end_dub_capture(m, ti);
@@ -2949,6 +2956,55 @@ int mark_track_wave_ex(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span
     for (int b = 0; b < bins; b++) {
         uint64_t a = (uint64_t)span * (uint64_t)b / (uint64_t)bins;
         uint64_t e = (uint64_t)span * (uint64_t)(b + 1) / (uint64_t)bins;
+        if (a >= avail) break;
+        if (e > avail) e = avail;
+        uint64_t stride = (e - a) / 256 + 1;
+        int pk = 0;
+        for (uint64_t f = a; f < e; f += stride) {
+            float lf, rf;
+            tbuf_load(t->buf, (uint32_t)f, &lf, &rf);
+            int l = (int)fabsf(lf), r = (int)fabsf(rf);
+            if (l > pk) pk = l;
+            if (r > pk) pk = r;
+        }
+        if (pk > 32767) pk = 32767;
+        out[b] = (uint8_t)(sqrtf((float)pk / 32768.0f) * 255.0f);
+    }
+    return 1;
+}
+
+/* L606 zoom view: peaks of buffer frames [lo, hi) in `bins` bins (out may be
+ * NULL), and the playhead as a bin of that window (*pos: -1 before the window, -2 after it). Frames at or past the buffer end read as silence. Same strided
+ * scan as mark_track_wave_ex. Returns 0 when the track has no audio. */
+int mark_track_wave_win(mark_t *m, int ti, int bins, uint8_t *out, uint32_t lo, uint32_t hi, int *pos) {
+    if (!m || ti < 0 || ti >= MARK_TRACKS || bins < 1 || hi <= lo) return 0;
+    const mk_track_t *t = &m->t[ti];
+    if (pos) {
+        *pos = -1;
+        if (t->len && t->st != MK_REC) {
+            uint32_t rl = reg_len(t);
+            uint32_t ip = (uint32_t)t->pos;
+            if (ip >= rl) ip = rl - 1;
+            double fr = t->pos - (double)ip;
+            double x = (double)play_index(t, ip) + (t->rev ? -fr : fr);
+            if (x < (double)t->off) x = (double)t->off;
+            else if (x >= (double)t->len) x = (double)t->len - 1e-3;
+            if (x < (double)lo) *pos = -1;            /* before the window */
+            else if (x >= (double)hi) *pos = -2;      /* after it */
+            else {
+                int p = (int)((x - (double)lo) * bins / (double)(hi - lo));
+                *pos = p < 0 ? 0 : p >= bins ? bins - 1 : p;
+            }
+        }
+    }
+    if (!out) return t->len != 0;
+    memset(out, 0, (size_t)bins);
+    uint32_t avail = t->full_len > t->len ? t->full_len : t->len;
+    if (!t->buf || avail == 0 || t->st == MK_REC) return 0;
+    uint64_t span = hi - lo;
+    for (int b = 0; b < bins; b++) {
+        uint64_t a = (uint64_t)lo + span * (uint64_t)b / (uint64_t)bins;
+        uint64_t e = (uint64_t)lo + span * (uint64_t)(b + 1) / (uint64_t)bins;
         if (a >= avail) break;
         if (e > avail) e = avail;
         uint64_t stride = (e - a) / 256 + 1;
