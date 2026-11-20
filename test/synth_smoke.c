@@ -182,6 +182,7 @@ static unsigned (*pf_latch_mask)(const perf_t *); static unsigned (*pf_on_mask)(
 static int (*pf_top)(const perf_t *); static int (*pf_held)(const perf_t *);
 static int (*pf_entry_fn)(const perf_t *, int, int *, int *, int *, int *);
 #define perf_entry_ok pf_entry_fn
+static int api_x_k = -1, api_x_v = 0;      /* optional 2nd knob set by api_tones on pct_fx */
 static void api_init(void *h) {
     *(void **)&pf_create = dlsym(h, "perf_create"); *(void **)&pf_destroy = dlsym(h, "perf_destroy");
     *(void **)&pf_press = dlsym(h, "perf_press"); *(void **)&pf_release = dlsym(h, "perf_release");
@@ -198,6 +199,7 @@ static void api_tones(int nfx, const int *fxs, int pct_fx, int pct_k, int pct_v,
         p = pf_create();
         for (int i = 0; i < nfx; i++) pf_press(p, fxs[i], 0, 0);
         if (pct_fx >= 0) pf_pct_set(p, pct_fx, pct_k, pct_v);
+        if (pct_fx >= 0 && api_x_k >= 0) pf_pct_set(p, pct_fx, api_x_k, api_x_v);
         double f = tone ? f2 : f1, w = 0;
         for (long n = 0; n < 44100; n++) {
             if (n % 128 == 0) pf_begin(p, (double)n, 9600.0);
@@ -1585,24 +1587,39 @@ int main(int argc, char **argv) {
         setstr("step_up", "6"); CHECK(geti("perf_fx") == -1);
         up(M_SHIFT); setstr("step", "3"); setstr("step_up", "3");
 
-        /* knobs: each effect remembers its settings */
-        down(M_SHIFT);
-        for (int fx = 0; fx < 8; fx++) {
-            char b[8], k[8]; snprintf(b, sizeof b, "%d", fx);
-            char key[16]; snprintf(key, sizeof key, "perf_p%d_0", fx);
-            int before = geti(key);
-            setstr("step", b); setstr("knob_delta", "1:5"); setstr("step_up", b); run(110);
-            int nk = fx == 0 ? 3 : fx == 3 || fx == 7 ? 2 : fx == 6 ? 0 : 1;
-            if (nk) CHECK(geti(key) == before + 10); else CHECK(geti(key) == before);
-            setstr("step", b); CHECK(geti(key) == (nk ? before + 10 : before)); setstr("step_up", b); run(110);   /* remembered */
-            if (nk > 1) { snprintf(k, sizeof k, "2:-3"); snprintf(key, sizeof key, "perf_p%d_1", fx); int b1 = geti(key);
-                          setstr("step", b); setstr("knob_delta", k); setstr("step_up", b); run(110); CHECK(geti(key) == (b1 - 6 < 0 ? 0 : b1 - 6)); }
-            setstr("step", b); setstr("knob_delta", "8:5"); setstr("step_up", b); run(110);   /* an unused knob is ignored */
+        /* knobs: every effect has exactly NK real knobs; each one moves, is remembered, and the screen boxes only those */
+        static const int NK[16] = { 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 3, 3, 2, 3 };
+        CHECK(!strcmp(screen(), "")); down(M_SHIFT); run(8); screen(); CHECK(geti("perf_boxes") == 0);   /* the grid page has no knob boxes */
+        for (int fx = 0; fx < 16; fx++) {
+            char b[8]; snprintf(b, sizeof b, "%d", fx);
+            for (int k = 1; k <= 4; k++) {
+                char key[24], kd[16]; snprintf(key, sizeof key, "perf_p%d_%d", fx, k - 1);
+                int before = geti(key);
+                setstr("step", b);                                  /* turned right after the press, no block in between */
+                snprintf(kd, sizeof kd, "%d:3", k); setstr("knob_delta", kd);
+                int after = geti(key);
+                if (k <= NK[fx] && after == before) { snprintf(kd, sizeof kd, "%d:-3", k); setstr("knob_delta", kd); after = geti(key); }
+                if (k <= NK[fx]) CHECK(after != before); else CHECK(after == before);          /* a knob that does not exist is ignored */
+                if (k == 1) { run(60); screen(); CHECK(geti("perf_boxes") == NK[fx]); }       /* boxes == real knobs */
+                setstr("step_up", b); run(110);
+                setstr("step", b); CHECK(geti(key) == after); setstr("step_up", b); run(110);  /* remembered */
+            }
         }
         up(M_SHIFT);
-        CHECK(geti("perf_p0_0") == 30 && geti("perf_p1_0") == 43 && geti("perf_p6_0") == 0);
-        setstr("knob_delta", "1:5");                              /* no effect held, MIX: knobs are not ours */
-        CHECK(geti("perf_p0_0") == 30);
+        { int a0 = geti("perf_p0_0");
+          setstr("knob_delta", "1:5");                              /* no effect held, MIX: knobs are not ours */
+          CHECK(geti("perf_p0_0") == a0); }
+        /* latched only, SHIFT held: the knobs reach the effect; without SHIFT (MIX) they do not */
+        fresh(&host); seti("quantize", 0);
+        down(M_SHIFT); setstr("step", "8"); run(3); setstr("step_up", "8"); run(3); setstr("step", "8"); setstr("step_up", "8");
+        CHECK(geti("perf_latch") == 1 << 8 && geti("knob_capture") == 1);
+        { int c = geti("perf_p8_2"), r = geti("perf_p8_1");
+          setstr("knob_delta", "3:1"); CHECK(geti("perf_p8_2") != c);
+          setstr("knob_delta", "2:5"); CHECK(geti("perf_p8_1") == r + 10); }
+        up(M_SHIFT); CHECK(geti("knob_capture") == 0);
+        { int c = geti("perf_p8_2"); setstr("knob_delta", "3:1"); CHECK(geti("perf_p8_2") == c); }
+        down(M_SHIFT); setstr("step", "8"); setstr("step_up", "8"); up(M_SHIFT);
+        CHECK(geti("perf_n") == 0);
 
         /* beat repeat: the captured slice repeats at the rate grid (the first loop is the grid: 300 blocks = 4 beats, so 1/8 = 4800 frames) */
         scen(eff, PF_BEATREP, 1, IN_RICH, 200, 20, "2:-20", 1);
@@ -1718,6 +1735,57 @@ int main(int argc, char **argv) {
         }
         up(M_SHIFT);
         CHECK(geti("perf_p14_0") == 100 && geti("perf_p15_0") == 100);          /* HALF 1/4 is the last option, KILL HIGH the last */
+
+        /* K2 / K3 of every effect change the sound; mix at 0 is the dry signal bit for bit */
+        {
+            static int16_t xa[1200 * 128], xb[1200 * 128];
+            static const struct { int fx; const char *kn; } ALT[] = {
+                { PF_STUTTER, "2:+1" }, { PF_STUTTER, "3:-60" }, { PF_PITCH, "2:+50" }, { PF_PITCH, "3:-20" }, { PF_CRUSH, "3:-20" },
+                { PF_TSTOP, "2:+60" }, { PF_TSTOP, "3:+60" }, { PF_TSTART, "2:+60" }, { PF_TSTART, "3:+60" },
+                { PF_REVERSE, "2:-20" }, { PF_VINYL, "3:+60" },
+                { PF_LP, "3:+1" }, { PF_HP, "3:+1" }, { PF_DELAY, "3:-20" }, { PF_FREEZE, "2:-20" }, { PF_FREEZE, "3:+100" },
+                { PF_RETRIG, "2:+60" }, { PF_RETRIG, "3:+60" }, { PF_HALF, "2:-20" }, { PF_KILL, "2:+100" }, { PF_KILL, "1:+1;3:+40" },
+            };
+            for (unsigned i = 0; i < sizeof ALT / sizeof ALT[0]; i++) {
+                scen(xa, ALT[i].fx, 1, IN_RICH, 150, 20, NULL, 0);
+                scen(xb, ALT[i].fx, 1, IN_RICH, 150, 20, ALT[i].kn, 0);
+                long d = ndiff(xa, xb, H0 + 1000, H1);
+                if (d <= 100) printf("  (fx %d knobs %s: only %ld samples differ)\n", ALT[i].fx, ALT[i].kn, d);
+                CHECK(d > 100);
+            }
+            static const struct { int fx; const char *kn; } DRY[] = {
+                { PF_PITCH, "3:-100" }, { PF_CRUSH, "3:-100" }, { PF_REVERSE, "2:-100" }, { PF_FREEZE, "2:-100" }, { PF_HALF, "2:-100" }, { PF_DELAY, "3:-100" },
+            };
+            scen(xa, -1, 1, IN_RICH, 150, 360, NULL, 0);
+            for (unsigned i = 0; i < sizeof DRY / sizeof DRY[0]; i++) {
+                scen(xb, DRY[i].fx, 1, IN_RICH, 150, 360, DRY[i].kn, 0);
+                long d = ndiff(xa, xb, 0, TOT);
+                if (d) printf("  (fx %d mix 0: %ld samples differ)\n", DRY[i].fx, d);
+                CHECK(d == 0);
+            }
+            /* REVERSE window: a 1/4-bar (1 beat) window wraps long before the free one does */
+            scen(xa, PF_REVERSE, 1, IN_RICH, 400, 20, NULL, 0);
+            scen(xb, PF_REVERSE, 1, IN_RICH, 400, 20, "1:-3", 0);
+            CHECK(ndiff(xa, xb, H0 + 24000, H0 + 50000) > 100 && ndiff(xa, xb, H0 + 100, H0 + 8000) < 100);
+            /* KILL FADE: the default is gone in 3 ms, the slowest takes ~half a second */
+            scen(xb, PF_KILL, 1, IN_RICH, 150, 20, "2:+100", 0);
+            CHECK(peak_of(xb, H0 + 20 * 128, H0 + 40 * 128) > 1000);
+            /* filters: 24 dB cuts a tone beyond the cutoff much harder than 12 dB */
+            { double a1, b1, a2, b2; int fx = PF_LP;
+              api_tones(1, &fx, PF_LP, 0, 40, 100.0, 1500.0, &a1, &b1);
+              api_x_k = 2; api_x_v = 100; api_tones(1, &fx, PF_LP, 0, 40, 100.0, 1500.0, &a2, &b2); api_x_k = -1;
+              CHECK(a1 > 0.8 && a2 > 0.8 && b2 < b1 / 4 && b1 > 0);
+              fx = PF_HP;
+              api_tones(1, &fx, PF_HP, 0, 60, 200.0, 6000.0, &a1, &b1);
+              api_x_k = 2; api_x_v = 100; api_tones(1, &fx, PF_HP, 0, 60, 200.0, 6000.0, &a2, &b2); api_x_k = -1;
+              CHECK(b1 > 0.8 && b2 > 0.8 && a2 < a1 / 4 && a1 > 0); }
+            /* KILL split: LOW kill at 60 Hz keeps a 400 Hz tone, at 12 kHz it takes a 6 kHz tone; HIGH kill at 60 Hz takes both tones */
+            { double a, b; int fx = PF_KILL;
+              api_x_k = 2; api_x_v = 0; api_tones(1, &fx, PF_KILL, 0, 50, 400.0, 6000.0, &a, &b); CHECK(a > 0.9 && b > 0.9);
+              api_x_v = 100; api_tones(1, &fx, PF_KILL, 0, 50, 400.0, 6000.0, &a, &b); CHECK(a < 0.1 && b < 0.3);
+              api_x_v = 0; api_tones(1, &fx, PF_KILL, 0, 100, 400.0, 6000.0, &a, &b); CHECK(a < 0.2 && b < 0.2);
+              api_x_k = -1; }
+        }
 
         /* GATE: beat-synced steps on the loop grid, depth, swing, rate */
         {

@@ -1997,6 +1997,7 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "perf_fx"))      RET("%d", perf_top_fx(s->perf));
     if (!strcmp(key, "perf_n"))       RET("%d", perf_count(s->perf));
     if (!strcmp(key, "perf_target")) { int tg = -1; if (perf_count(s->perf)) perf_entry(s->perf, perf_count(s->perf) - 1, NULL, &tg, NULL, NULL); RET("%d", tg); }
+    if (!strcmp(key, "perf_boxes"))   RET("%d", perf_ui_boxes());
     if (!strcmp(key, "perf_on"))      RET("%u", perf_on_mask(s->perf));
     if (!strcmp(key, "perf_latch"))   RET("%u", perf_latch_mask(s->perf));
     if (!strncmp(key, "perf_p", 6)) {              /* perf_p<fx>_<knob>: stored 0..100 of a PERFORM knob */

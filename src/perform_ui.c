@@ -26,10 +26,17 @@ static void frame(gfx_t *g) {
     }
 }
 static void panel_sep(gfx_t *g) { gfx_dline(g, 89, 11, 89, 62, 1, 2, GFX_ON); }
-static void box(gfx_t *g, int y, const char *lab, const char *val) {
+static int s_boxes;                                            /* boxes drawn in the last frame (tests) */
+int perf_ui_boxes(void) { return s_boxes; }
+/* a box is a KNOB: a filled tab with its number on the left, then the label and the value. Nothing else is boxed. */
+static void box(gfx_t *g, int y, int knob, const char *lab, const char *val) {
+    char num[4]; snprintf(num, sizeof num, "%d", knob);
     gfx_rect(g, 92, y, 33, 14, GFX_ON);
-    gfx_text(g, 95, y + 2, lab, GFX_ON);
+    gfx_frect(g, 92, y, 7, 14, GFX_ON);
+    gfx_text_c(g, 95, y + 5, num, GFX_OFF);
+    gfx_text(g, 101, y + 2, lab, GFX_ON);
     gfx_text(g, 122 - gfx_text_w(val), y + 8, val, GFX_ON);
+    s_boxes++;
 }
 static void level_bar(gfx_t *g, float lvl) {
     gfx_rect(g, 92, 56, 33, 4, GFX_ON);
@@ -84,7 +91,7 @@ static void scene_stutter(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v
 
 static void scene_pitch(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {
     int st = (int)perf_pval(p, PF_PITCH, 0);
-    float ratio = powf(2.0f, (float)st / 12.0f), hh = 0.72f * ratio;
+    float ratio = powf(2.0f, ((float)st + perf_pval(p, PF_PITCH, 1) / 100.0f) / 12.0f), hh = 0.72f * ratio;
     w3_t w; vp(&w, g, 14.0f, 6.0f);
     w3_view(&w, 0.5f, u->rot[0] + 0.6f, 0.0f);
     float lv = 1.0f + clampf(v->level * 2.0f, 0.0f, 1.0f) * 0.06f;
@@ -171,7 +178,7 @@ static void scene_filter(gfx_t *g, perf_t *p, const perf_vis_t *v, int hp, float
     w3_t w; vp(&w, g, 20.0f, 4.0f);
     w3_grid(&w, yh, hp ? -1 : 1, fmodf(tsec * 0.7f, 1.0f), q * 4.0f, tsec * 3.0f);
     gfx_cross(g, 84, (int)lroundf(yh), 1, GFX_ON);
-    gfx_text(g, 7, hp ? 56 : 14, hp ? "HP" : "LP", GFX_ON);
+    gfx_text(g, 7, hp ? 56 : 14, perf_pval(p, v->fx, 2) > 0.5f ? (hp ? "HP 24" : "LP 24") : (hp ? "HP 12" : "LP 12"), GFX_ON);
 }
 
 static int gate_cells(int idx) { static const int N[6] = { 4, 8, 16, 32, 12, 24 }; return N[idx]; }
@@ -288,25 +295,16 @@ static void others(gfx_t *g, const perf_vis_t *v) {
 }
 
 static void panel(gfx_t *g, perf_t *p, const perf_vis_t *v) {
-    int fx = v->fx, n = perf_nparams(fx), y = 12, shown = 0;
+    int fx = v->fx, n = perf_nparams(fx), y = 12;
     char t[16];
+    s_boxes = 0;
     panel_sep(g);
-    for (int k = 0; k < n && shown < 3; k++, shown++, y += 15) { perf_ptext(p, fx, k, t, sizeof t); box(g, y, perf_plabel(fx, k), t); }
-    if (shown < 3) {
-        if (fx == PF_REVERSE) { box(g, y, "DIR", "<<"); }
-        else if (fx == PF_PITCH) { snprintf(t, sizeof t, "X%.2f", (double)v->speed); box(g, y, "RATIO", t); }
-        else if (fx == PF_STUTTER) { snprintf(t, sizeof t, "X%.1f", (double)v->speed); box(g, y, "SPEED", t); }
-        else if (fx == PF_TSTOP || fx == PF_TSTART || fx == PF_VINYL) { snprintf(t, sizeof t, "%d%%", (int)lroundf(v->speed * 100.0f)); box(g, y, "SPEED", t); }
-        else if (fx == PF_CRUSH) { snprintf(t, sizeof t, "%d", 1 << ((int)perf_pval(p, fx, 0) > 5 ? 5 : (int)perf_pval(p, fx, 0))); box(g, y, "STEPS", t); }
-        else if (fx == PF_DELAY) { snprintf(t, sizeof t, "%d%%", (int)lroundf(v->aux * 100.0f)); box(g, y, "ECHO", t); }
-        else if (fx == PF_RETRIG) { snprintf(t, sizeof t, "%d/4", (v->rep & 3) + 1); box(g, y, "STEP", t); }
-        else if (fx == PF_HALF) { snprintf(t, sizeof t, "%d%%", (int)lroundf(v->speed * 100.0f)); box(g, y, "RATIO", t); }
-        else if (fx == PF_GATE && n < 3) { }
-        else if (fx == PF_FREEZE) { snprintf(t, sizeof t, "%d%%", (int)lroundf(clampf((float)(v->k / (0.9 * (double)MARK_SR)), 0, 1) * 100.0f)); box(g, y, "GROW", t); }
-        else if (fx == PF_LP || fx == PF_HP) { snprintf(t, sizeof t, "%d", 12); box(g, y, "SLOPE", "12DB"); }
-        else if (fx == PF_KILL) { box(g, y, "MODE", v->held ? "ON" : "OFF"); }
+    for (int k = 0; k < n && k < 3; k++, y += 15) { perf_ptext(p, fx, k, t, sizeof t); box(g, y, k + 1, perf_plabel(fx, k), t); }
+    /* purely informative values: plain text, no box (nothing here turns) */
+    if (n < 3) {
+        if (fx == PF_REVERSE) gfx_text(g, 95, y + 2, "DIR <<", GFX_ON);
+        else if (fx == PF_HALF) { snprintf(t, sizeof t, "X%.2f", (double)v->speed); gfx_text(g, 95, y + 2, t, GFX_ON); }
     }
-    if (v->latched) gfx_text_c(g, 108, 50, "LATCH", GFX_ON);
     level_bar(g, v->level);
 }
 
@@ -334,6 +332,7 @@ static int ui_engaged(perf_t *p, const perf_vis_t *v) { return v->fx >= 0 && per
 int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long clock_frames) {
     perf_vis_t v;
     perf_vis(p, &v);
+    s_boxes = 0;
     char tgt[12];
     float dt = u->last_frames ? (float)(clock_frames - u->last_frames) / (float)MARK_SR : 0.0f;
     if (dt < 0.0f || dt > 0.5f) dt = 0.0f;
@@ -351,7 +350,7 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     if (v.fx == PF_TSTOP || v.fx == PF_TSTART) u->rot[0] += dt * clampf(spd, 0, 1) * 7.0f;
     else if (v.fx == PF_VINYL) u->rot[0] += dt * spd * 3.5f;
     else if (v.fx == PF_REVERSE) u->rot[0] -= dt * 2.4f;
-    else if (v.fx == PF_PITCH) u->rot[0] += dt * 0.9f * powf(2.0f, perf_pval(p, PF_PITCH, 0) / 12.0f);
+    else if (v.fx == PF_PITCH) u->rot[0] += dt * 0.9f * powf(2.0f, (perf_pval(p, PF_PITCH, 0) + perf_pval(p, PF_PITCH, 1) / 100.0f) / 12.0f);
     else if (v.fx == PF_STUTTER) u->rot[1] += dt * (1.2f + 5.0f * clampf((float)(v.k / (perf_pval(p, PF_STUTTER, 0) * v.beat)), 0.0f, 1.0f));
     else if (v.fx == PF_FREEZE) u->rot[0] += dt * 1.0f;
     else if (v.fx == PF_HALF) { u->rot[0] += dt * spd * 1.6f; u->rot[1] += dt * 1.6f; }
@@ -375,6 +374,7 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     default: break;
     }
     others(g, &v);
+    if (v.latched) gfx_text(g, 124 - gfx_text_w(tgt) - 7 - gfx_text_w("LATCH"), 2, "LATCH", GFX_OFF);
     panel(g, p, &v);
     return 1;
 }

@@ -95,7 +95,7 @@ Los loops sobreviven a cerrar/recargar Movy y a apagar la Move.
 - **Al cargar** un Set cuyo `state` trae un ID, y solo si la instancia esta vacia, el mismo hilo lee los WAV y deja las pistas en STOP (nunca pisa loops vivos). Ademas del audio vuelven largo fijo, velocidad, mute, count-in, umbral y volumen de entrada.
 - Limitaciones: un Set duplicado por Movy comparte ID con el original hasta que uno grabe algo nuevo; quitar el modulo de una pista deja su carpeta huerfana (se puede borrar a mano); una carpeta ilegible no se sobrescribe. Variables de entorno solo para tests: `LOOPER606_PERSIST_DIR`, `LOOPER606_PERSIST_DELAY_MS`.
 
-## PERFORM: efectos en los botones de paso (v0.10.1)
+## PERFORM: efectos en los botones de paso (v0.10.2)
 
 Con **SHIFT** (pad de arriba de la columna 1) mantenido, la pantalla muestra la pagina **PERFORM**: una rejilla de 4 x 4 casillas (`NN XXX`: numero y nombre de 3 letras) con los 16 efectos en el orden de los botones de paso (pasos 1-4 arriba, 13-16 abajo). El titulo lleva el objetivo: `PISTA 3` o `MIX`. Las casillas de efectos activos llevan marca: un cuadradito si estan en la pila y una banderita con visto si estan **enclavados** (latch). Los LEDs de paso se iluminan por familia: azul = repeticion, naranja = cinta/tiempo, violeta = tono y filtros, cian = ritmo, verde azulado = espacio (delay/freeze), amarillo = KILL. Sin SHIFT los pasos siguen fijando el largo del loop igual que siempre.
 
@@ -112,21 +112,23 @@ Mientras mantienes un efecto, los 8 knobs (knob capture) son sus parametros; cad
 | Paso | Efecto | Knobs | Escena |
 |---|---|---|---|
 | 1 | BEAT REPEAT: repite la rodaja justo anterior, alineada a la rejilla del loop | K1 tasa (1/4 1/8 1/16 1/32 1/8T 1/16T) · K2 decay por repeticion · K3 bajada de tono por repeticion (0..12 st) | circulos concentricos que laten en cada repeticion (n = tasa) |
-| 2 | STUTTER: repeticiones que se aceleran de 1/4 a 1/32 | K1 tiempo 1..4 pulsos | barras que convergen cada vez mas rapido |
-| 3 | PITCH: desplaza el tono sin cambiar el tiempo (granular, 40 ms) | K1 -12..+12 semitonos | dial de radar semicircular con aguja |
-| 4 | BITCRUSH | K1 bits 16..2 · K2 submuestreo 1..32 | anillo que se pixela + senoide cuantizada |
-| 5 | TAPE STOP: velocidad y tono bajan hasta 0, silencio mientras se mantiene | K1 tiempo 1/4..2 pulsos | dos bobinas que frenan |
-| 6 | TAPE START: al pulsar silencio y sube de 0 a 1 mientras se mantiene | K1 tiempo 1/4..2 pulsos | dos bobinas que aceleran |
-| 7 | REVERSE (`BCK`): lee hacia atras desde el punto de pulsacion (hasta ~2.9 s y vuelve a empezar) | - | espirales con flechas girando al reves |
-| 8 | VINYL: tono cayendo despacio como un disco que frena (no llega a parar) + ruido | K1 freno · K2 crujido | disco con surcos y brazo |
-| 9 | FILTER LP: paso bajo resonante (SVF de 2 polos), el cutoff sigue al knob con suavizado | K1 cutoff 30 Hz..18 kHz (exponencial) · K2 resonancia | mira/diana con linea de corte horizontal que sube y baja, zona cortada rayada, pico de resonancia y arco de frecuencia |
-| 10 | FILTER HP: igual, paso alto | K1 cutoff · K2 resonancia | igual, rayado por debajo |
+| 2 | STUTTER: repeticiones que se aceleran de 1/4 a 1/32 | K1 tiempo 1..4 pulsos · K2 tasa final (1/16, 1/32, 1/64) · K3 curva de aceleracion (lineal → exponencial) | barras que convergen cada vez mas rapido |
+| 3 | PITCH: desplaza el tono sin cambiar el tiempo (granular, 40 ms) | K1 -12..+12 semitonos · K2 afinacion fina ±50 cents · K3 mezcla seco/mojado | dial de radar semicircular con aguja |
+| 4 | BITCRUSH | K1 bits 16..2 · K2 submuestreo 1..32 · K3 mezcla seco/mojado | anillo que se pixela + senoide cuantizada |
+| 5 | TAPE STOP: velocidad y tono bajan hasta 0, silencio mientras se mantiene | K1 tiempo 1/4..2 pulsos · K2 curva (lineal → pronunciada) · K3 wow (fluctuacion de velocidad) | dos bobinas que frenan |
+| 6 | TAPE START: al pulsar silencio y sube de 0 a 1 mientras se mantiene | K1 tiempo 1/4..2 pulsos · K2 curva (lineal → pronunciada) · K3 wow | dos bobinas que aceleran |
+| 7 | REVERSE (`BCK`): lee hacia atras desde el punto de pulsacion (hasta ~2.9 s y vuelve a empezar) | K1 ventana (1/4, 1/2, 1 compas, libre desde la pulsacion) · K2 mezcla seco/mojado (solo 2 knobs) | espirales con flechas girando al reves |
+| 8 | VINYL: tono cayendo despacio como un disco que frena (no llega a parar) + ruido | K1 freno · K2 crujido · K3 wow (oscilacion lenta del tono) | disco con surcos y brazo |
+| 9 | FILTER LP: paso bajo resonante (SVF de 2 polos), el cutoff sigue al knob con suavizado | K1 cutoff 30 Hz..18 kHz (exponencial) · K2 resonancia · K3 pendiente 12 / 24 dB | mira/diana con linea de corte horizontal que sube y baja, zona cortada rayada, pico de resonancia y arco de frecuencia |
+| 10 | FILTER HP: igual, paso alto | K1 cutoff · K2 resonancia · K3 pendiente 12 / 24 dB | igual, rayado por debajo |
 | 11 | GATE: puerta ritmica sincronizada a la rejilla del loop (abierta la primera mitad de cada celda) | K1 tasa (1/4 1/8 1/16 1/32 1/8T 1/16T) · K2 profundidad · K3 swing (retrasa las celdas impares) | rejilla de celdas que parpadean con el patron y cursor de fase |
-| 12 | DELAY THROW: la entrada llega al delay solo mientras se mantiene; los ecos siguen sonando al soltar (cola) | K1 tiempo (1/8 1/8. 1/4 1/4. 1/2) · K2 feedback (0..88 %, repeticiones cada vez mas oscuras) | anillos concentricos que se expanden, mas tenues con cada eco |
-| 13 | ECHO FREEZE: congela una rodaja en un bucle infinito con crossfade (sigue sonando sin entrada) | K1 tamano (1/16 1/8 1/4 1/2 1 pulso) | cristal/copo de nieve que crece, mas ramas con tamano mayor |
-| 14 | RETRIGGER: cada unidad de rejilla se repite su primer cuarto saltando atras al inicio de la unidad (retrigger de DJ, en tiempo) | K1 cada 1/4, 1/2, 1 compas | flechas de rebobinado en un anillo y cabezas de lectura/directo |
-| 15 | HALF SPEED: lectura a ½ o ¼ de velocidad (cae el tono) que vuelve a tiempo cada ciclo (2 o 4 pulsos) | K1 ½ / ¼ | orbita lenta con estela y orbita fantasma a velocidad normal |
-| 16 | KILL: silencio inmediato (fundido de 3 ms) mientras se mantiene | K1 parte: ALL (todo) / LOW (se van los graves, corte 400 Hz) / HIGH (se van los agudos, corte 2 kHz), 24 dB/oct | X grande con rayas de aviso; en LOW/HIGH, espectro con la zona muerta tachada |
+| 12 | DELAY THROW: la entrada llega al delay solo mientras se mantiene; los ecos siguen sonando al soltar (cola) | K1 tiempo (1/8 1/8. 1/4 1/4. 1/2) · K2 feedback (0..88 %, repeticiones cada vez mas oscuras) · K3 nivel del eco (0..100 %) | anillos concentricos que se expanden, mas tenues con cada eco |
+| 13 | ECHO FREEZE: congela una rodaja en un bucle infinito con crossfade (sigue sonando sin entrada) | K1 tamano (1/16 1/8 1/4 1/2 1 pulso) · K2 mezcla con el seco · K3 decay del bucle congelado (0 % = infinito) | cristal/copo de nieve que crece, mas ramas con tamano mayor |
+| 14 | RETRIGGER: cada unidad de rejilla se repite su primer cuarto saltando atras al inicio de la unidad (retrigger de DJ, en tiempo) | K1 cada 1/4, 1/2, 1 compas · K2 bajada de volumen por retrigger · K3 bajada de tono por retrigger (0..4 st) | flechas de rebobinado en un anillo y cabezas de lectura/directo |
+| 15 | HALF SPEED: lectura a ½ o ¼ de velocidad (cae el tono) que vuelve a tiempo cada ciclo (2 o 4 pulsos) | K1 ½ / ¼ · K2 mezcla seco/mojado (solo 2 knobs) | orbita lenta con estela y orbita fantasma a velocidad normal |
+| 16 | KILL: silencio inmediato (fundido de 3 ms) mientras se mantiene | K1 parte: ALL / LOW / HIGH (24 dB/oct) · K2 fundido 2 ms..500 ms · K3 frecuencia de corte de LOW/HIGH 60 Hz..12 kHz (en ALL no hace nada; muestra -) | X grande con rayas de aviso; en LOW/HIGH, espectro con la zona muerta tachada |
+
+**v0.10.2 (knobs):** cada efecto tiene K1..K3 reales (REVERSE y HALF SPEED solo K1-K2) y cada uno se recuerda por efecto. En pantalla solo llevan casilla los knobs que existen, con su numero en una pestana a la izquierda (`1`, `2`, `3`); los valores meramente informativos (direccion, ratio) van como texto suelto sin casilla. El indicador LATCH pasa al titulo. Los knobs llegan al efecto con `knob_delta` ("N:delta") tambien nada mas pulsar el paso y, con SHIFT mantenido, sobre efectos solo enclavados. Limite conocido (lado Movy): `knob_capture` se lee por sondeo (~40 ms); en MIX, un giro que llegue antes de que Movy vea `knob_capture=1` va a la pagina normal de knobs (mezclador) y el modulo no puede interceptarlo; en vista PISTA la captura ya esta activa y no hay retraso.
 
 Escenas 3D: desde la v0.10.1 cada efecto tiene una escena de alambre 3D (motor minimo `src/wire3d.c`: rotaciones, proyeccion en perspectiva, recorte al visor y aristas lejanas punteadas como pista de profundidad; solo lineas de 1 px). Beat repeat = cubos anidados, stutter = losas apiladas, pitch = cubo estirado, bitcrush = esfera de anillos, tape = dos bobinas, reverse = tunel, vinyl = disco inclinado con brazo, filtros = rejilla synthwave (horizonte = cutoff, onda = reso), gate = 4x2 cubos, delay = marcos que se alejan, freeze = octaedro, retrigger = cubo que salta, half speed = esfera lenta, kill = cubo que implosiona. Titulo, lecturas a la derecha, etiquetas de efectos combinados e indicadores de latch no cambian.
 

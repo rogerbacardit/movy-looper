@@ -19,6 +19,8 @@
 
 enum { SB_REP, SB_STU, SB_FRZ, SB_DLY, SB_N };
 
+typedef struct { float a1, a2, a3, kk; } svfc;
+
 typedef struct {
     int   act, held;
     float g;
@@ -33,7 +35,12 @@ typedef struct {
     float hl, hr, lpl, lpr;
     float speed, phase, aux;
     /* filters / kill: TPT state-variable filter */
-    float ic1[2][2], ic2[2][2], fcs, a1, a2, a3, kk;
+    float ic1[2][2], ic2[2][2], fcs;
+    svfc  c[2];                             /* [0] main (reso) stage, [1] fixed 2nd stage (24 dB slope) */
+    float slope;                            /* LP/HP: 0 = 12 dB .. 1 = 24 dB, slewed */
+    float fk;                               /* KILL: fade step per frame */
+    double lfo;                             /* wow / flutter phase */
+    double offp;                            /* retrigger: pitch-drop offset at the last jump */
     int   fn, kmode;
     /* gate */
     float gg;
@@ -69,25 +76,25 @@ struct perf {
 
 /* defaults; stepped parameters (DISC) hold idx * 100 / (n - 1) */
 static const uint8_t DEF[PF_NFX][3] = {
-    { 20, 20, 0 }, { 33, 0, 0 }, { 75, 0, 0 }, { 60, 20, 0 },
-    { 40, 0, 0 }, { 40, 0, 0 }, { 0, 0, 0 }, { 40, 40, 0 },
-    { 75, 25, 0 }, { 30, 25, 0 }, { 40, 85, 0 }, { 50, 40, 0 },
-    { 50, 0, 0 }, { 50, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 },
+    { 20, 20, 0 },   { 33, 50, 100 }, { 75, 50, 100 }, { 60, 20, 100 },
+    { 40, 0, 0 },    { 40, 0, 0 },    { 100, 100, 0 }, { 40, 40, 0 },
+    { 75, 25, 0 },   { 30, 25, 0 },   { 40, 85, 0 },   { 50, 40, 85 },
+    { 50, 100, 0 },  { 50, 0, 0 },    { 0, 100, 0 },   { 0, 7, 53 },
 };
 static const uint8_t DISC[PF_NFX][3] = {          /* option count of a stepped knob, 0 = continuous */
-    { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 },
-    { 0 }, { 0 }, { 6, 0, 0 }, { 5, 0, 0 }, { 5, 0, 0 }, { 3, 0, 0 }, { 2, 0, 0 }, { 3, 0, 0 },
+    { 0 }, { 0, 3, 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 4, 0, 0 }, { 0 },
+    { 0, 0, 2 }, { 0, 0, 2 }, { 6, 0, 0 }, { 5, 0, 0 }, { 5, 0, 0 }, { 3, 0, 0 }, { 2, 0, 0 }, { 3, 0, 0 },
 };
 static const char *const NAME[PF_NFX] = { "BEAT REPEAT", "STUTTER", "PITCH", "BITCRUSH", "TAPE STOP", "TAPE START", "REVERSE", "VINYL",
     "FILTER LP", "FILTER HP", "GATE", "DELAY THROW", "ECHO FREEZE", "RETRIGGER", "HALF SPEED", "KILL" };
 static const char *const SHORT[PF_NFX] = { "RPT", "STU", "PCH", "BIT", "STP", "STA", "BCK", "VIN",
     "LPF", "HPF", "GAT", "DLY", "FRZ", "RTG", "HLF", "KIL" };
-static const int NP[PF_NFX] = { 3, 1, 1, 2, 1, 1, 0, 2, 2, 2, 3, 2, 1, 1, 1, 1 };
-static const char *const PL[PF_NFX][3] = {
-    { "RATE", "DECAY", "DROP" }, { "TIME", "", "" }, { "SEMI", "", "" }, { "BITS", "DOWN", "" },
-    { "TIME", "", "" }, { "TIME", "", "" }, { "", "", "" }, { "BRAKE", "CRKL", "" },
-    { "CUT", "RESO", "" }, { "CUT", "RESO", "" }, { "RATE", "DEPTH", "SWING" }, { "TIME", "FDBK", "" },
-    { "SIZE", "", "" }, { "EVERY", "", "" }, { "SPEED", "", "" }, { "PART", "", "" },
+static const int NP[PF_NFX] = { 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 3, 3, 2, 3 };
+static const char *const PL[PF_NFX][3] = {          /* <= 4 letters: they must fit beside the knob number tab */
+    { "RATE", "DCAY", "DROP" }, { "TIME", "END", "CURV" }, { "SEMI", "FINE", "MIX" }, { "BITS", "DOWN", "MIX" },
+    { "TIME", "CURV", "WOW" }, { "TIME", "CURV", "WOW" }, { "WIND", "MIX", "" }, { "BRAK", "CRKL", "WOW" },
+    { "CUT", "RESO", "SLOP" }, { "CUT", "RESO", "SLOP" }, { "RATE", "DEPT", "SWNG" }, { "TIME", "FDBK", "LEVL" },
+    { "SIZE", "MIX", "DCAY" }, { "EVRY", "DCAY", "PTCH" }, { "SPED", "MIX", "" }, { "PART", "FADE", "SPLT" },
 };
 static const char *const RATE_TXT[6] = { "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" };
 static const double RATE_MUL[6] = { 1.0, 0.5, 0.25, 0.125, 1.0 / 3.0, 1.0 / 6.0 };
@@ -99,6 +106,10 @@ static const char *const RTG_TXT[3] = { "1/4", "1/2", "1 BAR" };
 static const double RTG_BEATS[3] = { 1.0, 2.0, 4.0 };
 static const char *const HLF_TXT[2] = { "1/2", "1/4" };
 static const char *const KIL_TXT[3] = { "ALL", "LOW", "HIGH" };
+static const char *const STU_TXT[3] = { "1/16", "1/32", "1/64" };
+static const double STU_END[3] = { 0.25, 0.125, 0.0625 };
+static const char *const REV_TXT[4] = { "1/4", "1/2", "1BAR", "FREE" };
+static const double REV_BEATS[3] = { 1.0, 2.0, 4.0 };
 
 /* fixed chain order; ring1 is written after index 3, ring2 after index 13 */
 static const uint8_t CHAIN[PF_NFX] = { PF_BEATREP, PF_STUTTER, PF_RETRIG, PF_REVERSE,
@@ -224,29 +235,41 @@ int perf_family(int fx) {
 
 /* Decoded value of knob k of effect fx:
  *  BEATREP 0 rate index 0..5, 1 gain kept per repeat 1..0.35, 2 pitch drop st/repeat 0..12
- *  STUTTER 0 beats 1..4          PITCH 0 semitones -12..12   CRUSH 0 bits 16..2, 1 hold 1..32
- *  TSTOP/TSTART 0 beats .25..2   VINYL 0 floor speed .92..30, 1 crackle 0..1
- *  LP/HP 0 cutoff Hz 30..18k (exp), 1 reso 0..1
+ *  STUTTER 0 beats 1..4, 1 end rate index 0..2 (1/16 1/32 1/64), 2 curve 0 linear .. 1 exponential
+ *  PITCH 0 semitones -12..12, 1 fine cents -50..50, 2 mix 0..1
+ *  CRUSH 0 bits 16..2, 1 hold 1..32, 2 mix 0..1
+ *  TSTOP/TSTART 0 beats .25..2, 1 curve 0 linear .. 1 steep, 2 wow 0..1
+ *  REVERSE 0 window index 0..3 (1/4 1/2 1 bar, free), 1 mix 0..1
+ *  VINYL 0 floor speed .92..30, 1 crackle 0..1, 2 wow 0..1
+ *  LP/HP 0 cutoff Hz 30..18k (exp), 1 reso 0..1, 2 slope index 0..1 (12 / 24 dB)
  *  GATE 0 rate index 0..5, 1 depth 0..1, 2 swing 0..1
- *  DELAY 0 time index 0..4, 1 feedback 0..0.88   FREEZE 0 size index 0..4
- *  RETRIG 0 index 0..2   HALF 0 index 0..1   KILL 0 index 0..2 (ALL, LOW, HIGH) */
+ *  DELAY 0 time index 0..4, 1 feedback 0..0.88, 2 echo level 0..1
+ *  FREEZE 0 size index 0..4, 1 mix 0..1, 2 decay 0..1 (0 = holds forever)
+ *  RETRIG 0 index 0..2, 1 volume decay per retrig 0..1, 2 pitch drop per retrig 0..4 st
+ *  HALF 0 index 0..1, 1 mix 0..1
+ *  KILL 0 index 0..2 (ALL, LOW, HIGH), 1 fade ms 2..500 (exp), 2 split Hz 60..12k (exp) */
 float perf_pval(const perf_t *p, int fx, int k) {
     float v = (float)perf_pct(p, fx, k) / 100.0f;
     switch (fx) {
     case PF_BEATREP: return k == 0 ? (float)(int)(v * 5.999f) : k == 1 ? 1.0f - v * 0.65f : v * 12.0f;
-    case PF_STUTTER: return 1.0f + v * 3.0f;
-    case PF_PITCH:   return (float)(int)lroundf(-12.0f + v * 24.0f);
-    case PF_CRUSH:   return k == 0 ? (float)(16 - (int)lroundf(v * 14.0f)) : 1.0f + (float)(int)lroundf(v * 31.0f);
-    case PF_TSTOP: case PF_TSTART: return 0.25f + v * 1.75f;
+    case PF_STUTTER: return k == 0 ? 1.0f + v * 3.0f : k == 1 ? (float)didx(p, fx, 1) : v;
+    case PF_PITCH:   return k == 0 ? (float)(int)lroundf(-12.0f + v * 24.0f) : k == 1 ? (float)(int)lroundf(-50.0f + v * 100.0f) : v;
+    case PF_CRUSH:   return k == 0 ? (float)(16 - (int)lroundf(v * 14.0f)) : k == 1 ? 1.0f + (float)(int)lroundf(v * 31.0f) : v;
+    case PF_TSTOP: case PF_TSTART: return k == 0 ? 0.25f + v * 1.75f : v;
+    case PF_REVERSE: return k == 0 ? (float)didx(p, fx, 0) : v;
     case PF_VINYL:   return k == 0 ? 0.92f - v * 0.62f : v;
-    case PF_LP: case PF_HP: return k == 0 ? 30.0f * powf(600.0f, v) : v;
+    case PF_LP: case PF_HP: return k == 0 ? 30.0f * powf(600.0f, v) : k == 1 ? v : (float)didx(p, fx, 2);
     case PF_GATE:    return k == 0 ? (float)didx(p, fx, 0) : v;
-    case PF_DELAY:   return k == 0 ? (float)didx(p, fx, 0) : v * 0.88f;
-    case PF_FREEZE: case PF_RETRIG: case PF_HALF: case PF_KILL: return (float)didx(p, fx, 0);
+    case PF_DELAY:   return k == 0 ? (float)didx(p, fx, 0) : k == 1 ? v * 0.88f : v;
+    case PF_FREEZE:  return k == 0 ? (float)didx(p, fx, 0) : v;
+    case PF_RETRIG:  return k == 0 ? (float)didx(p, fx, 0) : k == 1 ? v : v * 4.0f;
+    case PF_HALF:    return k == 0 ? (float)didx(p, fx, 0) : v;
+    case PF_KILL:    return k == 0 ? (float)didx(p, fx, 0) : k == 1 ? 2.0f * powf(250.0f, v) : 60.0f * powf(200.0f, v);
     default: return 0.0f;
     }
 }
 
+static void pcent(float v, char *out, int n) { snprintf(out, (size_t)n, "%d%%", (int)lroundf(v * 100.0f)); }
 void perf_ptext(const perf_t *p, int fx, int k, char *out, int n) {
     float v = perf_pval(p, fx, k);
     out[0] = 0;
@@ -256,25 +279,50 @@ void perf_ptext(const perf_t *p, int fx, int k, char *out, int n) {
         else if (k == 1) snprintf(out, (size_t)n, "%d%%", (int)lroundf((1.0f - v) * 100.0f / 0.65f));
         else snprintf(out, (size_t)n, "-%dST", (int)lroundf(v));
         break;
-    case PF_STUTTER: snprintf(out, (size_t)n, "%.1fB", (double)v); break;
-    case PF_PITCH:   snprintf(out, (size_t)n, "%+dST", (int)v); break;
-    case PF_CRUSH:   if (k == 0) snprintf(out, (size_t)n, "%dB", (int)v); else snprintf(out, (size_t)n, "/%d", (int)v); break;
-    case PF_TSTOP: case PF_TSTART: snprintf(out, (size_t)n, "%.2gB", (double)v); break;
-    case PF_VINYL:   snprintf(out, (size_t)n, "%d%%", (int)lroundf(v * 100.0f)); break;
+    case PF_STUTTER:
+        if (k == 0) snprintf(out, (size_t)n, "%.1fB", (double)v);
+        else if (k == 1) snprintf(out, (size_t)n, "%s", STU_TXT[(int)v]);
+        else if (v < 0.02f) snprintf(out, (size_t)n, "LIN"); else if (v > 0.98f) snprintf(out, (size_t)n, "EXP"); else pcent(v, out, n);
+        break;
+    case PF_PITCH:
+        if (k == 0) snprintf(out, (size_t)n, "%+dST", (int)v);
+        else if (k == 1) snprintf(out, (size_t)n, "%+dC", (int)v);
+        else pcent(v, out, n);
+        break;
+    case PF_CRUSH:   if (k == 0) snprintf(out, (size_t)n, "%dB", (int)v); else if (k == 1) snprintf(out, (size_t)n, "/%d", (int)v); else pcent(v, out, n); break;
+    case PF_TSTOP: case PF_TSTART:
+        if (k == 0) snprintf(out, (size_t)n, "%.2gB", (double)v);
+        else if (k == 1) { if (v < 0.02f) snprintf(out, (size_t)n, "LIN"); else if (v > 0.98f) snprintf(out, (size_t)n, "EXP"); else pcent(v, out, n); }
+        else pcent(v, out, n);
+        break;
+    case PF_REVERSE: if (k == 0) snprintf(out, (size_t)n, "%s", REV_TXT[(int)v]); else pcent(v, out, n); break;
+    case PF_VINYL:   pcent(v, out, n); break;
     case PF_LP: case PF_HP:
         if (k == 0) { if (v >= 1000.0f) snprintf(out, (size_t)n, "%.1fK", (double)(v / 1000.0f)); else snprintf(out, (size_t)n, "%dHZ", (int)lroundf(v)); }
-        else snprintf(out, (size_t)n, "%d%%", (int)lroundf(v * 100.0f));
+        else if (k == 1) pcent(v, out, n);
+        else snprintf(out, (size_t)n, "%dDB", (int)v ? 24 : 12);
         break;
     case PF_GATE:
-        if (k == 0) snprintf(out, (size_t)n, "%s", RATE_TXT[(int)v]); else snprintf(out, (size_t)n, "%d%%", (int)lroundf(v * 100.0f));
+        if (k == 0) snprintf(out, (size_t)n, "%s", RATE_TXT[(int)v]); else pcent(v, out, n);
         break;
     case PF_DELAY:
-        if (k == 0) snprintf(out, (size_t)n, "%s", DLY_TXT[(int)v]); else snprintf(out, (size_t)n, "%d%%", (int)lroundf(v / 0.88f * 100.0f));
+        if (k == 0) snprintf(out, (size_t)n, "%s", DLY_TXT[(int)v]);
+        else if (k == 1) snprintf(out, (size_t)n, "%d%%", (int)lroundf(v / 0.88f * 100.0f));
+        else pcent(v, out, n);
         break;
-    case PF_FREEZE:  snprintf(out, (size_t)n, "%s", FRZ_TXT[(int)v]); break;
-    case PF_RETRIG:  snprintf(out, (size_t)n, "%s", RTG_TXT[(int)v]); break;
-    case PF_HALF:    snprintf(out, (size_t)n, "%s", HLF_TXT[(int)v]); break;
-    case PF_KILL:    snprintf(out, (size_t)n, "%s", KIL_TXT[(int)v]); break;
+    case PF_FREEZE:  if (k == 0) snprintf(out, (size_t)n, "%s", FRZ_TXT[(int)v]); else pcent(v, out, n); break;
+    case PF_RETRIG:
+        if (k == 0) snprintf(out, (size_t)n, "%s", RTG_TXT[(int)v]);
+        else if (k == 1) pcent(v, out, n);
+        else snprintf(out, (size_t)n, "-%.1fST", (double)v);
+        break;
+    case PF_HALF:    if (k == 0) snprintf(out, (size_t)n, "%s", HLF_TXT[(int)v]); else pcent(v, out, n); break;
+    case PF_KILL:
+        if (k == 0) snprintf(out, (size_t)n, "%s", KIL_TXT[(int)v]);
+        else if (k == 1) snprintf(out, (size_t)n, "%dMS", (int)lroundf(v));
+        else if ((int)perf_pval(p, fx, 0) == 0) snprintf(out, (size_t)n, "-");
+        else if (v >= 1000.0f) snprintf(out, (size_t)n, "%.1fK", (double)(v / 1000.0f)); else snprintf(out, (size_t)n, "%dHZ", (int)lroundf(v));
+        break;
     default: break;
     }
 }
@@ -326,17 +374,19 @@ static float noise(lane_t *L) {
 }
 
 /* TPT state-variable filter coefficients */
-static void svf_set(slot_t *s, float fc, float k) {
+static void svf_set(slot_t *s, int ci, float fc, float k) {
     float g = tanf((float)M_PI * fc / (float)MARK_SR);
-    s->kk = k; s->a1 = 1.0f / (1.0f + g * (g + k)); s->a2 = g * s->a1; s->a3 = g * s->a2;
+    svfc *c = &s->c[ci];
+    c->kk = k; c->a1 = 1.0f / (1.0f + g * (g + k)); c->a2 = g * c->a1; c->a3 = g * c->a2;
 }
-static inline void svf_run(slot_t *s, int ch, int st, float x, float *lp, float *hp) {
+static inline void svf_run(slot_t *s, int ci, int ch, int st, float x, float *lp, float *hp) {
+    const svfc *c = &s->c[ci];
     float v3 = x - s->ic2[ch][st];
-    float v1 = s->a1 * s->ic1[ch][st] + s->a2 * v3;
-    float v2 = s->ic2[ch][st] + s->a2 * s->ic1[ch][st] + s->a3 * v3;
+    float v1 = c->a1 * s->ic1[ch][st] + c->a2 * v3;
+    float v2 = s->ic2[ch][st] + c->a2 * s->ic1[ch][st] + c->a3 * v3;
     s->ic1[ch][st] = 2.0f * v1 - s->ic1[ch][st];
     s->ic2[ch][st] = 2.0f * v2 - s->ic2[ch][st];
-    *lp = v2; *hp = x - s->kk * v1 - v2;
+    *lp = v2; *hp = x - c->kk * v1 - v2;
 }
 
 static void engage(perf_t *p, lane_t *L, int fx) {
@@ -365,13 +415,15 @@ static void engage(perf_t *p, lane_t *L, int fx) {
         int64_t Ln = (int64_t)(L->beat * FRZ_MUL[(int)perf_pval(p, fx, 0)] + 0.5);
         if (Ln < 256) Ln = 256;
         if (Ln > SL_N) Ln = SL_N;
-        s->L = Ln;
+        s->L = Ln; s->env = 1.0f;
         copy_slice(L, L->ring2, L->sb[SB_FRZ], Ln, Ln);                 /* what reached the end of the chain */
     } else if (fx == PF_DELAY) {
         if (L->dly_dirty) { memset(L->sb[SB_DLY], 0, (size_t)SL_N * 2 * sizeof(float)); L->dly_dirty = 0; }
         s->dly = -1.0;
     } else if (fx == PF_LP || fx == PF_HP) {
-        s->fcs = perf_pval(p, fx, 0); s->fn = 0;
+        s->fcs = perf_pval(p, fx, 0); s->fn = 0; s->slope = perf_pval(p, fx, 2);
+    } else if (fx == PF_KILL) {
+        s->fcs = perf_pval(p, fx, 2);
     }
 }
 
@@ -386,6 +438,7 @@ void perf_block_begin(perf_t *p, double grid_pos, double beat_frames) {
             slot_t *s = &L->s[fx];
             if ((w >> fx) & 1u) { if (!s->held || !s->act) engage(p, L, fx); }
             else if (s->held) s->held = 0;
+            if (fx == PF_KILL && s->act) s->fk = (float)(1.0 / ((double)perf_pval(p, fx, 1) * 0.001 * SR));
         }
     }
 }
@@ -407,23 +460,25 @@ static void gran(const lane_t *L, slot_t *s, const float *ring, double ratio, fl
 }
 
 /* read `ring` at an integer delay with a short crossfade when the delay jumps */
-static void jump_read(const lane_t *L, slot_t *s, const float *ring, double d, float *wl, float *wr) {
+/* the same, plus a continuous extra delay `off` (frames, >= 0) that makes the read slower than real time */
+static void jump_read_off(const lane_t *L, slot_t *s, const float *ring, double d, double off, float *wl, float *wr) {
     int64_t di = (int64_t)(d + 0.5);
-    if (di > RING_N - 1024) di = RING_N - 1024;
+    if (di > RING_N - 1024 - 65536) di = RING_N - 1024 - 65536;
     if (di < 0) di = 0;
     if (s->dprev < 0.0) s->dprev = (double)di;
-    if ((double)di != s->dprev && s->xf <= 0) s->xf = XFADE;
-    uint32_t a = (uint32_t)((int64_t)L->wc - di) & RING_MASK;
-    float l = ring[a * 2], r = ring[a * 2 + 1];
+    if ((double)di != s->dprev && s->xf <= 0) { s->xf = XFADE; s->d = s->offp; }
+    float l, r;
+    ring_at(ring, (double)L->wc - ((double)di + off), &l, &r);
     if (s->xf > 0) {
-        uint32_t b = (uint32_t)((int64_t)L->wc - (int64_t)s->dprev) & RING_MASK;
+        float c, e;
+        ring_at(ring, (double)L->wc - (s->dprev + s->d), &c, &e);
         float m = (float)s->xf / (float)XFADE;
-        l += (ring[b * 2] - l) * m; r += (ring[b * 2 + 1] - r) * m;
+        l += (c - l) * m; r += (e - r) * m;
         if (--s->xf <= 0) s->dprev = (double)di;
     } else s->dprev = (double)di;
+    s->offp = off;
     *wl = l; *wr = r;
 }
-
 static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, float *wl, float *wr) {
     double k = s->k;
     switch (fx) {
@@ -451,7 +506,9 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
         double total = perf_pval(p, PF_STUTTER, 0) * L->beat;
         if (s->rep_pos >= s->rep_len) {
             double u = k / total; if (u > 1.0) u = 1.0;
-            s->rep_len = (int)((double)s->L * pow(0.125, u));
+            double er = STU_END[(int)perf_pval(p, PF_STUTTER, 1)], cv = (double)perf_pval(p, PF_STUTTER, 2);
+            double f = (1.0 - cv) * (1.0 + (er - 1.0) * u) + cv * pow(er, u);          /* linear -> exponential shrink of the repeat */
+            s->rep_len = (int)((double)s->L * f);
             if (s->rep_len < 64) s->rep_len = 64;
             s->rep_pos = 0; s->rep++;
         }
@@ -471,14 +528,23 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
         double t = L->grid + (double)L->bn; if (t < 0.0) t = 0.0;
         double tau = fmod(t, T);
         double jj = floor(tau / R);
-        jump_read(L, s, L->ring, R * jj, wl, wr);
+        float semi = perf_pval(p, fx, 2), dec = perf_pval(p, fx, 1);
+        double rho = exp2(-(double)semi * jj / 12.0);                    /* each retrig plays a little lower */
+        double off = (1.0 - rho) * (tau - jj * R);
+        jump_read_off(L, s, L->ring, R * jj, off, wl, wr);
+        float tg = 1.0f;
+        for (int i = 0; i < (int)jj; i++) tg *= 1.0f - 0.3f * dec;        /* and a little quieter */
+        s->gg += (tg - s->gg) * 0.02f;
+        *wl *= s->gg; *wr *= s->gg;
         s->rep = (int)jj; s->phase = (float)((tau - jj * R) / R);
         break;
     }
     case PF_PITCH: {
-        double ratio = pow(2.0, perf_pval(p, PF_PITCH, 0) / 12.0);
+        double ratio = pow(2.0, ((double)perf_pval(p, PF_PITCH, 0) + (double)perf_pval(p, PF_PITCH, 1) / 100.0) / 12.0);
+        float mix = perf_pval(p, PF_PITCH, 2), a, b;
         s->speed = (float)ratio;
-        gran(L, s, L->ring1, ratio, wl, wr);
+        gran(L, s, L->ring1, ratio, &a, &b);
+        *wl = il + (a - il) * mix; *wr = ir + (b - ir) * mix;
         break;
     }
     case PF_HALF: {                   /* tape-slow read of the history; the lag returns to 0 every cycle, so it stays in time */
@@ -498,24 +564,30 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
             float m = (float)s->xf / (float)XFADE; s->xf--;
             a += (c - a) * m; b += (e - b) * m;
         }
-        *wl = a; *wr = b;
+        float mix = perf_pval(p, fx, 1);
+        *wl = il + (a - il) * mix; *wr = ir + (b - ir) * mix;
         s->speed = (float)r; s->phase = (float)(tau / C);
         break;
     }
     case PF_CRUSH: {
-        float bits = perf_pval(p, PF_CRUSH, 0), ds = perf_pval(p, PF_CRUSH, 1);
+        float bits = perf_pval(p, PF_CRUSH, 0), ds = perf_pval(p, PF_CRUSH, 1), mix = perf_pval(p, PF_CRUSH, 2);
         float q = exp2f(16.0f - bits);
         if (s->hold <= 0.0) {
             s->hold += (double)ds;
             s->hl = floorf(il / q + 0.5f) * q; s->hr = floorf(ir / q + 0.5f) * q;
         }
         s->hold -= 1.0;
-        *wl = s->hl; *wr = s->hr;
+        *wl = il + (s->hl - il) * mix; *wr = ir + (s->hr - ir) * mix;
         break;
     }
     case PF_TSTOP: {
         double T = (double)perf_pval(p, PF_TSTOP, 0) * L->beat;
-        double sp = 1.0 - k / T; if (sp < 0.0) sp = 0.0;
+        double u = k / T; if (u > 1.0) u = 1.0;
+        double sp = pow(1.0 - u, 1.0 + 2.0 * (double)perf_pval(p, PF_TSTOP, 1));     /* curve: linear .. steep */
+        if (sp > 0.0) {                                                              /* wow: speed dips, never above 1 */
+            s->lfo += 2.0 * M_PI * 5.0 / SR;
+            sp *= 1.0 - (double)perf_pval(p, PF_TSTOP, 2) * 0.08 * (0.5 + 0.5 * sin(s->lfo));
+        }
         s->d += 1.0 - sp;
         if (s->d > RING_N / 2) s->d = RING_N / 2;
         s->speed = (float)sp;
@@ -529,7 +601,10 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
     case PF_TSTART: {
         double T = (double)perf_pval(p, PF_TSTART, 0) * L->beat;
         double u = k / T; if (u > 1.0) u = 1.0;
-        double ratio = u < 0.03 ? 0.03 : u;
+        u = pow(u, 1.0 + 2.0 * (double)perf_pval(p, PF_TSTART, 1));
+        s->lfo += 2.0 * M_PI * 5.0 / SR;
+        double ratio = u * (1.0 - (double)perf_pval(p, PF_TSTART, 2) * 0.08 * (0.5 + 0.5 * sin(s->lfo)));
+        if (ratio < 0.03) ratio = 0.03;
         s->speed = (float)u;
         float a, b;
         gran(L, s, L->ring1, ratio, &a, &b);
@@ -538,18 +613,23 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
         break;
     }
     case PF_REVERSE: {
-        const int64_t M = RING_N / 2 - 256;
+        int64_t M = RING_N / 2 - 256;
+        int wi = (int)perf_pval(p, fx, 0);
+        if (wi < 3) { int64_t W = (int64_t)(L->beat * REV_BEATS[wi]); if (W < 512) W = 512; if (W < M) M = W; }
+        float mix = perf_pval(p, fx, 1);
         int64_t j = (int64_t)k % M;
         uint32_t a = (uint32_t)((int64_t)s->rv0 - j) & RING_MASK;
         float e1 = (float)j / EDGE, e2 = (float)(M - 1 - j) / EDGE;
         float e = e1 < e2 ? e1 : e2; e = e > 1.0f ? 1.0f : e;
-        *wl = L->ring[a * 2] * e; *wr = L->ring[a * 2 + 1] * e;
+        *wl = il + (L->ring[a * 2] * e - il) * mix; *wr = ir + (L->ring[a * 2 + 1] * e - ir) * mix;
         s->speed = -1.0f;
         break;
     }
     case PF_VINYL: {
         float floor_s = perf_pval(p, PF_VINYL, 0), cr = perf_pval(p, PF_VINYL, 1);
         double ratio = 1.0 - (1.0 - (double)floor_s) * (1.0 - exp(-k / (1.2 * SR)));
+        s->lfo += 2.0 * M_PI * 0.9 / SR;
+        ratio *= 1.0 + (double)perf_pval(p, PF_VINYL, 2) * 0.05 * sin(s->lfo);          /* wow */
         s->speed = (float)ratio;
         float a, b;
         gran(L, s, L->ring1, ratio, &a, &b);
@@ -564,13 +644,18 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
             float tgt = perf_pval(p, fx, 0), q = 0.7f + perf_pval(p, fx, 1) * perf_pval(p, fx, 1) * 11.0f;
             s->fcs += (tgt - s->fcs) * 0.18f;
             float fc = s->fcs > 18000.0f ? 18000.0f : s->fcs < 20.0f ? 20.0f : s->fcs;
-            svf_set(s, fc, 1.0f / q);
+            svf_set(s, 0, fc, 1.0f / q);
+            svf_set(s, 1, fc, 1.4142f);            /* 2nd pole pair of the 24 dB slope: plain Butterworth, no extra resonance */
             s->lpl = 1.0f / (1.0f + 0.06f * (q - 0.7f));          /* level compensation */
             s->aux = logf(fc / 30.0f) / logf(600.0f);
         }
-        float lp, hp, lq, hq;
-        svf_run(s, 0, 0, il, &lp, &hp); svf_run(s, 1, 0, ir, &lq, &hq);
-        *wl = (fx == PF_LP ? lp : hp) * s->lpl; *wr = (fx == PF_LP ? lq : hq) * s->lpl;
+        s->slope += (perf_pval(p, fx, 2) - s->slope) * 0.002f;      /* 12 <-> 24 dB without a click: the 2nd stage always runs */
+        float lp, hp, lq, hq, l2, h2, l3, h3;
+        svf_run(s, 0, 0, 0, il, &lp, &hp); svf_run(s, 0, 1, 0, ir, &lq, &hq);
+        float o1l = fx == PF_LP ? lp : hp, o1r = fx == PF_LP ? lq : hq;
+        svf_run(s, 1, 0, 1, o1l, &l2, &h2); svf_run(s, 1, 1, 1, o1r, &l3, &h3);
+        float o2l = fx == PF_LP ? l2 : h2, o2r = fx == PF_LP ? l3 : h3;
+        *wl = (o1l + (o2l - o1l) * s->slope) * s->lpl; *wr = (o1r + (o2r - o1r) * s->slope) * s->lpl;
         break;
     }
     case PF_GATE: {                   /* beat-synced to the loop grid: open for the first half of each cell, swing delays the odd ones */
@@ -588,15 +673,16 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
     }
     case PF_KILL: {
         int m = (int)perf_pval(p, fx, 0);
-        if (m != s->kmode) {
-            s->kmode = m;
-            if (m == 1) svf_set(s, 400.0f, 1.4142f); else if (m == 2) svf_set(s, 2000.0f, 1.4142f);
-        }
+        if (m != s->kmode) s->kmode = m;
         if (m == 0) { *wl = *wr = 0.0f; s->speed = 0.0f; break; }
+        if ((s->fn++ & 15) == 0) {                 /* the split follows the knob smoothly */
+            s->fcs += (perf_pval(p, fx, 2) - s->fcs) * 0.18f;
+            svf_set(s, 0, s->fcs > 18000.0f ? 18000.0f : s->fcs < 20.0f ? 20.0f : s->fcs, 1.4142f);
+        }
         float lp, hp, lq, hq, l2, h2;
-        svf_run(s, 0, 0, il, &lp, &hp); svf_run(s, 1, 0, ir, &lq, &hq);            /* two stages: 24 dB/oct */
-        if (m == 1) { svf_run(s, 0, 1, hp, &l2, &h2); *wl = h2; svf_run(s, 1, 1, hq, &l2, &h2); *wr = h2; }   /* LOW kill = the lows are gone */
-        else { svf_run(s, 0, 1, lp, &l2, &h2); *wl = l2; svf_run(s, 1, 1, lq, &l2, &h2); *wr = l2; }          /* HIGH kill = the highs are gone */
+        svf_run(s, 0, 0, 0, il, &lp, &hp); svf_run(s, 0, 1, 0, ir, &lq, &hq);            /* two stages: 24 dB/oct */
+        if (m == 1) { svf_run(s, 0, 0, 1, hp, &l2, &h2); *wl = h2; svf_run(s, 0, 1, 1, hq, &l2, &h2); *wr = h2; }   /* LOW kill = the lows are gone */
+        else { svf_run(s, 0, 0, 1, lp, &l2, &h2); *wl = l2; svf_run(s, 0, 1, 1, lq, &l2, &h2); *wr = l2; }          /* HIGH kill = the highs are gone */
         s->speed = 0.5f;
         break;
     }
@@ -631,7 +717,8 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
             if (passes > 60.0) passes = 60.0;
             s->tail = passes * s->dly + 2000.0; s->rel = 1;
         } else s->tail -= 1.0;
-        *wl = il + el * 0.85f; *wr = ir + er * 0.85f;
+        float lvl = perf_pval(p, fx, 2);
+        *wl = il + el * lvl; *wr = ir + er * lvl;
         s->aux = s->env / 16000.0f > 1.0f ? 1.0f : s->env / 16000.0f;
         s->phase = (float)(s->dly / (double)SL_N);
         break;
@@ -646,7 +733,10 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
             float w = (float)j / (float)F;
             a = a * w + sl[(Lb + j) * 2] * (1.0f - w); b = b * w + sl[(Lb + j) * 2 + 1] * (1.0f - w);
         }
-        *wl = a; *wr = b;
+        float mix = perf_pval(p, fx, 1), dc = perf_pval(p, fx, 2);
+        s->env *= 1.0f - dc * dc * 4e-5f;                            /* decay: the held loop fades away slowly (0 = forever) */
+        a *= s->env; b *= s->env;
+        *wl = il + (a - il) * mix; *wr = ir + (b - ir) * mix;
         s->phase = (float)j / (float)Lb; s->speed = 1.0f;
         break;
     }
@@ -657,7 +747,7 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
 static void stage(perf_t *p, lane_t *L, int fx, float *x0, float *x1) {
     slot_t *s = &L->s[fx];
     float tgt = s->held ? 1.0f : 0.0f;
-    float fi = fx == PF_KILL ? FADE_KILL : FADE_IN, fo = fx == PF_KILL ? FADE_KILL : FADE_OUT;
+    float fi = fx == PF_KILL ? s->fk : FADE_IN, fo = fx == PF_KILL ? s->fk : FADE_OUT;
     if (s->g < tgt) { s->g += fi; if (s->g > tgt) s->g = tgt; }
     else if (s->g > tgt) { s->g -= fo; if (s->g < tgt) s->g = tgt; }
     float wl, wr;
