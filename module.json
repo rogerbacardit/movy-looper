@@ -1,9 +1,9 @@
 {
-  "id": "movy-looper",
-  "name": "Looper",
-  "abbrev": "LOOP",
-  "version": "0.1.0",
-  "description": "6-track live looper (Mark engine by Tim Cox) as a sound generator: pads drive rec/play/overdub/mute, knobs mix",
+  "id": "looper-606",
+  "name": "Looper 606",
+  "abbrev": "L606",
+  "version": "0.2.0",
+  "description": "6-track live looper (Mark engine by Tim Cox, modified) as a sound generator: pads drive rec/play/overdub/mute, knobs mix",
   "dsp": "dsp.so",
   "api_version": 2,
   "component_type": "sound_generator",
@@ -19,7 +19,7 @@
       "pad_layout": "drums",
       "levels": {
         "root": {
-          "name": "Looper",
+          "name": "Looper 606",
           "params": [
             {
               "key": "t1_level",
@@ -313,6 +313,18 @@
                 "On"
               ],
               "default": 0
+            },
+            {
+              "key": "trk_spd",
+              "name": "Speed",
+              "short_name": "SPD",
+              "type": "enum",
+              "options": [
+                "1/2x",
+                "1x",
+                "2x"
+              ],
+              "default": 1
             }
           ],
           "knobs": [
@@ -320,7 +332,8 @@
             "fx_amt",
             "trk_pan",
             "trk_rev",
-            "trk_shot"
+            "trk_shot",
+            "trk_spd"
           ]
         },
         "setup": {

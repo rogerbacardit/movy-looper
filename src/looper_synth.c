@@ -1,8 +1,8 @@
 /*
- * Movy Looper -- 6-track live looper as a Schwung sound_generator.
+ * Looper 606 -- 6-track live looper as a Schwung sound_generator.
  *
- * Shim around the Mark looper engine (mark_core.c, shipped unmodified in
- * src/; built with -DMARK_TRACKS=6, see scripts/patch-core.sh). This file
+ * Shim around our fork of the Mark looper engine (mark_core.c, modified for
+ * Looper 606; native MARK_TRACKS=6, undoable clear, varispeed). This file
  * translates
  *   MIDI notes (Movy drum-rack pads) -> mark_set_param() actions,
  *   hardware audio input (host mailbox) -> mark_process(),
@@ -12,6 +12,7 @@
  * Mark engine: (c) Tim Cox, MIT (https://github.com/timncox/schwung-mark),
  * see LICENSE-mark. Ideas from Boss RC-505 / Loopex only; no Loopex code.
  */
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -99,13 +100,23 @@ typedef struct {
     int  rec_len;                  /* index into REC_LEN_BARS */
     int  in_gain;                  /* 0..200 percent */
     int  clock_logged, audio_logged, notes_logged;
+    long in_frames;                /* frames rendered so far (diagnostics) */
+    int  in_peak_1s;               /* raw input peak over the first second */
+    int  in_diag_done;             /* the "peak after 1 s" line was logged */
+    int  in_peak_now;              /* raw peak of the last block (get_param in_peak) */
+    int  bpm_src_logged;           /* last tempo source logged (-1 = none yet) */
+    long pend_frames[NTRK];        /* frames a track has been waiting on the grid */
+    int  pend_logged;
     char hierarchy[32768];
 } synth_t;
 
-static void hlog(const char *fmt, int a) {
-    char b[160];
+static void hlog(const char *fmt, ...) {
+    char b[200];
+    va_list ap;
     if (!g_host || !g_host->log) return;
-    snprintf(b, sizeof b, fmt, a);
+    va_start(ap, fmt);
+    vsnprintf(b, sizeof b, fmt, ap);
+    va_end(ap);
     g_host->log(b);
 }
 
@@ -142,11 +153,17 @@ static int core_pending(synth_t *s, int t) {
     return atoi(p);
 }
 
+static const char *const BPM_SRC_NAME[4] = { "default 120", "host get_bpm()", "MIDI clock", "override" };
+
+/* Tempo the engine itself is using: override > running clock > host
+ * get_bpm() > 120. Always a sane value, so count-in / fixed length never
+ * stall waiting for a clock that Movy may not deliver. */
 static double cur_bpm(synth_t *s) {
-    int b = get_i(s, "bpm_override");
-    if (b < 20) b = get_i(s, "grid_bpm");
-    if (b < 20) b = 120;
-    return (double)b;
+    char b[32] = "";
+    double v = 0.0;
+    if (mark_get_param(s->m, "tempo_bpm", b, sizeof b) > 0) v = atof(b);
+    if (v < 20.0 || v > 999.0) v = 120.0;
+    return v;
 }
 
 static int shim_state(synth_t *s, int t) {
@@ -271,7 +288,7 @@ static void build_hierarchy(synth_t *s) {
         "[\"Empty\",\"Armed\",\"Rec\",\"Play\",\"Dub\",\"Stop\",\"Mute\"]";
     static const char *onoff = "[\"Off\",\"On\"]";
 
-    APP("{\"pad_layout\":\"drums\",\"levels\":{\"root\":{\"name\":\"Looper\",\"params\":[");
+    APP("{\"pad_layout\":\"drums\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
         APP("{\"key\":\"t%d_level\",\"name\":\"Track %d Vol\",\"short_name\":\"T%d\","
             "\"type\":\"int\",\"min\":0,\"max\":200,\"default\":100,\"step\":5},", t, t, t);
@@ -298,8 +315,10 @@ static void build_hierarchy(synth_t *s) {
         "{\"key\":\"trk_rev\",\"name\":\"Reverse\",\"short_name\":\"REV\",\"type\":\"enum\","
         "\"options\":%s,\"default\":0},"
         "{\"key\":\"trk_shot\",\"name\":\"One-shot\",\"short_name\":\"1SHOT\",\"type\":\"enum\","
-        "\"options\":%s,\"default\":0}],"
-        "\"knobs\":[\"fx_type\",\"fx_amt\",\"trk_pan\",\"trk_rev\",\"trk_shot\"]},",
+        "\"options\":%s,\"default\":0},"
+        "{\"key\":\"trk_spd\",\"name\":\"Speed\",\"short_name\":\"SPD\",\"type\":\"enum\","
+        "\"options\":[\"1/2x\",\"1x\",\"2x\"],\"default\":1}],"
+        "\"knobs\":[\"fx_type\",\"fx_amt\",\"trk_pan\",\"trk_rev\",\"trk_shot\",\"trk_spd\"]},",
         fxopts, onoff, onoff);
 
     APP("\"setup\":{\"name\":\"Setup\",\"params\":["
@@ -357,6 +376,7 @@ static void *gen_create(const char *module_dir, const char *json_defaults) {
     s->m = mark_create_in_dir(g_host, module_dir);
     if (!s->m) { free(s); return NULL; }
     s->cur_track = 1;
+    s->bpm_src_logged = -1;
     s->threshold = DEFAULT_THRESHOLD;
     s->in_gain = 100;
     for (int i = 0; i < NTRK; i++) {
@@ -365,8 +385,13 @@ static void *gen_create(const char *module_dir, const char *json_defaults) {
     mark_set_param(s->m, "hw_input", "1");
     mark_set_param(s->m, "session_dir", "/data/UserData/schwung/looper-sessions");
     build_hierarchy(s);
-    hlog("movy-looper: created, host get_bpm present=%d",
-         (g_host && g_host->get_bpm) ? 1 : 0);
+    hlog("looper-606: created, host get_bpm present=%d, track capacity %d s",
+         (g_host && g_host->get_bpm) ? 1 : 0, get_i(s, "track_secs"));
+    if (g_host && g_host->mapped_memory)
+        hlog("looper-606: input source = host mailbox (mapped_memory + audio_in_offset=%d)",
+             g_host->audio_in_offset);
+    else
+        hlog("looper-606: input source = NONE (host has no mapped_memory; output stays silent)");
     return s;
 }
 
@@ -387,8 +412,19 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
         if (abs(v) > peak) peak = abs(v);
         if (abs(in[i]) > raw) raw = abs(in[i]);
     }
+    s->in_peak_now = raw;
     if (!s->audio_logged && raw > 0) {
-        s->audio_logged = 1; hlog("movy-looper: audio_in is live (peak %d)", raw);
+        s->audio_logged = 1; hlog("looper-606: audio_in is live (peak %d)", raw);
+    }
+    if (!s->in_diag_done) {
+        if (raw > s->in_peak_1s) s->in_peak_1s = raw;
+        s->in_frames += frames;
+        if (s->in_frames >= MARK_SR) {
+            s->in_diag_done = 1;
+            hlog("looper-606: input peak after 1 s = %d%s", s->in_peak_1s,
+                 s->in_peak_1s ? "" : " (SILENT: the host mailbox carries no audio; "
+                                      "check line-in routing / jack)");
+        }
     }
     /* ARM: threshold crossing starts recording; count-in expiry too */
     int thr = s->threshold * 32768 / 100;
@@ -407,6 +443,44 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
         }
     }
     mark_process(s->m, buf, out, frames);
+
+    /* Tempo source, logged once (and again only if it changes). */
+    {
+        int src = get_i(s, "tempo_src");
+        if (src != s->bpm_src_logged && s->in_frames >= MARK_SR / 2 && s->bpm_src_logged < 100) {
+            hlog("looper-606: bpm source = %s (%d bpm)",
+                 BPM_SRC_NAME[src & 3], (int)(cur_bpm(s) + 0.5));
+            s->bpm_src_logged = src;
+        }
+    }
+
+    /* Quantize watchdog: a track must never wait on the grid forever (a
+     * clock that was started and then stopped ticking would do that).
+     * After 1.5 measures + 0.5 s, cancel the pending action and run it
+     * unquantized. */
+    {
+        long lim = (long)((double)MARK_SR * 60.0 / cur_bpm(s) * 4.0 * 1.5) + MARK_SR / 2;
+        for (int t = 1; t <= NTRK; t++) {
+            int i = t - 1;
+            if (core_pending(s, t)) {
+                s->pend_frames[i] += frames;
+                if (s->pend_frames[i] > lim) {
+                    int q = get_i(s, "quantize");
+                    s->pend_frames[i] = 0;
+                    trig_t(s, t, "btn");              /* cancels the pending action */
+                    set_i(s, "quantize", 0);
+                    trig_t(s, t, "btn");              /* ...and applies it now */
+                    set_i(s, "quantize", q);
+                    if (!s->pend_logged) {
+                        s->pend_logged = 1;
+                        hlog("looper-606: quantize wait timed out on track %d, started immediately", t);
+                    }
+                }
+            } else {
+                s->pend_frames[i] = 0;
+            }
+        }
+    }
 
     /* fixed length: close the recording after N bars */
     int bars = REC_LEN_BARS[s->rec_len];
@@ -434,20 +508,35 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
             trig_t(s, i + 1, "clear");
         }
     }
+
+    /* Keep-alive. Movy parks a chain whose synth has been silent for ~1 s
+     * (peak <= 4) and only renders it every ~0.5 s; its idle gate ignores a
+     * synth's requires_continuous_processing. A looper must keep running
+     * (loop positions, armed threshold, count-in, quantize), so while any
+     * track is in use we add a +-6 LSB Nyquist dither (about -74 dBFS). */
+    {
+        int active = 0;
+        for (int t = 1; t <= NTRK && !active; t++)
+            if (core_state(s, t) != MK_EMPTY || s->armed[t - 1] || s->countin[t - 1] >= 0)
+                active = 1;
+        if (active)
+            for (int n = 0; n < frames; n++) {
+                int d = (n & 1) ? -6 : 6, l = out[n * 2] + d, r = out[n * 2 + 1] + d;
+                out[n * 2]     = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
+                out[n * 2 + 1] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r);
+            }
+    }
 }
 
 static void gen_render(void *inst, int16_t *out_lr, int frames) {
     synth_t *s = (synth_t *)inst;
+    static const int16_t no_input[MAXBLK * 2];     /* zeros: loops still play without a mailbox */
     const int16_t *in = NULL;
     if (g_host && g_host->mapped_memory)
         in = (const int16_t *)(g_host->mapped_memory + g_host->audio_in_offset);
-    if (!in) {
-        memset(out_lr, 0, (size_t)frames * 2 * sizeof(int16_t));
-        return;
-    }
     for (int done = 0; done < frames; done += MAXBLK) {
         int n = frames - done < MAXBLK ? frames - done : MAXBLK;
-        tick_block(s, in + done * 2, out_lr + done * 2, n);
+        tick_block(s, in ? in + done * 2 : no_input, out_lr + done * 2, n);
     }
 }
 
@@ -456,7 +545,7 @@ static void gen_on_midi(void *inst, const uint8_t *msg, int len, int source) {
     if (!s || len < 1) return;
     uint8_t st = msg[0];
     if (st == 0xF8 && !s->clock_logged) {
-        s->clock_logged = 1; hlog("movy-looper: first MIDI clock received (src %d)", source);
+        s->clock_logged = 1; hlog("looper-606: first MIDI clock received (src %d)", source);
     }
     if (len >= 2 && source != MOVE_MIDI_SOURCE_FX_BROADCAST) {
         int hi = st & 0xF0;
@@ -465,7 +554,7 @@ static void gen_on_midi(void *inst, const uint8_t *msg, int len, int source) {
             int on = (hi == 0x90) && len >= 3 && msg[2] > 0;
             if (on && s->notes_logged < 8) {
                 s->notes_logged++;
-                hlog("movy-looper: note-on %d", msg[1]);
+                hlog("looper-606: note-on %d", msg[1]);
             }
             if (p && p->act != A_NONE) {
                 if (on) pad_down(s, p); else pad_up(s, p);
@@ -508,6 +597,7 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     if (!strcmp(key, "trk_pan"))  { set_t(s, s->cur_track, "pan", v); return; }
     if (!strcmp(key, "trk_rev"))  { set_t(s, s->cur_track, "rev", v ? 1 : 0); return; }
     if (!strcmp(key, "trk_shot")) { set_t(s, s->cur_track, "shot", v ? 1 : 0); return; }
+    if (!strcmp(key, "trk_spd"))  { set_t(s, s->cur_track, "spd", clampi(v, 0, 2)); return; }
     if (is_trk_key(key, &t, &k)) {
         if (!strcmp(k, "state")) return;                   /* read-only */
         if (!strcmp(k, "level") && s->muted[t - 1]) {      /* applied on unmute */
@@ -537,6 +627,8 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "trk_pan"))  RET("%d", get_t(s, s->cur_track, "pan"));
     if (!strcmp(key, "trk_rev"))  RET("%d", get_t(s, s->cur_track, "rev"));
     if (!strcmp(key, "trk_shot")) RET("%d", get_t(s, s->cur_track, "shot"));
+    if (!strcmp(key, "trk_spd"))  RET("%d", get_t(s, s->cur_track, "spd"));
+    if (!strcmp(key, "in_peak"))      RET("%d", s->in_peak_now);
     if (is_trk_key(key, &t, &k)) {
         if (!strcmp(k, "state")) RET("%d", shim_state(s, t));
         if (!strcmp(k, "level") && s->muted[t - 1]) RET("%d", s->saved_level[t - 1]);
