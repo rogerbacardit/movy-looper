@@ -140,6 +140,12 @@ Pedalera en el hub USB-A del Move, en modo **CUSTOM** (no PATCH). Necesita el bu
 
 Los interruptores 1, 4, 5 y 6 actuan al pisar. El 2 y el 3 tienen gesto de mantener, asi que su toque actua al soltar (si se solto antes de 1 s); un mantenido nunca dispara ademas el toque.
 
+## Mute y transporte de Movy (v0.8.0, build `module-leds` de Movy)
+
+El mute de pista de Movy (M + boton de pista, y el silencio que pone un solo) solo corta las notas secuenciadas; no toca el audio de un modulo. Con `track_mute_param` (`track_mute`, `"1"`/`"0"`) Movy avisa al looper: silencia toda su salida con un fundido de ~10 ms (las 6 pistas siguen corriendo en tiempo, como su MUTE) y la cabecera de la pantalla muestra `MUTED`. Movy lo escribe al cambiar y una vez al cargar el modulo.
+
+Con `transport_param` (`transport`, `"play"`/`"stop"`) el Play/Stop de la Move controla el looper: **Stop** = STOP ALL recordando que pistas sonaban (un segundo Stop conserva la memoria); **Play** = arranca exactamente esas pistas desde el inicio del loop, a compas si quantize esta activo; sin memoria, arranca todas las pistas con audio (ALL START). Una grabacion en curso no se toca.
+
 ## Pad colours and status text in Movy (needs the `module-leds` Movy build)
 
 The shim publishes read-only/write-only params and names them in the `ui_hierarchy`

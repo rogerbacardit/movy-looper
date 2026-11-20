@@ -1385,6 +1385,63 @@ int main(int argc, char **argv) {
         CHECK(state(1) == S_STOP && state(2) == S_PLAY);
     }
 
+    /* --- 0.8.0: Movy's track mute (track_mute_param) and transport (transport_param) --- */
+    {
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE; seti("monitor", 0);
+        char hb[32768]; A->get_param(S, "ui_hierarchy", hb, sizeof hb);
+        CHECK(strstr(hb, "\"track_mute_param\":\"track_mute\"") && strstr(hb, "\"transport_param\":\"transport\""));
+        tap(REC(1)); run(300); tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
+        out_peak = 0; run(20); CHECK(out_peak > 300 && geti("track_mute") == 0);
+        CHECK(!strstr(disp_head(), "MUTED"));
+        seti("track_mute", 1); CHECK(geti("track_mute") == 1);
+        run(8); out_peak = 0; run(30);
+        CHECK(out_peak <= 8);                              /* silent bar the keep-alive dither */
+        CHECK(state(1) == S_PLAY);                         /* the tracks keep running */
+        int p0 = disp_pos(); run(40); CHECK(disp_pos() != p0);
+        CHECK(!strncmp(disp_head(), "MUTED ", 6));
+        seti("track_mute", 0); run(8); out_peak = 0; run(20); CHECK(out_peak > 300);
+        CHECK(!strstr(disp_head(), "MUTED"));
+        /* the fade is click-free: the first block after muting is only partly attenuated, not cut */
+        { seti("track_mute", 1); out_peak = 0; run(1); int p1 = out_peak; CHECK(p1 > 1000);
+          run(6); out_peak = 0; run(1); CHECK(out_peak <= 8); seti("track_mute", 0); run(8); }
+
+        /* transport stop remembers what played; play restarts exactly those */
+        fresh(&host); seti("quantize", 0);
+        for (int k = 1; k <= 3; k++) { tap(REC(k)); run(300); tap(REC(k)); run(2); }
+        tap(STOP(3)); run(2);
+        CHECK(state(1) == S_PLAY && state(2) == S_PLAY && state(3) == S_STOP);
+        setstr("transport", "stop"); run(2);
+        CHECK(state(1) == S_STOP && state(2) == S_STOP && state(3) == S_STOP && !strcmp(status_text(), "TRANSPORT STOP"));
+        setstr("transport", "stop"); run(2);               /* a second stop keeps the memory */
+        setstr("transport", "play"); run(2);
+        CHECK(state(1) == S_PLAY && state(2) == S_PLAY && state(3) == S_STOP);
+        /* nothing remembered: play starts every track that holds audio (ALL START) */
+        fresh(&host); seti("quantize", 0);
+        for (int k = 1; k <= 2; k++) { tap(REC(k)); run(300); tap(REC(k)); run(2); }
+        tap(M_STOPALL); run(2); CHECK(state(1) == S_STOP && state(2) == S_STOP);
+        setstr("transport", "play"); run(2);
+        CHECK(state(1) == S_PLAY && state(2) == S_PLAY);
+        /* a recording in progress is left alone */
+        setstr("transport", "stop"); run(2);
+        tap(REC(3)); run(60); CHECK(state(3) == S_REC);
+        setstr("transport", "play"); run(2);
+        CHECK(state(3) == S_REC && state(1) == S_PLAY && state(2) == S_PLAY);
+        tap(REC(3)); run(2);
+        /* quantize on with a running clock: the restart waits for the bar */
+        fresh(&host); seti("quantize", 1);
+        { uint8_t st = 0xFA; A->on_midi(S, &st, 1, 3); }
+        clock_run(20);
+        tap(REC(1)); clock_run(800); tap(REC(1)); clock_run(800);
+        CHECK(state(1) == S_PLAY);
+        setstr("transport", "stop"); clock_run(4); CHECK(state(1) == S_STOP);
+        { uint8_t st = 0xFA; A->on_midi(S, &st, 1, 3); }
+        clock_run(20);
+        setstr("transport", "play"); run(1);
+        CHECK(state(1) == S_STOP);                         /* pending on the grid */
+        clock_run(1500); CHECK(state(1) == S_PLAY);
+        A->set_param(S, "transport", "junk"); CHECK(state(1) == S_PLAY);
+    }
+
     /* --- nothing crashes on garbage --- */
     uint8_t junk[3] = {0x90, 200, 100}; A->on_midi(S, junk, 3, 0);
     A->set_param(S, "nonsense", "1");

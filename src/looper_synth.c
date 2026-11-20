@@ -133,6 +133,9 @@ typedef struct {
         char fx_module[64];
         int muted[NTRK], saved_level[NTRK], solo, solo_saved[NTRK];
     } rsnap;
+    int  host_mute;                /* Movy muted this track (track_mute_param): the whole output is silenced */
+    float mute_g;                  /* the gain applied to it, ramped (audio thread) */
+    unsigned play_mask;            /* tracks playing at the last transport stop (bit i = track i+1), 0 = none */
     int  solo;                     /* soloed track, 0 = none */
     int  solo_saved[NTRK];         /* mute flags before the solo */
     int  count_bars;               /* count-in length in bars, 1 or 2 */
@@ -1146,6 +1149,7 @@ static void build_display(synth_t *s, char *out, size_t n) {
     }
     char hdr[48], hx[WAVE_BINS * 2 + 1], posf[24], tk[WAVE_BINS * 4 + 4];
     header_text(s, t, span, zoomed, hdr, sizeof hdr);
+    if (s->host_mute) { char h2[48]; snprintf(h2, sizeof h2, "MUTED %s", hdr); memcpy(hdr, h2, sizeof hdr); }
     for (char *c = hdr; *c; c++) if (*c == '|') *c = '/';      /* '|' separates the display fields */
     {
         uint8_t tb[WAVE_BINS], pb[WAVE_BINS];
@@ -1255,7 +1259,7 @@ static void build_hierarchy(synth_t *s) {
         "\"status_text_param\":\"status_text\",\"display_param\":\"display\",\"delete_pad_param\":\"delete_pad\","
         "\"step_buttons_param\":\"step\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
         "\"knob_capture_param\":\"knob_capture\",\"knob_page_param\":\"knob_page\",\"knob_delta_param\":\"knob_delta\",\"undo_param\":\"undo_cmd\","
-        "\"pedal_param\":\"pedal\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
+        "\"pedal_param\":\"pedal\",\"track_mute_param\":\"track_mute\",\"transport_param\":\"transport\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
         APP("{\"key\":\"t%d_level\",\"name\":\"Track %d Vol\",\"short_name\":\"T%d\","
             "\"type\":\"int\",\"min\":0,\"max\":200,\"default\":100,\"step\":5},", t, t, t);
@@ -1583,6 +1587,7 @@ static void *gen_create(const char *module_dir, const char *json_defaults) {
     s->threshold = DEFAULT_THRESHOLD;
     s->count_bars = 1;
     s->in_gain = 100;
+    s->mute_g = 1.0f;
     for (int i = 0; i < NTRK; i++) {
         s->countin[i] = -1; s->saved_level[i] = 100;
     }
@@ -1674,6 +1679,20 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
         }
     }
     mark_process(s->m, buf, out, frames);
+    /* Movy's track mute: a ~10 ms linear ramp to / from silence over the whole mix. The
+     * tracks keep running in time underneath, like the looper's own MUTE. */
+    {
+        float tgt = s->host_mute ? 0.0f : 1.0f;
+        if (s->mute_g != tgt || tgt == 0.0f) {
+            const float step = 1.0f / (MARK_SR * 0.01f);
+            for (int n = 0; n < frames; n++) {
+                if (s->mute_g < tgt) { s->mute_g += step; if (s->mute_g > tgt) s->mute_g = tgt; }
+                else if (s->mute_g > tgt) { s->mute_g -= step; if (s->mute_g < tgt) s->mute_g = tgt; }
+                out[n * 2]     = (int16_t)(out[n * 2] * s->mute_g);
+                out[n * 2 + 1] = (int16_t)(out[n * 2 + 1] * s->mute_g);
+            }
+        }
+    }
     s->clock_frames += frames;
     pedal_tick(s);
     for (int t = 1; t <= NTRK; t++) {
@@ -1816,6 +1835,28 @@ static int is_trk_key(const char *key, int *t, const char **rest) {
     return 0;
 }
 
+/* Movy's transport (transport_param). "stop": like STOP ALL, but the tracks that were
+ * playing or overdubbing are remembered (a second stop keeps what the first
+ * remembered). "play": start exactly those from the loop start, quantized to the bar
+ * when quantize is on; nothing remembered = every track holding audio (ALL START).
+ * Tracks recording, playing or overdubbing are not touched by "play". */
+static void transport_cmd(synth_t *s, const char *val) {
+    if (!strcmp(val, "stop")) {
+        unsigned mask = 0;
+        for (int k = 1; k <= NTRK; k++) {
+            int st = core_state(s, k);
+            if (st == MK_PLAY || st == MK_DUB) mask |= 1u << (k - 1);
+        }
+        if (mask) s->play_mask = mask;
+        say(s, "TRANSPORT STOP");
+        for (int k = 1; k <= NTRK; k++) { clear_flags(s, k); trig_t(s, k, "stop"); }
+    } else if (!strcmp(val, "play")) {
+        char b[16]; snprintf(b, sizeof b, "%u", s->play_mask);
+        say(s, "TRANSPORT PLAY");
+        mark_set_param(s->m, "resume", b);
+    }
+}
+
 static void gen_set_param(void *inst, const char *key, const char *val) {
     synth_t *s = (synth_t *)inst;
     int t; const char *k;
@@ -1832,6 +1873,8 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     if (!strcmp(key, "knob_delta")) { knob_delta(s, val); return; }
     if (!strcmp(key, "undo_cmd"))  { undo_cmd(s, val); return; }
     if (!strcmp(key, "pedal"))     { pedal_set(s, val); return; }
+    if (!strcmp(key, "track_mute")) { s->host_mute = v ? 1 : 0; return; }
+    if (!strcmp(key, "transport")) { transport_cmd(s, val); return; }
     if (!strcmp(key, "state"))     { state_set(s, val); return; }
     if (!strcmp(key, "in_gain"))   { s->in_gain = clampi(v, 0, 200); return; }
     if (!strcmp(key, "arm")) {
@@ -1873,6 +1916,7 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "rec_len"))      RET("%d", s->rec_len);
     if (!strcmp(key, "in_gain"))      RET("%d", s->in_gain);
     if (!strcmp(key, "arm"))          RET("%d", s->arm);
+    if (!strcmp(key, "track_mute"))   RET("%d", s->host_mute);
     if (!strcmp(key, "fx_type"))  RET("%d", get_t(s, s->cur_track, "fx"));
     if (!strcmp(key, "fx_amt"))   RET("%d", get_t(s, s->cur_track, "fxp"));
     if (!strcmp(key, "trk_pan"))  RET("%d", get_t(s, s->cur_track, "pan"));

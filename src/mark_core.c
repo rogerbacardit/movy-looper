@@ -1672,6 +1672,23 @@ static void all_button(mark_t *m) {
     }
 }
 
+/* Start the stopped tracks in `mask` (bit i = track i+1; 0 = every track that
+ * holds audio) from the loop start, through the same quantized path as a track
+ * button: on the bar when quantize is on and something runs, else at once.
+ * Tracks that record, play or overdub are left alone, so a recording in
+ * progress is never touched. SINGLE mode starts only the first. */
+static void resume_tracks(mark_t *m, unsigned mask) {
+    if (m->io_busy) return;
+    for (int i = 0; i < MARK_TRACKS; i++) {
+        mk_track_t *t = &m->t[i];
+        if (mask && !(mask & (1u << i))) continue;
+        if (t->len > 0 && t->st == MK_STOP && !t->pending && m->swap_track != i) {
+            schedule(m, i, 2);
+            if (m->play_mode) break;
+        }
+    }
+}
+
 static void undo_press(mark_t *m) {
     if (m->undo_track < 0 || m->swap_track >= 0 || m->io_busy) return;
     mk_track_t *t = &m->t[m->undo_track];
@@ -2778,6 +2795,7 @@ void mark_set_param(mark_t *m, const char *key, const char *val) {
     }
 
     if (!strcmp(key, "all_btn"))  { if (trig_active(val)) all_button(m); return; }
+    if (!strcmp(key, "resume"))   { resume_tracks(m, (unsigned)atoi(val)); return; }
     if (!strcmp(key, "undo"))     { if (trig_active(val)) undo_press(m); return; }
     if (!strcmp(key, "quantize")) { m->quantize = atoi(val) ? 1 : 0; m->edit_rev++; return; }
     if (!strcmp(key, "rec_grid")) { m->rec_grid = clampi(atoi(val), 0, 3); m->edit_rev++; return; }
