@@ -25,6 +25,8 @@
 
 #include "plugin_api_v1.h"
 #include "mark_core.h"
+#include "perform.h"
+#include "perform_ui.h"
 
 /* ------------------------------------------------------------------ */
 /*  PAD <-> ACTION TABLE (the one place to change the pad layout)      */
@@ -122,6 +124,10 @@ typedef struct {
     int  rec_len;                  /* fixed recording length in bars, 0 = free */
     int  sel;                      /* PISTA view: selected track 1..NTRK, 0 = MIX */
     int  shift_held;               /* looper SHIFT pad is down */
+    perf_t *perf;                  /* PERFORM effects (perform.c), attached to the core */
+    perf_ui_t pui;                 /* PERFORM graphics state (get_param path only) */
+    int  perf_step;                /* step button holding an effect, -1 = none */
+    int  perf_tgt;                 /* target frozen at the press: 0 = MIX, else the track */
     int  knob_acc[9];              /* detent accumulators of the enum knobs */
     int  last_knob;                /* last PISTA knob touched (display view) */
     char pista_lab[24];            /* readout of the last PISTA knob ("IN +8/16") */
@@ -514,6 +520,24 @@ static void pista_select(synth_t *s, int t) {
     s->wave_dirty = 1;
 }
 
+/* ---- PERFORM (perform.c): SHIFT + a held step = a momentary effect --------
+ * Steps 1..8 are batch 1; 9..16 are reserved for batch 2 and do nothing yet.
+ * The target is frozen at the press: the selected track in PISTA, the whole mix
+ * in MIX. Releasing SHIFT while the step is still down keeps the effect. */
+#define PERF_STEPS PF_NFX
+static void perf_step_down(synth_t *s, int button) {
+    if (button < 0 || button >= PERF_STEPS || !s->perf) return;
+    mark_set_perf_target(s->m, s->sel);
+    s->perf_step = button;
+    s->perf_tgt = s->sel;
+    perf_set_want(s->perf, button);
+}
+static void perf_step_up(synth_t *s, int button) {
+    if (s->perf_step != button) return;          /* an older step let go: the newer one still holds */
+    s->perf_step = -1;
+    perf_set_want(s->perf, -1);
+}
+
 /* Movy's knob capture (knob_capture = 1 while PISTA is active): "N:delta[:fine]".
  * Knobs act on the selected track. No fine mode here (SHIFT is reserved for a
  * second page of knobs): IN/OUT always move on the 1/16 grid. Fine survives
@@ -521,6 +545,10 @@ static void pista_select(synth_t *s, int t) {
 static void knob_delta(synth_t *s, const char *val) {
     int n = 0, d = 0, fine = 0;
     if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
+    if (s->perf_step >= 0) {                      /* a PERFORM effect is held: the knobs are its parameters */
+        if (n >= 1 && n <= PF_NKNOB && d != 0 && n <= perf_nparams(s->perf_step)) perf_knob(s->perf, s->perf_step, n - 1, d);
+        return;
+    }
     if (n < 1 || n > 8 || d == 0 || s->sel == 0) return;
     int t = s->sel;
     fine = 0;
@@ -1000,6 +1028,14 @@ static void build_pad_leds(synth_t *s, char *out) {
 /* step_leds: the 16 step buttons show the fixed recording length. Free = all
  * dark; N bars = steps 1..N-1 dim, step N white, the rest dark. 32 hex digits. */
 static void build_step_leds(synth_t *s, char *out) {
+    if (s->shift_held || s->perf_step >= 0) {      /* PERFORM page: family colours, the held one white */
+        static const uint8_t FAM[4] = { L_ROYAL_BLUE, L_ORANGE, L_PURPLE, L_CYAN };
+        for (int i = 0; i < 16; i++) {
+            int c = i >= PF_NFX ? L_DARK_GREY : i == s->perf_step ? L_WHITE : FAM[perf_family(i)];
+            snprintf(out + i * 2, 3, "%02X", c);
+        }
+        return;
+    }
     int bars = s->rec_len;                       /* next recording... */
     if (clip_state(core_state(s, s->cur_track))) bars = clip_bars(s, s->cur_track);   /* ...or the selected clip */
     for (int i = 0; i < 16; i++) {
@@ -1257,7 +1293,7 @@ static void build_hierarchy(synth_t *s) {
 
     APP("{\"pad_layout\":\"drums\",\"pad_leds_param\":\"pad_leds\","
         "\"status_text_param\":\"status_text\",\"display_param\":\"display\",\"delete_pad_param\":\"delete_pad\","
-        "\"step_buttons_param\":\"step\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
+        "\"step_buttons_param\":\"step\",\"step_up_param\":\"step_up\",\"screen_param\":\"screen\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
         "\"knob_capture_param\":\"knob_capture\",\"knob_page_param\":\"knob_page\",\"knob_delta_param\":\"knob_delta\",\"undo_param\":\"undo_cmd\","
         "\"pedal_param\":\"pedal\",\"track_mute_param\":\"track_mute\",\"transport_param\":\"transport\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
@@ -1583,6 +1619,9 @@ static void *gen_create(const char *module_dir, const char *json_defaults) {
     s->m = mark_create_in_dir(g_host, module_dir);
     if (!s->m) { free(s); return NULL; }
     s->cur_track = 1;
+    s->perf_step = -1;
+    s->perf = perf_create();
+    mark_set_perf(s->m, s->perf);
     s->bpm_src_logged = -1;
     s->threshold = DEFAULT_THRESHOLD;
     s->count_bars = 1;
@@ -1611,7 +1650,9 @@ static void gen_destroy(void *inst) {
     synth_t *s = (synth_t *)inst;
     if (!s) return;
     persist_stop_and_flush(s);
+    mark_set_perf(s->m, NULL);
     mark_destroy(s->m);
+    perf_destroy(s->perf);
     free(s);
 }
 
@@ -1868,7 +1909,8 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     if (!strcmp(key, "threshold")) { s->threshold = clampi(v, -70, -6); return; }
     if (!strcmp(key, "count_in"))  { s->count_in = v ? 1 : 0; return; }
     if (!strcmp(key, "rec_len"))   { s->rec_len = clampi(v, 0, MAX_BARS); return; }
-    if (!strcmp(key, "step"))      { step_press(s, v); return; }
+    if (!strcmp(key, "step"))      { if (s->shift_held) perf_step_down(s, v); else step_press(s, v); return; }
+    if (!strcmp(key, "step_up"))   { perf_step_up(s, v); return; }
     if (!strcmp(key, "loop_knob")) { loop_knob(s, val); return; }
     if (!strcmp(key, "knob_delta")) { knob_delta(s, val); return; }
     if (!strcmp(key, "undo_cmd"))  { undo_cmd(s, val); return; }
@@ -1940,8 +1982,18 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
         build_step_leds(s, hx);
         RET("%s", hx);
     }
-    if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0);
+    if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0 || s->perf_step >= 0);
+    if (!strcmp(key, "screen")) {
+        static char sc[GFX_HEX_LEN + 24];       /* get_param runs on one thread */
+        perf_ui_param(&s->pui, s->perf, s->shift_held, s->perf_step >= 0 ? s->perf_tgt : s->sel, s->clock_frames, sc, sizeof sc);
+        RET("%s", sc);
+    }
     if (!strcmp(key, "sel"))          RET("%d", s->sel);
+    if (!strcmp(key, "perf_fx"))      RET("%d", s->perf_step);
+    if (!strncmp(key, "perf_p", 6)) {              /* perf_p<fx>_<knob>: stored 0..100 of a PERFORM knob */
+        int fx, kb;
+        if (sscanf(key + 6, "%d_%d", &fx, &kb) == 2) RET("%d", perf_pct(s->perf, fx, kb));
+    }
     if (!strcmp(key, "loop_id"))      RET("%s", loop_id_now(s));
     if (!strcmp(key, "state"))        return state_get(s, buf, buf_len);
     if (!strcmp(key, "pad_leds")) {

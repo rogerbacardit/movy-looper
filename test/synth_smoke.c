@@ -44,21 +44,27 @@ static void fresh(host_api_v1_t *h) {
 static int fails, checks;
 #define CHECK(c) do { checks++; if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
 
-enum { IN_SINE, IN_SILENCE, IN_LOUD };
-static int in_mode = IN_SINE; static double ph; static int in_dc = 0;
+enum { IN_SINE, IN_SILENCE, IN_LOUD, IN_RICH };
+static int in_mode = IN_SINE; static double ph; static int in_dc = 0; static long rich_n;
 static void fill_input(void) {
     int16_t *in = (int16_t *)(mem + 2304);
     for (int i = 0; i < 128; i++) {
         double a = in_mode == IN_SILENCE ? 0.0 : in_mode == IN_LOUD ? 0.5 : 0.25;
         int16_t v = (int16_t)(sin(ph) * a * 32767.0); ph += 2 * M_PI * 220.0 / 44100.0;
+        if (in_mode == IN_RICH) {       /* a decaying two-tone "drum" every 11025 frames: deterministic and non-periodic enough */
+            double env = exp(-(double)(rich_n++ % 11025) / 2500.0);
+            v = (int16_t)((sin(ph) * 0.5 + sin(ph * 1.5) * 0.3) * env * 0.6 * 32767.0);
+        }
         if (in_dc) v = (int16_t)in_dc;
         in[2 * i] = in[2 * i + 1] = v;
     }
 }
 static int16_t out[256]; static int out_peak;
+static int16_t *recbuf; static long recpos; static int recing;     /* optional recording of the left channel */
 static void run(int blocks) {
     for (int b = 0; b < blocks; b++) {
         fill_input(); A->render_block(S, out, 128);
+        if (recing) for (int i = 0; i < 128; i++) recbuf[recpos++] = out[2 * i];
         for (int i = 0; i < 256; i++) if (abs(out[i]) > out_peak) out_peak = abs(out[i]);
     }
 }
@@ -163,6 +169,58 @@ static void wait_until_saved(const char *dir, const char *f, int ms) {
 #define R_FIXLEN note_of(2, 7)
 #define R_RECACT note_of(3, 7)
 #define R_COUNTIN note_of(4, 7)
+
+
+/* ---- PERFORM scenarios: the same timeline with and without an effect ---- */
+#define PRE 108
+enum { PF_BEATREP, PF_STUTTER, PF_PITCH, PF_CRUSH, PF_TSTOP, PF_TSTART, PF_REVERSE, PF_VINYL };
+static void scen(int16_t *dst, int fx, int sel, int rec_mode, int hold, int tail, const char *knobs, int silent) {
+    fresh(&host); seti("quantize", 0);
+    ph = 0; rich_n = 0; in_mode = rec_mode;
+    tap(REC(1)); run(300); tap(REC(1)); run(2);
+    if (sel) tap(FX(1));
+    recbuf = dst; recpos = 0; recing = 1;
+    run(PRE);
+    if (fx >= 0) {
+        char b[8]; snprintf(b, sizeof b, "%d", fx);
+        down(M_SHIFT); setstr("step", b); up(M_SHIFT);      /* SHIFT is released while the step stays down */
+        for (const char *k = knobs; k && *k; ) {
+            setstr("knob_delta", k);
+            k = strchr(k, ';'); if (k) k++;
+        }
+    }
+    if (silent) in_mode = IN_SILENCE;
+    run(hold);
+    if (fx >= 0) { char b[8]; snprintf(b, sizeof b, "%d", fx); setstr("step_up", b); }
+    in_mode = rec_mode;
+    run(tail);
+    recing = 0;
+}
+static long ndiff(const int16_t *a, const int16_t *b, long from, long to) {
+    long n = 0; for (long i = from; i < to; i++) if (a[i] != b[i]) n++; return n;
+}
+static int maxjump(const int16_t *a, long from, long to) {
+    int m = 0; for (long i = from + 1; i < to; i++) { int d = abs(a[i] - a[i - 1]); if (d > m) m = d; } return m;
+}
+static int cross_count(const int16_t *a, long from, long to) {
+    int c = 0, sg = 0;
+    for (long i = from; i < to; i++) {
+        if (a[i] > 300 && sg <= 0) { if (sg < 0) c++; sg = 1; } else if (a[i] < -300 && sg >= 0) { if (sg > 0) c++; sg = -1; }
+    }
+    return c;
+}
+static int peak_of(const int16_t *a, long from, long to) { int m = 0; for (long i = from; i < to; i++) if (abs(a[i]) > m) m = abs(a[i]); return m; }
+static int ndistinct(const int16_t *a, long from, long to) {
+    int16_t seen[64]; int n = 0;
+    for (long i = from; i < to; i++) {
+        int f = 0; for (int k = 0; k < n; k++) if (seen[k] == a[i]) { f = 1; break; }
+        if (!f) { if (n < 64) seen[n++] = a[i]; else return 64; }
+    }
+    return n;
+}
+static char scr[4300];
+static const char *screen(void) { scr[0] = 0; A->get_param(S, "screen", scr, sizeof scr); return scr; }
+static unsigned scr_seq(void) { const char *b = strchr(screen(), '|'); return b ? (unsigned)atoi(scr) : 0xFFFFFFFFu; }
 
 static char pdir[200];
 int main(int argc, char **argv) {
@@ -1440,6 +1498,148 @@ int main(int argc, char **argv) {
         CHECK(state(1) == S_STOP);                         /* pending on the grid */
         clock_run(1500); CHECK(state(1) == S_PLAY);
         A->set_param(S, "transport", "junk"); CHECK(state(1) == S_PLAY);
+    }
+
+
+    /* ================= PERFORM (SHIFT + hold a step) ================= */
+    {
+        static int16_t ref[1200 * 128], eff[1200 * 128];
+        const int HOLD = 150, TAIL = 360;
+        const long H0 = (long)PRE * 128, H1 = (long)(PRE + HOLD) * 128, TOT = (long)(PRE + HOLD + TAIL) * 128;
+        static const char *const FXN[8] = { "beat repeat", "stutter", "pitch", "bitcrush", "tape stop", "tape start", "reverse", "vinyl" };
+        for (int sel = 0; sel <= 1; sel++) {
+            scen(ref, -1, sel, IN_RICH, HOLD, TAIL, NULL, 0);
+            int refjump = maxjump(ref, 0, TOT);
+            for (int fx = 0; fx < 8; fx++) {
+                scen(eff, fx, sel, IN_RICH, HOLD, TAIL, NULL, 0);
+                long dur = ndiff(eff, ref, H0 + 1000, H1);
+                long after = ndiff(eff, ref, H1 + 12 * 128, TOT);
+                int jump = maxjump(eff, H0 - 128, H1 + 20 * 128);
+                if (dur <= 100 || after || jump > refjump * 2 + 4000) printf("  (%s, sel %d: dur %ld after %ld jump %d ref %d)\n", FXN[fx], sel, dur, after, jump, refjump);
+                CHECK(dur > 100);                                 /* the effect engages */
+                CHECK(after == 0);                                /* released: bit-exact, in sync, the loop buffer untouched (a full loop later) */
+                CHECK(jump <= refjump * 2 + 4000);                /* click-free engage and release */
+                CHECK(ndiff(eff, ref, 0, H0) == 0);               /* nothing before the press */
+                CHECK(geti("perf_fx") == -1);
+            }
+        }
+        /* the SHIFT page and the held effect survive SHIFT being released */
+        fresh(&host); seti("quantize", 0);
+        CHECK(!strcmp(screen(), ""));                             /* nothing to draw without SHIFT */
+        down(M_SHIFT);
+        CHECK(step_led(0) == 17 && step_led(1) == 14 && step_led(2) == 20 && step_led(3) == 20 && step_led(4) == 3 && step_led(7) == 3);
+        CHECK(step_led(8) == 119 && step_led(15) == 119);         /* batch 2: dim */
+        setstr("step", "2");
+        CHECK(geti("perf_fx") == 2 && step_led(2) == 120);        /* the held one is white */
+        up(M_SHIFT);
+        CHECK(geti("perf_fx") == 2 && step_led(2) == 120 && geti("knob_capture") == 1);
+        setstr("step_up", "5"); CHECK(geti("perf_fx") == 2);      /* another step's release is not ours */
+        setstr("step_up", "2"); CHECK(geti("perf_fx") == -1 && geti("knob_capture") == 0);
+        CHECK(step_led(2) != 120 && step_led(0) == 119);          /* no SHIFT: the length LEDs again */
+        /* without SHIFT a step still sets the length */
+        setstr("step", "3"); CHECK(geti("rec_len") == 4 && geti("perf_fx") == -1);
+        setstr("step_up", "3");
+        down(M_SHIFT); setstr("step", "9"); CHECK(geti("perf_fx") == -1 && geti("rec_len") == 4);   /* batch-2 slot: nothing */
+        setstr("step", "0"); CHECK(geti("perf_fx") == 0);
+        setstr("step", "6"); CHECK(geti("perf_fx") == 6);         /* a newer step takes over */
+        setstr("step_up", "0"); CHECK(geti("perf_fx") == 6);
+        setstr("step_up", "6"); CHECK(geti("perf_fx") == -1);
+        up(M_SHIFT); setstr("step", "3"); setstr("step_up", "3");
+
+        /* knobs: each effect remembers its settings */
+        down(M_SHIFT);
+        for (int fx = 0; fx < 8; fx++) {
+            char b[8], k[8]; snprintf(b, sizeof b, "%d", fx);
+            char key[16]; snprintf(key, sizeof key, "perf_p%d_0", fx);
+            int before = geti(key);
+            setstr("step", b); setstr("knob_delta", "1:5"); setstr("step_up", b);
+            int nk = fx == 0 ? 3 : fx == 3 || fx == 7 ? 2 : fx == 6 ? 0 : 1;
+            if (nk) CHECK(geti(key) == before + 10); else CHECK(geti(key) == before);
+            setstr("step", b); CHECK(geti(key) == (nk ? before + 10 : before)); setstr("step_up", b);   /* remembered */
+            if (nk > 1) { snprintf(k, sizeof k, "2:-3"); snprintf(key, sizeof key, "perf_p%d_1", fx); int b1 = geti(key);
+                          setstr("step", b); setstr("knob_delta", k); setstr("step_up", b); CHECK(geti(key) == (b1 - 6 < 0 ? 0 : b1 - 6)); }
+            setstr("step", b); setstr("knob_delta", "8:5"); setstr("step_up", b);   /* an unused knob is ignored */
+        }
+        up(M_SHIFT);
+        CHECK(geti("perf_p0_0") == 30 && geti("perf_p1_0") == 43 && geti("perf_p6_0") == 0);
+        setstr("knob_delta", "1:5");                              /* no effect held, MIX: knobs are not ours */
+        CHECK(geti("perf_p0_0") == 30);
+
+        /* beat repeat: the captured slice repeats at the rate grid (the first loop is the grid: 300 blocks = 4 beats, so 1/8 = 4800 frames) */
+        scen(eff, PF_BEATREP, 1, IN_RICH, 200, 20, "2:-20", 1);
+        { long a0 = H0 + 800, n = 11025 - 100; long bad = 0;
+          for (long i = 0; i < 12000; i++) { if (abs(eff[a0 + i] - eff[a0 + i + 4800]) > 40) bad++; }
+          (void)n; CHECK(bad == 0); }
+        /* a faster rate (1/16 = 5512 frames) changes the pattern */
+        scen(ref, PF_BEATREP, 1, IN_RICH, 200, 20, "2:-20;1:+10", 1);
+        { long bad = 0; for (long i = 0; i < 12000; i++) if (abs(ref[H0 + 800 + i] - ref[H0 + 800 + i + 2400]) > 40) bad++; CHECK(bad == 0);
+          CHECK(ndiff(ref, eff, H0 + 800, H0 + 12000) > 100); }
+        /* decay: each repeat is quieter */
+        scen(eff, PF_BEATREP, 1, IN_RICH, 200, 20, "2:+30", 1);
+        CHECK(peak_of(eff, H0 + 4800 * 3 + 400, H0 + 4800 * 3 + 4000) < peak_of(eff, H0 + 400, H0 + 4000) / 2);
+
+        /* pitch +12 doubles the frequency, keeping time; bit crush has few levels */
+        scen(ref, -1, 1, IN_SINE, 150, 20, NULL, 1);
+        scen(eff, PF_PITCH, 1, IN_SINE, 150, 20, "1:+12", 1);
+        { int c0 = cross_count(ref, H0 + 20 * 128, H0 + 130 * 128), c1 = cross_count(eff, H0 + 20 * 128, H0 + 130 * 128);
+          CHECK(c1 * 10 > c0 * 17 && c1 * 10 < c0 * 24); }
+        scen(eff, PF_PITCH, 1, IN_SINE, 150, 20, "1:-40", 1);
+        { int c0 = cross_count(ref, H0 + 20 * 128, H0 + 130 * 128), c1 = cross_count(eff, H0 + 20 * 128, H0 + 130 * 128);
+          CHECK(c1 * 10 > c0 * 4 && c1 * 10 < c0 * 6); }
+        scen(eff, PF_CRUSH, 1, IN_SINE, 150, 20, "1:+30", 1);
+        CHECK(ndistinct(eff, H0 + 40 * 128, H0 + 140 * 128) <= 16 && ndistinct(ref, H0 + 40 * 128, H0 + 140 * 128) > 40);
+        /* tape stop: ramps down, silent while held, back when released */
+        scen(eff, PF_TSTOP, 1, IN_RICH, 150, 20, "1:-40", 1);
+        CHECK(peak_of(eff, H0 + 128, H0 + 6 * 128) > 1000 && peak_of(eff, H0 + 80 * 128, H1) <= 24);
+        /* tape start: from silence, up to full */
+        scen(eff, PF_TSTART, 1, IN_RICH, 150, 20, "1:-40", 1);
+        scen(ref, -1, 1, IN_RICH, 150, 20, NULL, 1);
+        CHECK(peak_of(eff, H0 + 2 * 128, H0 + 3 * 128) * 4 < peak_of(ref, H0 + 2 * 128, H0 + 3 * 128));   /* after the 4 ms crossfade it starts from silence */
+        CHECK(peak_of(eff, H0 + 100 * 128, H1) > 1000);
+        /* vinyl drifts down in pitch and keeps playing */
+        scen(ref, -1, 1, IN_SINE, 150, 20, NULL, 1);
+        scen(eff, PF_VINYL, 1, IN_SINE, 150, 20, "2:-20", 1);
+        { int c0 = cross_count(ref, H0 + 100 * 128, H1), c1 = cross_count(eff, H0 + 100 * 128, H1);
+          CHECK(c1 * 100 < c0 * 97 && c1 * 100 > c0 * 70); }
+        /* the target: PISTA 2 leaves track 1 alone, MIX takes everything */
+        fresh(&host); seti("quantize", 0); in_mode = IN_RICH; rich_n = 0;
+        for (int k = 1; k <= 2; k++) { tap(REC(k)); run(300); tap(REC(k)); run(2); }
+        tap(FX(2)); down(M_SHIFT); setstr("step", "4"); up(M_SHIFT); in_mode = IN_SILENCE;
+        run(400); out_peak = 0; run(40); CHECK(out_peak > 1000);   /* tape stop on track 2 only: track 1 still plays */
+        setstr("step_up", "4"); run(10);
+        tap(FX(2)); CHECK(geti("sel") == 0);                        /* back to MIX */
+        down(M_SHIFT); setstr("step", "4"); up(M_SHIFT);
+        run(400); out_peak = 0; run(40); CHECK(out_peak <= 24);    /* tape stop on the whole mix */
+        setstr("step_up", "4"); run(10); out_peak = 0; run(40); CHECK(out_peak > 1000);
+
+        /* screen_param: nothing -> "", else "<seq>|<2048 hex>"; drawing only on get_param, ~25 fps */
+        fresh(&host); seti("quantize", 0); in_mode = IN_RICH;
+        tap(REC(1)); run(300); tap(REC(1)); run(2);
+        CHECK(!strcmp(screen(), ""));
+        down(M_SHIFT);
+        { const char *b = screen(); const char *bar = strchr(b, '|');
+          CHECK(bar && strlen(bar + 1) == 2048 && strspn(bar + 1, "0123456789ABCDEF") == 2048);
+          CHECK(strncmp(bar + 1, "00000000000000000000000000000000", 32) == 0);     /* row 0 is dark (title bar starts on row 1) */
+          CHECK(bar[1 + 32] == '7' && bar[2 + 32] == 'F'); }       /* row 1: the inverted title bar, x = 1..126 */
+        unsigned q0 = scr_seq(); CHECK(scr_seq() == q0);            /* same frame period: same seq */
+        run(400);                                                   /* ~1.2 s of audio and NO get_param */
+        unsigned q1 = scr_seq(); CHECK(q1 == q0);                   /* the page is static: nothing to redraw */
+        setstr("step", "0");
+        run(40); unsigned a0 = scr_seq();
+        run(400); unsigned a1 = scr_seq();
+        CHECK(a1 == a0 + 1 || a1 == a0 + 2);                        /* process() never drew: one get_param = at most one new frame */
+        run(30); unsigned a2 = scr_seq(); CHECK(a2 != a1);          /* animating: a new frame per period */
+        { const char *bar = strchr(screen(), '|'); CHECK(bar && strlen(bar + 1) == 2048); }
+        up(M_SHIFT);
+        CHECK(strchr(screen(), '|') != NULL);                       /* the effect scene stays while the step is held */
+        setstr("step_up", "0"); run(8);
+        CHECK(!strcmp(screen(), ""));
+        for (int fx = 0; fx < 8; fx++) {                            /* every scene draws, in PISTA and MIX */
+            char b[8]; snprintf(b, sizeof b, "%d", fx);
+            down(M_SHIFT); setstr("step", b); run(30);
+            const char *bar = strchr(screen(), '|'); CHECK(bar && strlen(bar + 1) == 2048);
+            setstr("step_up", b); up(M_SHIFT); run(8);
+        }
     }
 
     /* --- nothing crashes on garbage --- */

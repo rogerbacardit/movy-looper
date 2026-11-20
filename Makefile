@@ -13,10 +13,11 @@ endif
 
 test-synth:
 	@mkdir -p build
-	$(CC) $(CFLAGS) -fPIC $(SHARED_FLAGS) src/mark_core.c src/looper_synth.c -o build/looper-606-host.so -lm -lpthread -ldl
+	$(CC) $(CFLAGS) -fPIC $(SHARED_FLAGS) src/mark_core.c src/looper_synth.c src/gfx1.c src/perform.c src/perform_ui.c -o build/looper-606-host.so -lm -lpthread -ldl
 	$(CC) $(CFLAGS) test/synth_smoke.c -o build/synth_smoke -ldl -lm
 	./build/synth_smoke build/looper-606-host.so build/hierarchy.json
 	python3 scripts/check-hierarchy.py build/hierarchy.json module.json
+	./scripts/check-no-draw-in-process.sh
 
 module-json:
 	python3 scripts/check-hierarchy.py build/hierarchy.json module.json --write
@@ -26,3 +27,10 @@ arm-synth:
 
 clean:
 	rm -rf build
+
+FRAMES_DIR ?= build/perform-frames
+.PHONY: perform-frames
+perform-frames: test-synth
+	$(CC) $(CFLAGS) test/perform_frames.c -o build/perform_frames -ldl -lm
+	./build/perform_frames build/looper-606-host.so $(FRAMES_DIR)
+	python3 scripts/frames2png.py $(FRAMES_DIR) 6

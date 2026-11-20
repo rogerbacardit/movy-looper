@@ -6,6 +6,7 @@ h = json.load(open(sys.argv[1]))
 L = h["levels"]
 assert h["pad_layout"] == "drums"
 assert h["step_buttons_param"] == "step" and h["step_leds_param"] == "step_leds" and h["loop_knob_param"] == "loop_knob"
+assert h["step_up_param"] == "step_up" and h["screen_param"] == "screen"
 assert h["knob_capture_param"] == "knob_capture" and h["knob_delta_param"] == "knob_delta" and h["undo_param"] == "undo_cmd" and h["pedal_param"] == "pedal"
 assert h["display_param"] == "display" and h["pad_leds_param"] == "pad_leds" and h["delete_pad_param"] == "delete_pad"
 root = L["root"]

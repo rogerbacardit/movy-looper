@@ -26,6 +26,7 @@
 #include <stdatomic.h>
 
 #include "mark_core.h"
+#include "perform.h"
 /* Types only — stdint and plugin_api_v1.h, no POSIX — so the FX structs stay
  * available even when plugin LOADING is compiled out. */
 #include "audio_fx_api_v2.h"
@@ -222,6 +223,8 @@ struct mark {
 
     /* Clock (smack pattern). Global frame counter across all blocks. */
     uint64_t global_frames;
+    perf_t  *perf;               /* L606 PERFORM effects (owned by the shim), NULL = none */
+    _Atomic int perf_target;     /* 0 = the whole mix, 1..MARK_TRACKS = that track */
     double   frames_per_tick;    /* estimated; 120 BPM = MARK_SR*60/2880 */
     uint64_t last_tick_global;
     /* Tick-time history for the tempo regression (see clock_tick_push).
@@ -2481,6 +2484,15 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
         for (int i = 0; i < MARK_TRACKS; i++)
             memset(m->tmix[i], 0, (size_t)frames * sizeof(float));
 
+    /* L606 PERFORM: effects live on the READ side (the target track's output, or the
+     * whole mix); the loop buffers and playheads are never touched. */
+    perf_t *pf = rt ? NULL : m->perf;
+    int pf_tgt = atomic_load_explicit(&m->perf_target, memory_order_relaxed);
+    if (pf) {
+        mk_track_t *pb = base_playing(m);
+        perf_block_begin(pf, pb ? pb->pos : (double)m->global_frames, effective_grid(m) / 4.0);
+    }
+
     int paused = m->transport_paused;
     int use_measure_flag = m->measure_flag;
     m->measure_flag = 0;
@@ -2601,6 +2613,7 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
                 t->crev++;
             }
 
+            if (pf && pf_tgt == i + 1) perf_process(pf, &l, &r);
             if (use_ext[i]) {
                 m->fx_block[i][n * 2] = clip16(l);
                 m->fx_block[i][n * 2 + 1] = clip16(r);
@@ -2659,6 +2672,9 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
         }
     }
 
+    if (pf && pf_tgt == 0)
+        for (int n = 0; n < frames; n++) perf_process(pf, &m->mix_l[n], &m->mix_r[n]);
+
     float dry = m->monitor ? 1.0f : 0.0f;
     if (rt && rt->out_ch) {
         /* One jack per track. Master gain still applies, and monitor passes
@@ -2684,6 +2700,11 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
         }
     }
     m->global_frames += (uint64_t)frames;
+}
+
+void mark_set_perf(mark_t *m, perf_t *p) { if (m) m->perf = p; }
+void mark_set_perf_target(mark_t *m, int target) {
+    if (m) atomic_store_explicit(&m->perf_target, target < 0 || target > MARK_TRACKS ? 0 : target, memory_order_relaxed);
 }
 
 void mark_process(mark_t *m, const int16_t *in, int16_t *out, int frames) {

@@ -95,6 +95,31 @@ Los loops sobreviven a cerrar/recargar Movy y a apagar la Move.
 - **Al cargar** un Set cuyo `state` trae un ID, y solo si la instancia esta vacia, el mismo hilo lee los WAV y deja las pistas en STOP (nunca pisa loops vivos). Ademas del audio vuelven largo fijo, velocidad, mute, count-in, umbral y volumen de entrada.
 - Limitaciones: un Set duplicado por Movy comparte ID con el original hasta que uno grabe algo nuevo; quitar el modulo de una pista deja su carpeta huerfana (se puede borrar a mano); una carpeta ilegible no se sobrescribe. Variables de entorno solo para tests: `LOOPER606_PERSIST_DIR`, `LOOPER606_PERSIST_DELAY_MS`.
 
+## PERFORM: efectos momentaneos en los botones de paso (v0.9.0)
+
+Con **SHIFT** (pad de arriba de la columna 1) mantenido, la pantalla muestra la pagina **PERFORM**: una rejilla de 2 filas x 8 con los 16 efectos en el orden de los botones de paso (fila 1 = pasos 1-8, fila 2 = pasos 9-16; los de la fila 2 son del lote 2 y aparecen como `---`). El titulo lleva el objetivo: `PISTA 3` o `MIX`. Los LEDs de paso se iluminan por familia: azul = repeticion, cian = ritmo, violeta = tono, naranja = cinta/tiempo, gris = lote 2. Sin SHIFT los pasos siguen fijando el largo del loop igual que siempre.
+
+**SHIFT + mantener el paso N** = suena el efecto N mientras se mantiene; al soltar vuelve todo exactamente como estaba y en tiempo. Objetivo: la pista seleccionada en vista PISTA, o toda la salida del looper en MIX (el objetivo se fija al pulsar). Si sueltas SHIFT con el paso aun pulsado, el efecto sigue hasta soltar el paso.
+
+Los efectos se aplican **solo al lado de lectura/salida** (un anillo de ~6 s con el audio del objetivo): nunca se escribe en los buffers del loop ni se mueve un playhead, asi que al soltar la mezcla es identica bit a bit a la que habria sin efecto (los tests lo comprueban). Entrada y salida con fundido de 4 / 12 ms, sin clicks. El monitor de entrada en directo no pasa por los efectos.
+
+Mientras mantienes un efecto, los 8 knobs (knob capture) son sus parametros; cada efecto recuerda sus ajustes (no se guardan al apagar). La pantalla muestra una escena animada en linea fina estilo HUD/radar que reacciona a los parametros y al nivel de audio, con casillas de lectura a la derecha.
+
+| Paso | Efecto | Knobs | Escena |
+|---|---|---|---|
+| 1 | BEAT REPEAT: repite la rodaja justo anterior, alineada a la rejilla del loop | K1 tasa (1/4 1/8 1/16 1/32 1/8T 1/16T) · K2 decay por repeticion · K3 bajada de tono por repeticion (0..12 st) | circulos concentricos que laten en cada repeticion (n = tasa) |
+| 2 | STUTTER: repeticiones que se aceleran de 1/4 a 1/32 | K1 tiempo 1..4 pulsos | barras que convergen cada vez mas rapido |
+| 3 | PITCH: desplaza el tono sin cambiar el tiempo (granular, 40 ms) | K1 -12..+12 semitonos | dial de radar semicircular con aguja |
+| 4 | BITCRUSH | K1 bits 16..2 · K2 submuestreo 1..32 | anillo que se pixela + senoide cuantizada |
+| 5 | TAPE STOP: velocidad y tono bajan hasta 0, silencio mientras se mantiene | K1 tiempo 1/4..2 pulsos | dos bobinas que frenan |
+| 6 | TAPE START: **al pulsar silencio y sube de 0 a 1 mientras se mantiene** (elegida esta semantica, no la de "subir al soltar"); tono y volumen suben juntos | K1 tiempo 1/4..2 pulsos | dos bobinas que aceleran |
+| 7 | REVERSE: lee hacia atras desde el punto de pulsacion (hasta ~2.9 s y vuelve a empezar si se mantiene mas) | - | espirales con flechas girando al reves |
+| 8 | VINYL: tono cayendo despacio como un disco que frena (no llega a parar) + ruido | K1 freno (velocidad final) · K2 crujido | disco con surcos y brazo |
+
+Pantalla propia: el modulo declara `screen_param` (framebuffer 128x64 de 1 bit, `"<seq>|<2048 hex>"`) y Movy lo dibuja en lugar de la onda o la pagina de knobs mientras no sea `""`. Se genera en `get_param` (nunca en `process()`), a 25 fps como maximo y solo si cambia (`src/gfx1.c`, `src/perform_ui.c`). Tambien usa `step_up_param` para saber cuando se suelta un paso. Hace falta la build `module-leds` v10 de Movy o posterior.
+
+Volcar fotogramas para verlos: `make perform-frames` (PBM + PNG ampliado en `build/perform-frames/`).
+
 ## Knobs (paginas)
 
 - **Mezclador (pagina inicial):** K1-K6 volumen de las pistas 1-6, K7 volumen de entrada, K8 master.
