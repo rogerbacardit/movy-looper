@@ -12,6 +12,7 @@
  * Mark engine: (c) Tim Cox, MIT (https://github.com/timncox/schwung-mark),
  * see LICENSE-mark. Ideas from Boss RC-505 / Loopex only; no Loopex code.
  */
+#include <math.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -38,7 +39,7 @@
 enum act {
     A_NONE = 0,
     A_REC,        /* arg = track: REC->PLAY->DUB (per Rec Action)      */
-    A_STOP,       /* arg = track: tap = stop, hold 1 s = clear          */
+    A_STOP,       /* arg = track: row 2 PLAY/STOP                         */
     A_MUTE,       /* arg = track: mute (keeps running silently)         */
     A_FX,         /* arg = track: track FX on/off                       */
     A_ALL,        /* all start/stop                                     */
@@ -61,15 +62,14 @@ static const pad_def_t PAD_GRID[4][8] = {
   /* row 3       */ { P(A_ARM,0,"Arm/Reverse"), P(A_MUTE,1,"Mute 1"), P(A_MUTE,2,"Mute 2"),
                       P(A_MUTE,3,"Mute 3"), P(A_MUTE,4,"Mute 4"), P(A_MUTE,5,"Mute 5"),
                       P(A_MUTE,6,"Mute 6"), P(A_RECACT,0,"Rec Action") },
-  /* row 2       */ { P(A_STOPALL,0,"Stop All"), P(A_STOP,1,"Stop 1"), P(A_STOP,2,"Stop 2"),
-                      P(A_STOP,3,"Stop 3"), P(A_STOP,4,"Stop 4"), P(A_STOP,5,"Stop 5"),
-                      P(A_STOP,6,"Stop 6"), P(A_FIXLEN,0,"Fixed Length") },
-  /* row 1 (bot) */ { P(A_ALL,0,"All Start/Stop"), P(A_REC,1,"Rec 1"), P(A_REC,2,"Rec 2"),
-                      P(A_REC,3,"Rec 3"), P(A_REC,4,"Rec 4"), P(A_REC,5,"Rec 5"),
-                      P(A_REC,6,"Rec 6"), P(A_QUANT,0,"Quantize") },
+  /* row 2       */ { P(A_STOPALL,0,"Stop All"), P(A_STOP,1,"Play/Stop 1"), P(A_STOP,2,"Play/Stop 2"),
+                      P(A_STOP,3,"Play/Stop 3"), P(A_STOP,4,"Play/Stop 4"), P(A_STOP,5,"Play/Stop 5"),
+                      P(A_STOP,6,"Play/Stop 6"), P(A_FIXLEN,0,"Fixed Length") },
+  /* row 1 (bot) */ { P(A_ALL,0,"All Start/Stop"), P(A_REC,1,"Rec/Dub 1"), P(A_REC,2,"Rec/Dub 2"),
+                      P(A_REC,3,"Rec/Dub 3"), P(A_REC,4,"Rec/Dub 4"), P(A_REC,5,"Rec/Dub 5"),
+                      P(A_REC,6,"Rec/Dub 6"), P(A_QUANT,0,"Quantize") },
 };
 
-#define CLEAR_HOLD_MS     1000
 #define DEFAULT_THRESHOLD 8          /* percent of full scale = 0.08 */
 #define NTRK              MARK_TRACKS
 #define MAXBLK            128        /* core block size */
@@ -79,13 +79,16 @@ static const int REC_LEN_BARS[5] = { 0, 1, 2, 4, 8 };
 /* Shim-level track state enum (tN_state), read-only for the UI. */
 enum { S_EMPTY = 0, S_ARMED, S_REC, S_PLAY, S_DUB, S_STOP, S_MUTE };
 
+#define WAVE_BINS 128
+
 static const host_api_v1_t *g_host;
 
 typedef struct {
     mark_t *m;
     int cur_track;                 /* 1..NTRK, target of the Track page */
     int arm;                       /* auto-rec armed mode */
-    long arm_window;               /* frames left after an ARM tap in which a REC tap = REVERSE */
+    long arm_window;               /* frames left after an ARM tap in which a row-2 tap = REVERSE */
+    int  dub_after[NTRK];          /* row-1 on a stopped track: dub as soon as it is playing */
     int  arm_prev;                 /* arm state before that ARM tap */
     int  offs_logged;
     int armed[NTRK];               /* waiting for the input threshold */
@@ -109,6 +112,14 @@ typedef struct {
     int  pend_logged;
     unsigned status_seq;           /* bumps on every status_text change */
     char status_text[40];          /* last action, for Movy's toast */
+    /* display_param cache: the peaks are rescanned only when the clip can have
+     * changed (a pad was pressed, the state/length moved, or a refresh timer
+     * ran); the playhead is read fresh every call. */
+    uint8_t  wave[WAVE_BINS];
+    int      wave_track, wave_st, wave_dirty;
+    uint32_t wave_span;
+    long     wave_at;
+    unsigned wave_seq;
     char hierarchy[32768];
 } synth_t;
 
@@ -206,6 +217,7 @@ static void set_mute(synth_t *s, int t, int on) {
 static void clear_flags(synth_t *s, int t) {
     int i = t - 1;
     s->armed[i] = 0; s->countin[i] = -1; s->rec_fired[i] = 0; s->rec_frames[i] = 0;
+    s->dub_after[i] = 0;
 }
 
 /* ---- pads --------------------------------------------------------- */
@@ -247,34 +259,41 @@ static void rec_pad(synth_t *s, int t) {
         }
     }
     s->rec_fired[i] = 0;
-    say_rec(s, t);
+    if (core_state(s, t) == MK_STOP && !core_pending(s, t)) {
+        s->dub_after[i] = 1;               /* stopped: start playing straight into DUB */
+        say(s, "DUB %d", t);
+    } else {
+        s->dub_after[i] = 0;
+        say_rec(s, t);
+    }
     trig_t(s, t, "btn");
 }
 
 static void pad_down(synth_t *s, const pad_def_t *p) {
     int t = p->arg;
+    s->wave_dirty = 1;
     if (t >= 1 && t <= NTRK) s->cur_track = t;
     switch (p->act) {
-    case A_REC:
-        if (s->arm_window > 0) {           /* ARM tap, then REC tap within 1 s = REVERSE */
+    case A_REC:                            /* row 1: REC / DUB only; never reverse */
+        if (s->arm_window > 0) { say(s, "REV = ROW 2"); break; }   /* swallowed: ARM + row 1 must not record */
+        rec_pad(s, t);
+        break;
+    case A_STOP: {                         /* row 2: PLAY/STOP toggle */
+        int st = core_state(s, t);
+        if (s->arm_window > 0) {           /* ARM tap, then row-2 tap within 1 s = REVERSE */
             s->arm_window = 0;
             s->arm = s->arm_prev;          /* the ARM tap was only the modifier */
             if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
             toggle_t(s, t, "rev");
             say(s, get_t(s, t, "rev") ? "REV %d ON" : "REV %d OFF", t);
-        } else rec_pad(s, t);
-        break;
-    case A_STOP:                           /* note-on only: tap = stop, tap on a stopped track = CLEAR */
-        if (core_state(s, t) == MK_STOP) {
-            clear_flags(s, t);
-            say(s, "CLEAR %d", t);
-            trig_t(s, t, "clear");
-        } else {
-            clear_flags(s, t);
-            say(s, "STOP %d", t);
-            trig_t(s, t, "stop");
+            break;
         }
+        clear_flags(s, t);
+        if (st == MK_EMPTY) break;
+        if (st == MK_STOP) { say(s, "PLAY %d", t); trig_t(s, t, "btn"); }
+        else               { say(s, "STOP %d", t); trig_t(s, t, "stop"); }
         break;
+    }
     case A_MUTE:
         set_mute(s, t, !s->muted[t - 1]);
         say(s, s->muted[t - 1] ? "MUTE %d" : "UNMUTE %d", t);
@@ -328,8 +347,20 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
     }
 }
 
-/* Gestures are note-on only: Movy may not deliver (or may delay) note-offs
- * for drum pads, so nothing here depends on a release. */
+/* Gestures act on note-on; CLEAR comes from Movy's Delete + pad (delete_pad). */
+/* Movy's Delete + pad (module declares delete_pad_param): CLEAR the track in
+ * that pad's column, whatever row was tapped. Pad index 0..31 = rack pad. */
+static void delete_pad(synth_t *s, int idx) {
+    const pad_def_t *p = pad_for_note(NOTE_BASE + idx);
+    if (!p || p->arg < 1 || p->arg > NTRK) return;
+    int t = p->arg;
+    s->cur_track = t;
+    s->wave_dirty = 1;
+    clear_flags(s, t);
+    say(s, "CLEAR %d", t);
+    trig_t(s, t, "clear");
+}
+
 static void pad_up(synth_t *s, const pad_def_t *p) { (void)s; (void)p; }
 
 /* ------------------------------------------------------------------ */
@@ -342,16 +373,20 @@ static void pad_up(synth_t *s, const pad_def_t *p) { (void)s; (void)p; }
  */
 #define LED_BLINK 0x80
 enum {
-    L_OFF = 0, L_RED = 127, L_ORANGE_RED = 2, L_ORANGE = 3, L_YELLOW = 7,
-    L_BRIGHT_YELLOW = 8, L_GREEN = 11, L_CYAN = 14, L_PURPLE = 20,
-    L_DEEP_RED = 65, L_DIM_YELLOW = 74, L_DIM_GREEN = 85, L_DIM_CYAN = 92,
+    L_OFF = 0, L_RED = 127, L_ORANGE = 3, L_YELLOW = 7,
+    L_BRIGHT_YELLOW = 8, L_CYAN = 14, L_PURPLE = 20,
+    L_DIM_YELLOW = 74, L_DIM_CYAN = 92,
+    L_ROYAL_BLUE = 17, L_DARK_ROYAL_BLUE = 97, L_GREEN_PLAY = 126,
     L_LIGHT_GREY = 118, L_DARK_GREY = 119, L_WHITE = 120, L_OFF_WHITE = 122,
     L_GREY_40 = 123
 };
-/* One colour per loop track: green, blue, yellow, pink, cyan, orange.
- * (REC = red, DUB = violet are reserved for state.) */
-static const uint8_t TRK_BRIGHT[NTRK] = { 126, 125, 7, 23, 14, 3 };
-static const uint8_t TRK_DIM[NTRK]    = {  85,  99, 77, 109, 91, 69 };
+/* Colour rules (RC-505 style): GREEN = playing and RED = recording are
+ * reserved for state, so no track identity colour is green or red.
+ * Track identity: blue, cyan, yellow, magenta, white, orange.
+ * ARM / armed = orange blinking; DUB = violet; mute = grey. */
+static const uint8_t TRK_BRIGHT[NTRK] = { 125,  14,   7,  23, 122,   3 };
+static const uint8_t TRK_DIM[NTRK]    = {  99,  91,  77, 109, 123,  72 };
+static const uint8_t TRK_VDIM[NTRK]   = {  98,  92,  74, 110, 124,  69 };
 static const uint8_t FIXLEN_LEVEL[5]  = { L_DARK_GREY, L_GREY_40, L_LIGHT_GREY,
                                           L_OFF_WHITE, L_WHITE };
 
@@ -378,33 +413,37 @@ static void take_snap(synth_t *s, snap_t *n) {
 static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
     int t = d->arg, i = t - 1;
     switch (d->act) {
-    case A_REC: {
+    case A_REC: {                          /* row 1: rec red / dub violet / empty dim */
         int st = n->st[i];
-        if (s->armed[i])        return LED_BLINK | L_RED;
+        if (s->armed[i])        return LED_BLINK | L_ORANGE;
         if (s->countin[i] >= 0) return LED_BLINK | L_BRIGHT_YELLOW;
-        if (st == MK_EMPTY)     return n->pend[i] ? (LED_BLINK | TRK_BRIGHT[i]) : TRK_DIM[i];
-        if (s->muted[i])        return L_DARK_GREY;
+        if (st == MK_EMPTY)     return n->pend[i] ? (LED_BLINK | TRK_BRIGHT[i]) : TRK_VDIM[i];
         switch (st) {
         case MK_REC:  return L_RED;
-        case MK_PLAY: return TRK_BRIGHT[i];
         case MK_DUB:  return L_PURPLE;
-        case MK_STOP: return L_LIGHT_GREY;
-        default:      return L_OFF;
+        default:      return TRK_VDIM[i];  /* playing / stopped: row 2 shows it */
         }
     }
-    case A_STOP:
-        if (n->st[i] == MK_EMPTY) return L_OFF;
-        return n->st[i] == MK_STOP ? L_DEEP_RED : L_WHITE;   /* stopped: next tap clears */
+    case A_STOP: {                         /* row 2: play green / stopped track colour / empty off */
+        int st = n->st[i];
+        if (st == MK_EMPTY) return L_OFF;
+        if (s->muted[i])    return L_DARK_GREY;
+        switch (st) {
+        case MK_PLAY: case MK_DUB: return L_GREEN_PLAY;
+        case MK_REC:  return TRK_VDIM[i];
+        default:      return TRK_DIM[i];   /* stopped with a clip */
+        }
+    }
     case A_MUTE:
         if (s->muted[i]) return L_DARK_GREY;
-        return n->st[i] == MK_EMPTY ? TRK_DIM[i] : TRK_BRIGHT[i];
-    case A_FX:      return n->fx_on[i] ? L_WHITE : L_GREY_40;
-    case A_ALL:     return n->any_run ? L_GREEN : L_DIM_GREEN;
-    case A_STOPALL: return n->any_run ? L_ORANGE_RED : L_DARK_GREY;
-    case A_UNDO:    return L_LIGHT_GREY;
-    case A_ARM:     return s->arm ? (LED_BLINK | L_RED) : L_DARK_GREY;
+        return n->st[i] == MK_EMPTY ? TRK_VDIM[i] : TRK_BRIGHT[i];
+    case A_FX:      return n->fx_on[i] ? TRK_BRIGHT[i] : TRK_VDIM[i];
+    case A_ALL:     return n->any_run ? L_WHITE : L_GREY_40;
+    case A_STOPALL: return n->any_run ? L_BRIGHT_YELLOW : L_DARK_GREY;
+    case A_UNDO:    return L_ROYAL_BLUE;
+    case A_ARM:     return s->arm ? (LED_BLINK | L_ORANGE) : L_DARK_GREY;
     case A_COUNTIN: return s->count_in ? L_YELLOW : L_DIM_YELLOW;
-    case A_RECACT:  return n->rec_action ? L_PURPLE : 126;
+    case A_RECACT:  return n->rec_action ? L_PURPLE : L_DARK_ROYAL_BLUE;
     case A_FIXLEN:  return FIXLEN_LEVEL[clampi_(s->rec_len, 0, 4)];
     case A_QUANT:   return n->quant ? L_CYAN : L_DIM_CYAN;
     default:        return L_OFF;
@@ -418,6 +457,53 @@ static void build_pad_leds(synth_t *s, char *out) {
         int row_b = (v % 16) / 4, col = (v % 4) + 4 * (v / 16);
         snprintf(out + v * 2, 3, "%02X", pad_color(s, &n, &PAD_GRID[3 - row_b][col]));
     }
+}
+
+/* ------------------------------------------------------------------ */
+/*  display_param: waveform overview of the selected track              */
+/* ------------------------------------------------------------------ */
+/*
+ * get_param display = "<seq>|<pos>|<peaks>|<header>"
+ *   seq     bumps whenever the peaks/length change (Movy re-parses peaks then)
+ *   pos     playhead 0..127
+ *   peaks   128 x 2 hex digits (0..255), empty when the track has no audio
+ *   header  free text, last so it may hold anything: "PLAY 1 - 4 BARS"
+ * Peaks are cached; only the playhead is read on every call.
+ */
+static void header_text(synth_t *s, int t, uint32_t span, char *out, size_t n) {
+    static const char *const NAME[7] = { "EMPTY", "ARMED", "REC", "PLAY", "DUB", "STOP", "MUTE" };
+    int st = shim_state(s, t);
+    if (span == 0) { snprintf(out, n, "%s %d", NAME[st], t); return; }
+    double beat = (double)MARK_SR * 60.0 / cur_bpm(s);
+    double bars = (double)span / (beat * 4.0);
+    double r = (double)(long)(bars + 0.5);
+    if (st != S_REC && r >= 1.0 && fabs(bars - r) < 0.03 * r)
+        snprintf(out, n, "%s %d - %d %s", NAME[st], t, (int)r, (int)r == 1 ? "BAR" : "BARS");
+    else
+        snprintf(out, n, "%s %d - %.1f S", NAME[st], t, (double)span / (double)MARK_SR);
+}
+
+static void build_display(synth_t *s, char *out, size_t n) {
+    int t = s->cur_track, st = shim_state(s, t);
+    uint32_t span = 0; int pos = 0;
+    mark_track_wave(s->m, t - 1, WAVE_BINS, NULL, &span, &pos);
+    int busy = (st == S_REC || st == S_DUB);
+    long every = busy ? MARK_SR / 4 : MARK_SR * 2;
+    if (s->wave_dirty || t != s->wave_track || st != s->wave_st || span != s->wave_span
+        || s->in_frames - s->wave_at >= every) {
+        uint8_t w[WAVE_BINS];
+        mark_track_wave(s->m, t - 1, WAVE_BINS, w, &span, &pos);
+        if (t != s->wave_track || span != s->wave_span || memcmp(w, s->wave, sizeof w)) {
+            memcpy(s->wave, w, sizeof w);
+            s->wave_seq = (s->wave_seq + 1) % 100000u;
+        }
+        s->wave_track = t; s->wave_st = st; s->wave_span = span;
+        s->wave_at = s->in_frames; s->wave_dirty = 0;
+    }
+    char hdr[48], hx[WAVE_BINS * 2 + 1];
+    header_text(s, t, span, hdr, sizeof hdr);
+    for (int i = 0; i < WAVE_BINS; i++) snprintf(hx + i * 2, 3, "%02X", s->wave[i]);
+    snprintf(out, n, "%u|%d|%s|%s", s->wave_seq, pos, span ? hx : "", hdr);
 }
 
 /* ------------------------------------------------------------------ */
@@ -437,7 +523,7 @@ static void build_hierarchy(synth_t *s) {
     static const char *onoff = "[\"Off\",\"On\"]";
 
     APP("{\"pad_layout\":\"drums\",\"pad_leds_param\":\"pad_leds\","
-        "\"status_text_param\":\"status_text\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
+        "\"status_text_param\":\"status_text\",\"display_param\":\"display\",\"delete_pad_param\":\"delete_pad\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
         APP("{\"key\":\"t%d_level\",\"name\":\"Track %d Vol\",\"short_name\":\"T%d\","
             "\"type\":\"int\",\"min\":0,\"max\":200,\"default\":100,\"step\":5},", t, t, t);
@@ -650,6 +736,12 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
         s->prev_st[i] = st;
     }
     if (s->arm_window > 0) s->arm_window -= frames;
+    for (int i = 0; i < NTRK; i++) {
+        if (s->dub_after[i] && core_state(s, i + 1) == MK_PLAY) {
+            s->dub_after[i] = 0;
+            trig_t(s, i + 1, "btn");        /* PLAY -> DUB */
+        }
+    }
 
     /* Keep-alive. Movy parks a chain whose synth has been silent for ~1 s
      * (peak <= 4) and only renders it every ~0.5 s; its idle gate ignores a
@@ -723,7 +815,9 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     synth_t *s = (synth_t *)inst;
     int t; const char *k;
     if (!s) return;
+    s->wave_dirty = 1;
     int v = atoi(val);
+    if (!strcmp(key, "delete_pad")) { if (v >= 0 && v < 32) delete_pad(s, v); return; }
     if (!strcmp(key, "cur_track")) { s->cur_track = clampi(v, 1, NTRK); return; }
     if (!strcmp(key, "threshold")) { s->threshold = clampi(v, 1, 100); return; }
     if (!strcmp(key, "count_in"))  { s->count_in = v ? 1 : 0; return; }
@@ -776,6 +870,11 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "trk_spd"))  RET("%d", get_t(s, s->cur_track, "spd"));
     if (!strcmp(key, "in_peak"))      RET("%d", s->in_peak_now);
     if (!strcmp(key, "status_text"))  RET("%u:%s", s->status_seq, s->status_text);
+    if (!strcmp(key, "display")) {
+        char d[WAVE_BINS * 2 + 96];
+        build_display(s, d, sizeof d);
+        RET("%s", d);
+    }
     if (!strcmp(key, "pad_leds")) {
         char hx[65];
         build_pad_leds(s, hx);

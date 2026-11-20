@@ -5,6 +5,7 @@ import json, sys
 h = json.load(open(sys.argv[1]))
 L = h["levels"]
 assert h["pad_layout"] == "drums"
+assert h["display_param"] == "display" and h["pad_leds_param"] == "pad_leds" and h["delete_pad_param"] == "delete_pad"
 root = L["root"]
 assert root["knobs"] == ["t%d_level" % i for i in range(1, 7)] + ["in_gain", "master"], root["knobs"]
 for name in ("track", "setup", "status"):
@@ -15,9 +16,9 @@ for name, lv in L.items():
     for k in lv.get("knobs", []):
         assert k in keys, (name, k)
 # pad -> note table (Movy rack order: pad 1 bottom-left, banks of 4x4)
-want = {"v01": ("All Start/Stop", 36), "v02": ("Rec 1", 37), "v05": ("Stop All", 40),
-        "v06": ("Stop 1", 41), "v13": ("Undo/Redo", 48), "v17": ("Rec 4", 52),
-        "v19": ("Rec 6", 54), "v20": ("Quantize", 55), "v32": ("Count-in", 67)}
+want = {"v01": ("All Start/Stop", 36), "v02": ("Rec/Dub 1", 37), "v05": ("Stop All", 40),
+        "v06": ("Play/Stop 1", 41), "v13": ("Undo/Redo", 48), "v17": ("Rec/Dub 4", 52),
+        "v19": ("Rec/Dub 6", 54), "v20": ("Quantize", 55), "v32": ("Count-in", 67)}
 for v, (nm, note) in want.items():
     assert L[v]["name"] == nm and L[v]["note"] == note, (v, L[v])
 notes = [L["v%02d" % i]["note"] for i in range(1, 33)]

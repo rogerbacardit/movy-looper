@@ -155,9 +155,13 @@ int main(int argc, char **argv) {
 
     /* --- reverse: ARM held + REC tap; ARM tap alone toggles arm --- */
     CHECK(geti("trk_rev") == 0 && geti("arm") == 0);
-    down(M_ARM); tap(REC(1)); up(M_ARM);
+    down(M_ARM); tap(STOP(1)); up(M_ARM);
     CHECK(geti("t1_rev") == 1); CHECK(geti("arm") == 0); CHECK(state(1) == S_PLAY);
-    down(M_ARM); tap(REC(1)); up(M_ARM); CHECK(geti("t1_rev") == 0);
+    down(M_ARM); tap(STOP(1)); up(M_ARM); CHECK(geti("t1_rev") == 0); CHECK(state(1) == S_PLAY);
+    /* ARM + row 1 can never record/dub: it is swallowed during the 1 s window */
+    down(M_ARM); tap(REC(1)); up(M_ARM);
+    CHECK(state(1) == S_PLAY && geti("t1_rev") == 0 && geti("arm") == 1);
+    tap(M_ARM); CHECK(geti("arm") == 0); run(400);
 
     /* --- ARM + threshold --- */
     tap(M_ARM); CHECK(geti("arm") == 1); run(400);                 /* past the 1 s REVERSE window */
@@ -181,7 +185,11 @@ int main(int argc, char **argv) {
     tap(REC(3)); CHECK(state(3) != S_EMPTY); run(10); tap(STOP(3));
     tap(M_STOPALL);
     CHECK(state(2) == S_STOP);
-    tap(STOP(2)); CHECK(state(2) == S_EMPTY);                       /* STOP on a stopped track = CLEAR */
+    tap(STOP(2)); run(2); CHECK(state(2) == S_PLAY);                /* row 2 on a stopped track = PLAY (no clear) */
+    tap(STOP(2)); CHECK(state(2) == S_STOP);
+    down(STOP(2)); run(500); up(STOP(2)); CHECK(state(2) != S_EMPTY);   /* holding row 2 never clears */
+    seti("delete_pad", MUTE(2) - 36); CHECK(state(2) == S_EMPTY);       /* Movy Delete + any pad of the column = CLEAR */
+    seti("delete_pad", M_UNDO - 36); seti("delete_pad", 99);            /* master column / junk: ignored */
 
     /* --- count-in --- */
     tap(R_COUNTIN); CHECK(geti("count_in") == 1);
@@ -264,32 +272,45 @@ int main(int argc, char **argv) {
     tap(REC(1)); run(300); tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
     int len1 = geti("t1_len"); CHECK(len1 > 0);
     tap(STOP(1)); CHECK(state(1) == S_STOP);
-    tap(STOP(1)); CHECK(state(1) == S_EMPTY); CHECK(geti("t1_len") == 0);
+    seti("delete_pad", FX(1) - 36); CHECK(state(1) == S_EMPTY); CHECK(geti("t1_len") == 0);
     CHECK(geti("undo_avail") == 1);
     tap(M_UNDO); run(2);
     CHECK(state(1) == S_STOP); CHECK(geti("t1_len") == len1);
-    tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
+    tap(STOP(1)); run(2); CHECK(state(1) == S_PLAY);
     out_peak = 0; run(200); CHECK(out_peak > 500);                  /* audio really came back */
     tap(M_UNDO); CHECK(state(1) == S_EMPTY);                        /* redo = clear again */
     tap(M_UNDO); CHECK(state(1) == S_STOP && geti("t1_len") == len1);
 
-    /* --- user sequence: rec, rec, STOP, REC must PLAY (no note-off at all / with note-off) --- */
+    /* --- user sequence: rec, rec, STOP, STOP must PLAY (with / without note-off) --- */
     for (int with_off = 0; with_off < 2; with_off++) {
         fresh(&host); seti("quantize", 0);
         down(REC(1)); if (with_off) up(REC(1)); run(300);
         down(REC(1)); if (with_off) up(REC(1)); run(2); CHECK(state(1) == S_PLAY);
         down(STOP(1)); if (with_off) up(STOP(1));
         CHECK(state(1) == S_STOP);
-        run(1000);                                                  /* no hold timer may clear it */
-        CHECK(state(1) == S_STOP && geti("t1_len") > 0);
-        down(REC(1)); if (with_off) up(REC(1)); run(2);
+        run(1000); CHECK(state(1) == S_STOP && geti("t1_len") > 0);   /* holding never clears */
+        down(STOP(1)); if (with_off) up(STOP(1)); run(2);
         CHECK(state(1) == S_PLAY);
+        up(STOP(1));
     }
-    /* ARM is note-on only too; ARM tap + REC tap within 1 s = REVERSE, ARM unchanged */
+    /* row 1 on a stopped track plays straight into DUB */
+    fresh(&host); seti("quantize", 0);
+    tap(REC(1)); run(300); tap(REC(1)); run(2); tap(STOP(1)); CHECK(state(1) == S_STOP);
+    tap(REC(1)); run(4); CHECK(state(1) == S_DUB);
+    tap(REC(1)); CHECK(state(1) == S_PLAY);                          /* DUB -> PLAY */
+    tap(REC(1)); CHECK(state(1) == S_DUB);                           /* PLAY -> DUB */
+    tap(STOP(1)); CHECK(state(1) == S_STOP);                         /* row 2 stops a dubbing track */
+    tap(REC(1)); tap(STOP(1)); run(2); CHECK(state(1) == S_STOP);    /* cancelled before it played: still stopped */
+    /* row 2 while recording closes it and stops */
+    fresh(&host); seti("quantize", 0);
+    tap(REC(2)); run(200); tap(STOP(2)); run(4); CHECK(state(2) == S_STOP && geti("t2_len") > 0);
+    /* ARM is note-on only too; ARM tap + row-2 tap within 1 s = REVERSE, ARM unchanged */
     fresh(&host); seti("quantize", 0);
     down(M_ARM); CHECK(geti("arm") == 1);
     run(400); down(REC(1)); CHECK(state(1) == S_ARMED); down(REC(1)); CHECK(state(1) == S_EMPTY);
-    down(M_ARM); CHECK(geti("arm") == 0); down(REC(1)); CHECK(geti("t1_rev") == 1 && geti("arm") == 1);   /* arm restored */
+    tap(REC(1)); run(200); tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
+    down(M_ARM); CHECK(geti("arm") == 0); down(STOP(1)); up(STOP(1));
+    CHECK(geti("t1_rev") == 1 && geti("arm") == 1 && state(1) == S_PLAY);   /* arm restored, no stop */
 
     /* --- 6th track works without any source patch --- */
     fresh(&host); seti("quantize", 0);
@@ -321,7 +342,7 @@ int main(int argc, char **argv) {
 
     /* --- Movy feedback: pad_leds colours + status_text --- */
     {
-        char b[200]; int seq0, seq1; char txt[64];
+        char b[700]; int seq0, seq1; char txt[64];
         #define STATUS() do { b[0] = 0; A->get_param(S, "status_text", b, sizeof b); \
                               txt[0] = 0; sscanf(b, "%d:%63[^\n]", &seq1, txt); } while (0)
         #define LEDOF(pad) ({ char hx[3] = {0}; A->get_param(S, "pad_leds", b, sizeof b); \
@@ -332,23 +353,25 @@ int main(int argc, char **argv) {
         A->get_param(S, "pad_leds", b, sizeof b);
         CHECK(strlen(b) == 64);
         STATUS(); seq0 = seq1; CHECK(seq0 == 0);
-        CHECK(LEDOF(RACKPAD(1, 1)) == 85);                       /* empty = dim track 1 colour (green) */
-        CHECK(LEDOF(RACKPAD(1, 2)) == 99);                       /* track 2 dim blue */
+        CHECK(LEDOF(RACKPAD(1, 1)) == 98);                       /* empty = very dim track 1 colour (blue) */
+        CHECK(LEDOF(RACKPAD(1, 2)) == 92);                       /* track 2 very dim cyan */
         CHECK(LEDOF(RACKPAD(1, 1)) != LEDOF(RACKPAD(1, 2)));
         tap(REC(1)); STATUS(); CHECK(seq1 == seq0 + 1 && !strcmp(txt, "REC 1"));
         CHECK(LEDOF(RACKPAD(1, 1)) == 127);                      /* rec = red */
         run(200); tap(REC(1)); run(2); STATUS(); CHECK(!strcmp(txt, "PLAY 1"));
-        CHECK(LEDOF(RACKPAD(1, 1)) == 126);                      /* play = bright track colour */
-        CHECK(LEDOF(RACKPAD(3, 1)) == 126);                      /* mute pad: live track */
+        CHECK(LEDOF(RACKPAD(1, 1)) == 98);                       /* playing: row 1 back to dim */
+        CHECK(LEDOF(RACKPAD(2, 1)) == 126);                      /* play = green on row 2 */
+        CHECK(LEDOF(RACKPAD(3, 1)) == 125);                      /* mute pad: live track identity (blue) */
         tap(MUTE(1)); STATUS(); CHECK(!strcmp(txt, "MUTE 1"));
-        CHECK(LEDOF(RACKPAD(3, 1)) == 119 && LEDOF(RACKPAD(1, 1)) == 119);   /* mute = grey */
+        CHECK(LEDOF(RACKPAD(3, 1)) == 119 && LEDOF(RACKPAD(2, 1)) == 119);   /* mute = grey */
         tap(MUTE(1)); STATUS(); CHECK(!strcmp(txt, "UNMUTE 1"));
-        tap(REC(1)); STATUS(); CHECK(!strcmp(txt, "DUB 1")); CHECK(LEDOF(RACKPAD(1, 1)) == 20);
+        tap(REC(1)); STATUS(); CHECK(!strcmp(txt, "DUB 1")); CHECK(LEDOF(RACKPAD(1, 1)) == 20);   /* dub = violet */
+        CHECK(LEDOF(RACKPAD(2, 1)) == 126);
         tap(REC(1));
         tap(STOP(1)); STATUS(); CHECK(!strcmp(txt, "STOP 1"));
-        CHECK(LEDOF(RACKPAD(1, 1)) == 118);                      /* stopped = dim white */
-        tap(STOP(1)); STATUS(); CHECK(!strcmp(txt, "CLEAR 1"));
-        CHECK(LEDOF(RACKPAD(1, 1)) == 85);
+        CHECK(LEDOF(RACKPAD(2, 1)) == 99);                       /* stopped = dim track colour on row 2 */
+        seti("delete_pad", REC(1) - 36); STATUS(); CHECK(!strcmp(txt, "CLEAR 1"));
+        CHECK(LEDOF(RACKPAD(1, 1)) == 98 && LEDOF(RACKPAD(2, 1)) == 0);
         /* settings + master pads */
         CHECK(LEDOF(RACKPAD(1, 7)) == 92);                       /* quantize off */
         tap(R_QUANT); STATUS(); CHECK(!strcmp(txt, "QUANT ON")); CHECK(LEDOF(RACKPAD(1, 7)) == 14);
@@ -356,11 +379,70 @@ int main(int argc, char **argv) {
         tap(R_RECACT); STATUS(); CHECK(!strcmp(txt, "REC>DUB")); CHECK(LEDOF(RACKPAD(3, 7)) == 20);
         tap(R_FIXLEN); STATUS(); CHECK(!strcmp(txt, "LEN 1 BAR")); CHECK(LEDOF(RACKPAD(2, 7)) == 123);
         tap(R_FIXLEN); STATUS(); CHECK(!strcmp(txt, "LEN 2 BARS"));
-        tap(M_ARM); STATUS(); CHECK(!strcmp(txt, "ARM ON")); CHECK(LEDOF(RACKPAD(3, 0)) == (0x80 | 127));
+        tap(M_ARM); STATUS(); CHECK(!strcmp(txt, "ARM ON")); CHECK(LEDOF(RACKPAD(3, 0)) == (0x80 | 3));
         tap(M_ARM); STATUS(); CHECK(!strcmp(txt, "ARM OFF"));
         fresh(&host); seti("quantize", 0); tap(M_ARM); run(400);
-        tap(REC(2)); STATUS(); CHECK(!strcmp(txt, "ARMED 2")); CHECK(LEDOF(RACKPAD(1, 2)) == (0x80 | 127));
+        tap(REC(2)); STATUS(); CHECK(!strcmp(txt, "ARMED 2")); CHECK(LEDOF(RACKPAD(1, 2)) == (0x80 | 3));
         tap(M_UNDO); STATUS(); CHECK(!strcmp(txt, "UNDO/REDO"));
+
+        /* colour rules: no track identity, master or settings colour is red or green */
+        fresh(&host); seti("quantize", 0);
+        for (int k = 1; k <= 6; k++) {
+            int ids[3] = { LEDOF(RACKPAD(1, k)) & 0x7F, LEDOF(RACKPAD(3, k)) & 0x7F, LEDOF(RACKPAD(4, k)) & 0x7F };
+            for (int j = 0; j < 3; j++) CHECK(ids[j] != 126 && ids[j] != 127 && ids[j] != 11 && ids[j] != 85 && ids[j] != 1);
+        }
+        for (int row = 1; row <= 4; row++) for (int col = 0; col <= 7; col += 7) {
+            int c = LEDOF(RACKPAD(row, col)) & 0x7F;
+            CHECK(c != 126 && c != 127 && c != 11 && c != 85 && c != 1 && c != 65);
+        }
+        tap(REC(2)); run(200); tap(REC(2)); run(2);               /* PLAY: masters/settings still not red/green */
+        for (int row = 1; row <= 4; row++) for (int col = 0; col <= 7; col += 7) {
+            int c = LEDOF(RACKPAD(row, col)) & 0x7F;
+            CHECK(c != 126 && c != 127 && c != 11 && c != 85 && c != 1 && c != 65);
+        }
+        CHECK(LEDOF(RACKPAD(2, 2)) == 126);                      /* but the playing pad itself is green */
+        CHECK(LEDOF(RACKPAD(3, 2)) == 14);                       /* mute pad keeps the track 2 identity (cyan) */
+
+        /* display_param: "<seq>|<pos>|<peaks>|<header>" */
+        #define DISPLAY() do { b[0] = 0; A->get_param(S, "display", b, sizeof b); } while (0)
+        #define DSEQ()  atoi(b)
+        #define DPOS()  atoi(strchr(b, '|') + 1)
+        #define DPEAKS(o) do { const char *q = strchr(strchr(b, '|') + 1, '|') + 1; \
+                               size_t n = strcspn(q, "|"); memcpy(o, q, n); (o)[n] = 0; } while (0)
+        #define DHEAD() (strrchr(b, '|') + 1)
+        {
+            char pk[600];
+            fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+            DISPLAY(); DPEAKS(pk);
+            CHECK(strlen(pk) == 0 && !strcmp(DHEAD(), "EMPTY 1"));
+            tap(REC(1)); run(100); DISPLAY(); CHECK(!strncmp(DHEAD(), "REC 1", 5));
+            run(245); tap(REC(1)); run(2);
+            DISPLAY(); DPEAKS(pk);
+            CHECK(strlen(pk) == 256);
+            int mx = 0;
+            for (int i = 0; i < 128; i++) { char h2[3] = { pk[2*i], pk[2*i+1], 0 }; int v = (int)strtol(h2, NULL, 16); if (v > mx) mx = v; }
+            CHECK(mx > 100);                                     /* a 0.25 sine reads clearly on the overview */
+            CHECK(!strncmp(DHEAD(), "PLAY 1 - ", 9) && strstr(DHEAD(), " S"));
+            int seq_a = DSEQ(), pos_a = DPOS();
+            run(60); DISPLAY();
+            CHECK(DSEQ() == seq_a);                              /* playing does not produce new peaks */
+            CHECK(DPOS() != pos_a && DPOS() >= 0 && DPOS() < 128);
+            tap(MUTE(1)); DISPLAY(); CHECK(!strncmp(DHEAD(), "MUTE 1", 6)); tap(MUTE(1));
+            seti("cur_track", 2); DISPLAY(); DPEAKS(pk);
+            CHECK(strlen(pk) == 0 && !strcmp(DHEAD(), "EMPTY 2"));   /* the selected track is the one shown */
+            DISPLAY();
+            seti("cur_track", 1); DISPLAY(); CHECK(DSEQ() != seq_a);  /* switching track bumps seq */
+            /* fixed length: 2 bars at the host tempo reads as bars, not seconds */
+            fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+            tap(R_FIXLEN); tap(R_FIXLEN);
+            tap(REC(1)); run(1700); DISPLAY();
+            CHECK(strstr(DHEAD(), "2 BARS") != NULL);
+        }
+        #undef DISPLAY
+        #undef DSEQ
+        #undef DPOS
+        #undef DPEAKS
+        #undef DHEAD
         #undef STATUS
         #undef LEDOF
         #undef RACKPAD

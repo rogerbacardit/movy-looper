@@ -14,20 +14,22 @@ fila 4  UNDO/    FX     FX     FX     FX     FX     FX     Count-in
         REDO     on/off on/off on/off on/off on/off on/off on/off
 fila 3  ARM      MUTE   MUTE   MUTE   MUTE   MUTE   MUTE   Rec Action
         (rev.)                                              REC>PLAY/DUB
-fila 2  STOP     STOP   STOP   STOP   STOP   STOP   STOP   Largo fijo
-        TODO     (*)    (*)    (*)    (*)    (*)    (*)    libre/1/2/4/8
-fila 1  TODO     REC    REC    REC    REC    REC    REC    Quantize
-        START/   PLAY   PLAY   PLAY   PLAY   PLAY   PLAY   on/off
-        STOP     DUB    DUB    DUB    DUB    DUB    DUB
+fila 2  STOP     PLAY/  PLAY/  PLAY/  PLAY/  PLAY/  PLAY/  Largo fijo
+        TODO     STOP   STOP   STOP   STOP   STOP   STOP   libre/1/2/4/8
+fila 1  TODO     REC/   REC/   REC/   REC/   REC/   REC/   Quantize
+        START/   DUB    DUB    DUB    DUB    DUB    DUB    on/off
+        STOP
 ```
 
-- **REC** (fila 1): pista vacia -> graba; segundo toque -> reproduce (o sobregraba si Rec Action = REC>DUB); luego alterna PLAY/DUB.
-- **STOP** (*): toque = parar. **Tocar STOP otra vez en una pista ya parada = borrarla** (CLEAR, estilo RC-505). UNDO lo deshace; UNDO otra vez = rehacer el borrado; UNDO es de un solo nivel, el ultimo gesto gana.
-- **MUTE**: silencia la pista pero sigue girando, y al quitar el mute vuelve en su sitio.
-- **ARM** (columna 1, fila 3): un toque activa/desactiva el modo "grabar al detectar sonido": al pulsar REC en una pista vacia queda *armada* y empieza a grabar sola cuando la entrada supera el umbral. Tocar REC otra vez cancela.
-- **REVERSE**: toca ARM y, en menos de 1 s, el REC de una pista: esa pista cambia de sentido y ARM vuelve a como estaba.
+Colores: verde = reproduciendo, rojo = grabando, violeta = overdub, naranja parpadeante = ARM/armada. Las filas MUTE/FX (y STOP, parada) usan el color de cada pista (azul, cian, amarillo, magenta, blanco, naranja); mute = gris. La columna 1 y la 8 no usan ni verde ni rojo.
 
-Todos los gestos usan solo note-on (no dependen de note-off, que Movy puede no entregar).
+- **REC/DUB** (fila 1): pista vacia -> graba; segundo toque -> cierra la grabacion (PLAY, o DUB si Rec Action = REC>DUB); PLAY -> DUB; DUB -> PLAY; pista parada -> empieza a sonar directamente en DUB. Se ve en rojo (rec) / violeta (dub).
+- **PLAY/STOP** (fila 2): pista parada -> PLAY; sonando/DUB -> STOP; grabando -> cierra la grabacion y para. **Borrar pista (CLEAR): mantener Delete (X) del Move y tocar cualquier pad de la columna de esa pista** (Movy lo reenvia al modulo con `delete_pad_param`). UNDO lo deshace; UNDO otra vez = rehacer el borrado; UNDO es de un solo nivel. Verde = suena, color de pista = parada con clip, apagado = vacia.
+- **MUTE**: silencia la pista pero sigue girando, y al quitar el mute vuelve en su sitio.
+- **ARM** (columna 1, fila 3): un toque activa/desactiva el modo "grabar al detectar sonido": al pulsar REC en una pista vacia queda *armada* y empieza a grabar sola cuando la entrada supera el umbral. Tocar REC otra vez cancela. ARMADA parpadea en naranja.
+- **REVERSE**: toca ARM y, en menos de 1 s, el pad de la **fila 2** de una pista: esa pista cambia de sentido y ARM vuelve a como estaba. Un pad de la fila 1 en esa ventana se ignora (nunca graba ni hace dub).
+
+Todos los gestos actuan al note-on.
 - **Count-in**: al grabar en una pista vacia espera 4 tiempos antes de empezar.
 - **Largo fijo**: cada toque cicla libre -> 1 -> 2 -> 4 -> 8 compases; la grabacion se cierra sola.
 
@@ -66,7 +68,7 @@ Nota tecnica: el motor soporta `MARK_TRACKS=6` de forma nativa (ya no hay parche
 ## Pad colours and status text in Movy (needs the `module-leds` Movy build)
 
 The shim publishes two read-only params and names them in the `ui_hierarchy`
-root (`pad_leds_param`, `status_text_param`):
+root (`pad_leds_param`, `status_text_param`, `display_param`, `delete_pad_param`):
 
 - `pad_leds`: 64 hex digits, one byte per rack pad (pad 1 first). Bits 0-6 are a
   Move LED palette index, bit 7 = blink. Track colours: green, blue, yellow,
@@ -76,3 +78,6 @@ root (`pad_leds_param`, `status_text_param`):
   toast when `seq` changes.
 
 A Movy without the feature ignores both params; nothing else changes.
+
+- `display`: `"<seq>|<pos 0-127>|<128 peaks as 256 hex digits, or empty>|<header>"`, the selected track's waveform overview (header e.g. `PLAY 1 - 4 BARS`). Peaks are cached in the module and `seq` bumps only when they change.
+- `delete_pad` (write): Movy sends the rack pad index 0-31 when Delete + pad is pressed; the module CLEARs that pad's track.

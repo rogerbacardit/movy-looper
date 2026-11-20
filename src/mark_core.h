@@ -137,5 +137,7 @@ void mark_process_multi(mark_t *m, const int16_t *const *in_ch,
 void mark_on_midi(mark_t *m, const uint8_t *msg, int len, int source);
 void mark_set_param(mark_t *m, const char *key, const char *val);
 int  mark_get_param(mark_t *m, const char *key, char *buf, int buf_len);
+/* Peak overview of track ti (0-based) for a screen: see mark_core.c. */
+int  mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_frames, int *pos);
 
 #endif /* MARK_CORE_H */

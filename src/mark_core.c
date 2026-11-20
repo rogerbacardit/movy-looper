@@ -2650,6 +2650,47 @@ static int g_fx(const mk_track_t *t)    { return t->fx; }
 static int g_fxon(const mk_track_t *t)  { return t->fx_on; }
 static int g_fxp(const mk_track_t *t)   { return t->fxp; }
 
+/* Waveform overview of a track for the UI: `bins` peak values (0..255, a sqrt
+ * curve so quiet loops stay visible) over the loop (PLAY/STOP/DUB), or over the
+ * recording so far / its fixed target (REC). *span_frames = frames covered,
+ * *pos = playhead 0..bins-1. Strided: at most ~256 frames are read per bin, so
+ * a 120 s loop costs ~65k reads whatever its length. out == NULL skips the scan. Returns 0 when empty.
+ * Reads race with the audio thread by design (int16 loads; the UI tolerates it). */
+int mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_frames, int *pos) {
+    if (!m || ti < 0 || ti >= MARK_TRACKS || bins < 1) return 0;
+    const mk_track_t *t = &m->t[ti];
+    uint32_t span = t->st == MK_REC ? (t->rec_target ? t->rec_target : t->rec_len) : t->len;
+    if (span_frames) *span_frames = span;
+    if (pos) {
+        double f = t->st == MK_REC ? (span ? (double)t->rec_len / (double)span : 0.0)
+                                   : (t->len ? t->pos / (double)t->len : 0.0);
+        int p = (int)(f * bins);
+        *pos = p < 0 ? 0 : p >= bins ? bins - 1 : p;
+    }
+    if (!out) return span != 0;            /* position/length only: no scan */
+    memset(out, 0, (size_t)bins);
+    if (!t->buf || span == 0) return 0;
+    uint32_t avail = t->st == MK_REC ? t->rec_len : t->len;
+    for (int b = 0; b < bins; b++) {
+        uint64_t a = (uint64_t)span * (uint64_t)b / (uint64_t)bins;
+        uint64_t e = (uint64_t)span * (uint64_t)(b + 1) / (uint64_t)bins;
+        if (a >= avail) break;
+        if (e > avail) e = avail;
+        uint64_t stride = (e - a) / 256 + 1;
+        int pk = 0;
+        for (uint64_t f = a; f < e; f += stride) {
+            float lf, rf;
+            tbuf_load(t->buf, (uint32_t)f, &lf, &rf);
+            int l = (int)fabsf(lf), r = (int)fabsf(rf);
+            if (l > pk) pk = l;
+            if (r > pk) pk = r;
+        }
+        if (pk > 32767) pk = 32767;
+        out[b] = (uint8_t)(sqrtf((float)pk / 32768.0f) * 255.0f);
+    }
+    return 1;
+}
+
 int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
     if (!m || !key || !buf || buf_len < 2) return -1;
 

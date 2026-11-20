@@ -19,6 +19,8 @@
       "pad_layout": "drums",
       "pad_leds_param": "pad_leds",
       "status_text_param": "status_text",
+      "display_param": "display",
+      "delete_pad_param": "delete_pad",
       "levels": {
         "root": {
           "name": "Looper 606",
@@ -564,17 +566,17 @@
           "knobs": []
         },
         "v02": {
-          "name": "Rec 1",
+          "name": "Rec/Dub 1",
           "note": 37,
           "knobs": []
         },
         "v03": {
-          "name": "Rec 2",
+          "name": "Rec/Dub 2",
           "note": 38,
           "knobs": []
         },
         "v04": {
-          "name": "Rec 3",
+          "name": "Rec/Dub 3",
           "note": 39,
           "knobs": []
         },
@@ -584,17 +586,17 @@
           "knobs": []
         },
         "v06": {
-          "name": "Stop 1",
+          "name": "Play/Stop 1",
           "note": 41,
           "knobs": []
         },
         "v07": {
-          "name": "Stop 2",
+          "name": "Play/Stop 2",
           "note": 42,
           "knobs": []
         },
         "v08": {
-          "name": "Stop 3",
+          "name": "Play/Stop 3",
           "note": 43,
           "knobs": []
         },
@@ -639,17 +641,17 @@
           "knobs": []
         },
         "v17": {
-          "name": "Rec 4",
+          "name": "Rec/Dub 4",
           "note": 52,
           "knobs": []
         },
         "v18": {
-          "name": "Rec 5",
+          "name": "Rec/Dub 5",
           "note": 53,
           "knobs": []
         },
         "v19": {
-          "name": "Rec 6",
+          "name": "Rec/Dub 6",
           "note": 54,
           "knobs": []
         },
@@ -659,17 +661,17 @@
           "knobs": []
         },
         "v21": {
-          "name": "Stop 4",
+          "name": "Play/Stop 4",
           "note": 56,
           "knobs": []
         },
         "v22": {
-          "name": "Stop 5",
+          "name": "Play/Stop 5",
           "note": 57,
           "knobs": []
         },
         "v23": {
-          "name": "Stop 6",
+          "name": "Play/Stop 6",
           "note": 58,
           "knobs": []
         },
