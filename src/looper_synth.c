@@ -87,9 +87,9 @@ typedef struct {
     mark_t *m;
     int cur_track;                 /* 1..NTRK, target of the Track page */
     int arm;                       /* auto-rec armed mode */
-    long arm_window;               /* frames left after an ARM tap in which a row-2 tap = REVERSE */
+    int  arm_held;                 /* ARM pad is down: modifier for REVERSE */
+    int  arm_used;                 /* a track pad was tapped while ARM was held */
     int  dub_after[NTRK];          /* row-1 on a stopped track: dub as soon as it is playing */
-    int  arm_prev;                 /* arm state before that ARM tap */
     int  offs_logged;
     int armed[NTRK];               /* waiting for the input threshold */
     int muted[NTRK];
@@ -269,25 +269,23 @@ static void rec_pad(synth_t *s, int t) {
     trig_t(s, t, "btn");
 }
 
+static void arm_reverse(synth_t *s, int t) {
+    toggle_t(s, t, "rev");
+    say(s, get_t(s, t, "rev") ? "REV %d ON" : "REV %d OFF", t);
+}
+
 static void pad_down(synth_t *s, const pad_def_t *p) {
     int t = p->arg;
     s->wave_dirty = 1;
     if (t >= 1 && t <= NTRK) s->cur_track = t;
     switch (p->act) {
-    case A_REC:                            /* row 1: REC / DUB only; never reverse */
-        if (s->arm_window > 0) { say(s, "REV = ROW 2"); break; }   /* swallowed: ARM + row 1 must not record */
+    case A_REC:                            /* row 1: REC / DUB (ARM held = reverse) */
+        if (s->arm_held) { s->arm_used = 1; arm_reverse(s, t); break; }
         rec_pad(s, t);
         break;
     case A_STOP: {                         /* row 2: PLAY/STOP toggle */
         int st = core_state(s, t);
-        if (s->arm_window > 0) {           /* ARM tap, then row-2 tap within 1 s = REVERSE */
-            s->arm_window = 0;
-            s->arm = s->arm_prev;          /* the ARM tap was only the modifier */
-            if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
-            toggle_t(s, t, "rev");
-            say(s, get_t(s, t, "rev") ? "REV %d ON" : "REV %d OFF", t);
-            break;
-        }
+        if (s->arm_held) { s->arm_used = 1; arm_reverse(s, t); break; }
         clear_flags(s, t);
         if (st == MK_EMPTY) break;
         if (st == MK_STOP) { say(s, "PLAY %d", t); trig_t(s, t, "btn"); }
@@ -319,11 +317,7 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         break;
     case A_UNDO:    say(s, "UNDO/REDO"); trig(s, "undo"); break;
     case A_ARM:
-        s->arm_prev = s->arm;
-        s->arm = !s->arm;
-        if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
-        s->arm_window = (long)MARK_SR;
-        say(s, s->arm ? "ARM ON" : "ARM OFF");
+        s->arm_held = 1; s->arm_used = 0;      /* toggles on release unless used as modifier */
         break;
     case A_COUNTIN:
         s->count_in = !s->count_in;
@@ -361,7 +355,14 @@ static void delete_pad(synth_t *s, int idx) {
     trig_t(s, t, "clear");
 }
 
-static void pad_up(synth_t *s, const pad_def_t *p) { (void)s; (void)p; }
+static void pad_up(synth_t *s, const pad_def_t *p) {
+    if (p->act != A_ARM || !s->arm_held) return;
+    s->arm_held = 0;
+    if (s->arm_used) { s->arm_used = 0; return; }   /* was only the modifier */
+    s->arm = !s->arm;
+    if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
+    say(s, s->arm ? "ARM ON" : "ARM OFF");
+}
 
 /* ------------------------------------------------------------------ */
 /*  pad_leds: colours for Movy's drum grid (read-only get_param)        */
@@ -426,6 +427,8 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
     }
     case A_STOP: {                         /* row 2: play green / stopped track colour / empty off */
         int st = n->st[i];
+        if (s->arm_held && st != MK_EMPTY)   /* ARM held: show reverse state */
+            return get_t(s, t, "rev") ? L_WHITE : TRK_BRIGHT[i];
         if (st == MK_EMPTY) return L_OFF;
         if (s->muted[i])    return L_DARK_GREY;
         switch (st) {
@@ -735,7 +738,6 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
         }
         s->prev_st[i] = st;
     }
-    if (s->arm_window > 0) s->arm_window -= frames;
     for (int i = 0; i < NTRK; i++) {
         if (s->dub_after[i] && core_state(s, i + 1) == MK_PLAY) {
             s->dub_after[i] = 0;

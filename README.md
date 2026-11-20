@@ -26,8 +26,8 @@ Colores: verde = reproduciendo, rojo = grabando, violeta = overdub, naranja parp
 - **REC/DUB** (fila 1): pista vacia -> graba; segundo toque -> cierra la grabacion (PLAY, o DUB si Rec Action = REC>DUB); PLAY -> DUB; DUB -> PLAY; pista parada -> empieza a sonar directamente en DUB. Se ve en rojo (rec) / violeta (dub).
 - **PLAY/STOP** (fila 2): pista parada -> PLAY; sonando/DUB -> STOP; grabando -> cierra la grabacion y para. **Borrar pista (CLEAR): mantener Delete (X) del Move y tocar cualquier pad de la columna de esa pista** (Movy lo reenvia al modulo con `delete_pad_param`). UNDO lo deshace; UNDO otra vez = rehacer el borrado; UNDO es de un solo nivel. Verde = suena, color de pista = parada con clip, apagado = vacia.
 - **MUTE**: silencia la pista pero sigue girando, y al quitar el mute vuelve en su sitio.
-- **ARM** (columna 1, fila 3): un toque activa/desactiva el modo "grabar al detectar sonido": al pulsar REC en una pista vacia queda *armada* y empieza a grabar sola cuando la entrada supera el umbral. Tocar REC otra vez cancela. ARMADA parpadea en naranja.
-- **REVERSE**: toca ARM y, en menos de 1 s, el pad de la **fila 2** de una pista: esa pista cambia de sentido y ARM vuelve a como estaba. Un pad de la fila 1 en esa ventana se ignora (nunca graba ni hace dub).
+- **ARM** (columna 1, fila 3): un toque (pulsar y soltar) activa/desactiva el modo "grabar al detectar sonido": al pulsar REC en una pista vacia queda *armada* y empieza a grabar sola cuando la entrada supera el umbral. Tocar REC otra vez cancela. ARMADA parpadea en naranja.
+- **REVERSE**: manten pulsado ARM y toca cualquier pad de una pista (fila 1 o fila 2): esa pista cambia de sentido (nunca graba, reproduce ni para). Al soltar ARM tras usarlo asi, ARM no cambia. Mientras ARM esta pulsado, los pads de fila 2 se iluminan en blanco (invertida) o color de pista (normal).
 
 Todos los gestos actuan al note-on.
 - **Count-in**: al grabar en una pista vacia espera 4 tiempos antes de empezar.

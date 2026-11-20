@@ -158,9 +158,13 @@ int main(int argc, char **argv) {
     down(M_ARM); tap(STOP(1)); up(M_ARM);
     CHECK(geti("t1_rev") == 1); CHECK(geti("arm") == 0); CHECK(state(1) == S_PLAY);
     down(M_ARM); tap(STOP(1)); up(M_ARM); CHECK(geti("t1_rev") == 0); CHECK(state(1) == S_PLAY);
-    /* ARM + row 1 can never record/dub: it is swallowed during the 1 s window */
+    /* ARM held + row 1 = reverse, never rec/dub; arm unchanged after release */
     down(M_ARM); tap(REC(1)); up(M_ARM);
-    CHECK(state(1) == S_PLAY && geti("t1_rev") == 0 && geti("arm") == 1);
+    CHECK(state(1) == S_PLAY && geti("t1_rev") == 1 && geti("arm") == 0);
+    down(M_ARM); run(400); tap(REC(1)); up(M_ARM);                  /* hold > 1 s still works */
+    CHECK(state(1) == S_PLAY && geti("t1_rev") == 0 && geti("arm") == 0);
+    tap(M_ARM); CHECK(geti("arm") == 1); tap(M_ARM); CHECK(geti("arm") == 0);
+    down(M_ARM); CHECK(geti("arm") == 0); up(M_ARM); CHECK(geti("arm") == 1);
     tap(M_ARM); CHECK(geti("arm") == 0); run(400);
 
     /* --- ARM + threshold --- */
@@ -304,13 +308,13 @@ int main(int argc, char **argv) {
     /* row 2 while recording closes it and stops */
     fresh(&host); seti("quantize", 0);
     tap(REC(2)); run(200); tap(STOP(2)); run(4); CHECK(state(2) == S_STOP && geti("t2_len") > 0);
-    /* ARM is note-on only too; ARM tap + row-2 tap within 1 s = REVERSE, ARM unchanged */
+    /* ARM toggles on release; held as modifier it leaves arm unchanged */
     fresh(&host); seti("quantize", 0);
-    down(M_ARM); CHECK(geti("arm") == 1);
+    tap(M_ARM); CHECK(geti("arm") == 1);
     run(400); down(REC(1)); CHECK(state(1) == S_ARMED); down(REC(1)); CHECK(state(1) == S_EMPTY);
     tap(REC(1)); run(200); tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
-    down(M_ARM); CHECK(geti("arm") == 0); down(STOP(1)); up(STOP(1));
-    CHECK(geti("t1_rev") == 1 && geti("arm") == 1 && state(1) == S_PLAY);   /* arm restored, no stop */
+    down(M_ARM); down(STOP(1)); up(STOP(1)); up(M_ARM);
+    CHECK(geti("t1_rev") == 1 && geti("arm") == 1 && state(1) == S_PLAY);   /* arm unchanged, no stop */
 
     /* --- 6th track works without any source patch --- */
     fresh(&host); seti("quantize", 0);
