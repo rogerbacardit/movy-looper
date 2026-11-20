@@ -160,16 +160,17 @@ int main(int argc, char **argv) {
     down(M_ARM); tap(REC(1)); up(M_ARM); CHECK(geti("t1_rev") == 0);
 
     /* --- ARM + threshold --- */
-    tap(M_ARM); CHECK(geti("arm") == 1);
+    tap(M_ARM); CHECK(geti("arm") == 1); run(400);                 /* past the 1 s REVERSE window */
     in_mode = IN_SILENCE; tap(REC(2)); CHECK(state(2) == S_ARMED);
     run(100); CHECK(state(2) == S_ARMED);                          /* below threshold */
     in_mode = IN_SINE; run(3); CHECK(state(2) == S_REC);           /* crossed threshold */
     run(200); tap(REC(2)); run(2); CHECK(state(2) == S_PLAY);
-    tap(M_ARM); CHECK(geti("arm") == 0);
+    tap(M_ARM); CHECK(geti("arm") == 0); run(400);
     in_mode = IN_SILENCE; tap(REC(3)); tap(REC(3));                /* arm off: plain REC, then cancel */
-    in_mode = IN_SINE; tap(M_ARM); tap(REC(4)); CHECK(state(4) == S_ARMED);
+    in_mode = IN_SINE; tap(M_ARM); run(400); tap(REC(4)); CHECK(state(4) == S_ARMED);
     tap(REC(4)); CHECK(state(4) == S_EMPTY);                        /* tap again cancels arm */
     tap(M_ARM);
+    run(400);
 
     /* --- audio input path: diagnostics fired during the first second --- */
     CHECK(got_peak_log && !got_silent_log && got_bpm_log);
@@ -179,8 +180,8 @@ int main(int argc, char **argv) {
     /* --- clear: hold STOP 1 s --- */
     tap(REC(3)); CHECK(state(3) != S_EMPTY); run(10); tap(STOP(3));
     tap(M_STOPALL);
-    down(STOP(2)); run(300); CHECK(state(2) == S_PLAY || state(2) == S_STOP); run(100); up(STOP(2));
-    CHECK(state(2) == S_EMPTY);                                     /* ~1.16 s hold cleared it */
+    CHECK(state(2) == S_STOP);
+    tap(STOP(2)); CHECK(state(2) == S_EMPTY);                       /* STOP on a stopped track = CLEAR */
 
     /* --- count-in --- */
     tap(R_COUNTIN); CHECK(geti("count_in") == 1);
@@ -262,8 +263,8 @@ int main(int argc, char **argv) {
     fresh(&host); seti("quantize", 0);
     tap(REC(1)); run(300); tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
     int len1 = geti("t1_len"); CHECK(len1 > 0);
-    down(STOP(1)); run(400); up(STOP(1));
-    CHECK(state(1) == S_EMPTY); CHECK(geti("t1_len") == 0);
+    tap(STOP(1)); CHECK(state(1) == S_STOP);
+    tap(STOP(1)); CHECK(state(1) == S_EMPTY); CHECK(geti("t1_len") == 0);
     CHECK(geti("undo_avail") == 1);
     tap(M_UNDO); run(2);
     CHECK(state(1) == S_STOP); CHECK(geti("t1_len") == len1);
@@ -271,6 +272,24 @@ int main(int argc, char **argv) {
     out_peak = 0; run(200); CHECK(out_peak > 500);                  /* audio really came back */
     tap(M_UNDO); CHECK(state(1) == S_EMPTY);                        /* redo = clear again */
     tap(M_UNDO); CHECK(state(1) == S_STOP && geti("t1_len") == len1);
+
+    /* --- user sequence: rec, rec, STOP, REC must PLAY (no note-off at all / with note-off) --- */
+    for (int with_off = 0; with_off < 2; with_off++) {
+        fresh(&host); seti("quantize", 0);
+        down(REC(1)); if (with_off) up(REC(1)); run(300);
+        down(REC(1)); if (with_off) up(REC(1)); run(2); CHECK(state(1) == S_PLAY);
+        down(STOP(1)); if (with_off) up(STOP(1));
+        CHECK(state(1) == S_STOP);
+        run(1000);                                                  /* no hold timer may clear it */
+        CHECK(state(1) == S_STOP && geti("t1_len") > 0);
+        down(REC(1)); if (with_off) up(REC(1)); run(2);
+        CHECK(state(1) == S_PLAY);
+    }
+    /* ARM is note-on only too; ARM tap + REC tap within 1 s = REVERSE, ARM unchanged */
+    fresh(&host); seti("quantize", 0);
+    down(M_ARM); CHECK(geti("arm") == 1);
+    run(400); down(REC(1)); CHECK(state(1) == S_ARMED); down(REC(1)); CHECK(state(1) == S_EMPTY);
+    down(M_ARM); CHECK(geti("arm") == 0); down(REC(1)); CHECK(geti("t1_rev") == 1 && geti("arm") == 1);   /* arm restored */
 
     /* --- 6th track works without any source patch --- */
     fresh(&host); seti("quantize", 0);

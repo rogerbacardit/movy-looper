@@ -18,10 +18,10 @@ Row 1 is the bottom row. Notes are declared as drum voices in the hierarchy (`pa
 |---|---|---|---|
 | row 4 | UNDO/REDO | FX on/off | Count-in on/off |
 | row 3 | ARM auto-rec (toggle) | MUTE (keeps running silently, re-enters in place) | Rec Action: REC→PLAY / REC→DUB |
-| row 2 | STOP ALL | STOP (hold 1 s = CLEAR, UNDO restores) | Fixed length: free/1/2/4/8 bars (cycles) |
+| row 2 | STOP ALL | STOP (tap = stop; tap on a stopped track = CLEAR, UNDO restores) | Fixed length: free/1/2/4/8 bars (cycles) |
 | row 1 | ALL START/STOP | REC→PLAY→DUB→PLAY… (per Rec Action) | Quantize on/off |
 
-- **REVERSE:** hold the MASTER pad in row 3 (ARM) and tap a track's row-1 pad. That pad works as a modifier: a short tap without another pad still toggles ARM.
+- **REVERSE:** tap the MASTER pad in row 3 (ARM) and, within 1 s, a track's row-1 pad (ARM is restored). All gestures are note-on only.
 - **Pad ↔ note table:** a single array in the code, so it is easy to change. Verify Movy's pad → voice order (`schwung-movy/src/keyboard/drum-grid.ts`, banks 4×4: v01–16 on the left, v17–32 on the right).
 
 ## Auto-rec (in the shim, not in the core)

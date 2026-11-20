@@ -22,10 +22,12 @@ fila 1  TODO     REC    REC    REC    REC    REC    REC    Quantize
 ```
 
 - **REC** (fila 1): pista vacia -> graba; segundo toque -> reproduce (o sobregraba si Rec Action = REC>DUB); luego alterna PLAY/DUB.
-- **STOP** (*): toque corto = parar. **Mantener 1 segundo = borrar la pista** (CLEAR). El borrado se puede deshacer con UNDO (UNDO otra vez = rehacer el borrado); el UNDO es de un solo nivel, el ultimo gesto gana.
+- **STOP** (*): toque = parar. **Tocar STOP otra vez en una pista ya parada = borrarla** (CLEAR, estilo RC-505). UNDO lo deshace; UNDO otra vez = rehacer el borrado; UNDO es de un solo nivel, el ultimo gesto gana.
 - **MUTE**: silencia la pista pero sigue girando, y al quitar el mute vuelve en su sitio.
 - **ARM** (columna 1, fila 3): un toque activa/desactiva el modo "grabar al detectar sonido": al pulsar REC en una pista vacia queda *armada* y empieza a grabar sola cuando la entrada supera el umbral. Tocar REC otra vez cancela.
-- **REVERSE**: mantener ARM pulsado y tocar el REC de una pista (ARM no cambia).
+- **REVERSE**: toca ARM y, en menos de 1 s, el REC de una pista: esa pista cambia de sentido y ARM vuelve a como estaba.
+
+Todos los gestos usan solo note-on (no dependen de note-off, que Movy puede no entregar).
 - **Count-in**: al grabar en una pista vacia espera 4 tiempos antes de empezar.
 - **Largo fijo**: cada toque cicla libre -> 1 -> 2 -> 4 -> 8 compases; la grabacion se cierra sola.
 
@@ -39,7 +41,7 @@ fila 1  TODO     REC    REC    REC    REC    REC    REC    Quantize
 ## Compilar y probar
 
 ```
-make test-synth     # compila para el Mac y ejecuta los tests (118 comprobaciones)
+make test-synth     # compila para el Mac y ejecuta los tests (132 comprobaciones)
 make arm-synth      # compila para la Move -> build/looper-606-module.tar.gz
 ```
 

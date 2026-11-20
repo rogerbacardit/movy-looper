@@ -85,13 +85,13 @@ typedef struct {
     mark_t *m;
     int cur_track;                 /* 1..NTRK, target of the Track page */
     int arm;                       /* auto-rec armed mode */
-    int arm_down, arm_used;        /* ARM pad is a REVERSE modifier */
+    long arm_window;               /* frames left after an ARM tap in which a REC tap = REVERSE */
+    int  arm_prev;                 /* arm state before that ARM tap */
+    int  offs_logged;
     int armed[NTRK];               /* waiting for the input threshold */
     int muted[NTRK];
     int saved_level[NTRK];
     long countin[NTRK];            /* frames left, -1 = none */
-    long hold_frames[NTRK];        /* >=0 while STOP pad down */
-    int  hold_fired[NTRK];
     long rec_frames[NTRK];         /* frames spent in REC */
     int  rec_fired[NTRK];
     int  prev_st[NTRK];
@@ -230,12 +230,22 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
     if (t >= 1 && t <= NTRK) s->cur_track = t;
     switch (p->act) {
     case A_REC:
-        if (s->arm_down) {                 /* ARM held + REC tap = REVERSE */
-            s->arm_used = 1;
+        if (s->arm_window > 0) {           /* ARM tap, then REC tap within 1 s = REVERSE */
+            s->arm_window = 0;
+            s->arm = s->arm_prev;          /* the ARM tap was only the modifier */
+            if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
             toggle_t(s, t, "rev");
         } else rec_pad(s, t);
         break;
-    case A_STOP:    s->hold_frames[t - 1] = 0; s->hold_fired[t - 1] = 0; break;
+    case A_STOP:                           /* note-on only: tap = stop, tap on a stopped track = CLEAR */
+        if (core_state(s, t) == MK_STOP) {
+            clear_flags(s, t);
+            trig_t(s, t, "clear");
+        } else {
+            clear_flags(s, t);
+            trig_t(s, t, "stop");
+        }
+        break;
     case A_MUTE:    set_mute(s, t, !s->muted[t - 1]); break;
     case A_FX:
         if (!get_t(s, t, "fx_on") && get_t(s, t, "fx") == 0) set_t(s, t, "fx", 1);
@@ -246,7 +256,12 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         for (int k = 1; k <= NTRK; k++) { clear_flags(s, k); trig_t(s, k, "stop"); }
         break;
     case A_UNDO:    trig(s, "undo"); break;
-    case A_ARM:     s->arm_down = 1; s->arm_used = 0; break;
+    case A_ARM:
+        s->arm_prev = s->arm;
+        s->arm = !s->arm;
+        if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
+        s->arm_window = (long)MARK_SR;
+        break;
     case A_COUNTIN: s->count_in = !s->count_in; break;
     case A_RECACT:  set_i(s, "rec_action", !get_i(s, "rec_action")); break;
     case A_FIXLEN:  s->rec_len = (s->rec_len + 1) % 5; break;
@@ -255,22 +270,9 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
     }
 }
 
-static void pad_up(synth_t *s, const pad_def_t *p) {
-    if (p->act == A_ARM) {
-        s->arm_down = 0;
-        if (!s->arm_used) {
-            s->arm = !s->arm;
-            if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
-        }
-    } else if (p->act == A_STOP) {
-        int i = p->arg - 1;
-        if (s->hold_frames[i] >= 0 && !s->hold_fired[i]) {
-            clear_flags(s, p->arg);
-            trig_t(s, p->arg, "stop");
-        }
-        s->hold_frames[i] = -1;
-    }
-}
+/* Gestures are note-on only: Movy may not deliver (or may delay) note-offs
+ * for drum pads, so nothing here depends on a release. */
+static void pad_up(synth_t *s, const pad_def_t *p) { (void)s; (void)p; }
 
 /* ------------------------------------------------------------------ */
 /*  ui_hierarchy                                                       */
@@ -380,7 +382,7 @@ static void *gen_create(const char *module_dir, const char *json_defaults) {
     s->threshold = DEFAULT_THRESHOLD;
     s->in_gain = 100;
     for (int i = 0; i < NTRK; i++) {
-        s->hold_frames[i] = -1; s->countin[i] = -1; s->saved_level[i] = 100;
+        s->countin[i] = -1; s->saved_level[i] = 100;
     }
     mark_set_param(s->m, "hw_input", "1");
     mark_set_param(s->m, "session_dir", "/data/UserData/schwung/looper-sessions");
@@ -497,17 +499,7 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
         }
         s->prev_st[i] = st;
     }
-    /* long-press STOP = CLEAR */
-    long limit = (long)MARK_SR * CLEAR_HOLD_MS / 1000;
-    for (int i = 0; i < NTRK; i++) {
-        if (s->hold_frames[i] < 0 || s->hold_fired[i]) continue;
-        s->hold_frames[i] += frames;
-        if (s->hold_frames[i] >= limit) {
-            s->hold_fired[i] = 1;
-            clear_flags(s, i + 1);
-            trig_t(s, i + 1, "clear");
-        }
-    }
+    if (s->arm_window > 0) s->arm_window -= frames;
 
     /* Keep-alive. Movy parks a chain whose synth has been silent for ~1 s
      * (peak <= 4) and only renders it every ~0.5 s; its idle gate ignores a
@@ -555,6 +547,10 @@ static void gen_on_midi(void *inst, const uint8_t *msg, int len, int source) {
             if (on && s->notes_logged < 8) {
                 s->notes_logged++;
                 hlog("looper-606: note-on %d", msg[1]);
+            }
+            if (!on && s->offs_logged < 8) {
+                s->offs_logged++;
+                hlog("looper-606: note-off %d (status 0x%02X vel %d)", msg[1], st, len >= 3 ? msg[2] : -1);
             }
             if (p && p->act != A_NONE) {
                 if (on) pad_down(s, p); else pad_up(s, p);
