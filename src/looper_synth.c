@@ -155,6 +155,7 @@ typedef struct {
     uint32_t wave_lo, wave_hi;     /* buffer window of the cached peaks (0,0 = legacy REC/empty view) */
     int      zoom_t, zoom_pt, zoom_fine;   /* zoom on track zoom_t's IN (0) or OUT (1) point */
     long     zoom_until;           /* clock_frames until the zoom ends */
+    long     focus_until;          /* clock_frames until the last PISTA knob stops showing its value on the page */
     long     wave_at;
     unsigned wave_seq;
     uint8_t  ticks[WAVE_BINS];     /* bar / beat ticks of the display (bin | 0x80 = beat) */
@@ -503,15 +504,18 @@ static void pista_select(synth_t *s, int t) {
 }
 
 /* Movy's knob capture (knob_capture = 1 while PISTA is active): "N:delta[:fine]".
- * Knobs act on the selected track; SHIFT (or Movy's fine flag) = fine IN/OUT. */
+ * Knobs act on the selected track. No fine mode here (SHIFT is reserved for a
+ * second page of knobs): IN/OUT always move on the 1/16 grid. Fine survives
+ * only on Loop + knob (loop_knob). */
 static void knob_delta(synth_t *s, const char *val) {
     int n = 0, d = 0, fine = 0;
     if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
     if (n < 1 || n > 8 || d == 0 || s->sel == 0) return;
     int t = s->sel;
-    fine = fine || s->shift_held;
+    fine = 0;
     if (n != s->last_knob) s->wave_dirty = 1;
     s->last_knob = n;
+    s->focus_until = s->clock_frames + (long)MARK_SR * 3 / 2;
     s->cur_track = t;
     switch (n) {
     case 1: start_knob(s, t, d, fine, 1); break;
@@ -1087,6 +1091,45 @@ static void build_display(synth_t *s, char *out, size_t n) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  knob_page_param: the PISTA view as a Schwung-style parameter page   */
+/* ------------------------------------------------------------------ */
+/*
+ * get_param knob_page = "<left>|<right>|<focus>|<e1>|...|<e8>", or "" when Movy
+ * should show the waveform instead (MIX, or IN/OUT zoom). left = "PISTA 3",
+ * right = the track state, focus = 0..8, the knob last turned (its value text
+ * replaces the label for ~1.5 s) or 0. Entry: "LABEL;d;<0..1>;<text>" is a dial
+ * (position + value text), "LABEL;b;<text>" a boxed word (<= 3 chars a line).
+ */
+static void build_page(synth_t *s, char *out, size_t n) {
+    static const char *const NAME[7] = { "EMPTY", "ARMED", "REC", "PLAY", "DUB", "STOP", "MUTE" };
+    static const char *const FX_SH[7] = { "OFF", "LPF", "HPF", "CRS", "DLY", "PHS", "RNG" };
+    static const char *const SPD_SH[MK_SPD_N] = { "1/4", "1/2", "3/4", "X1", "1.5", "X2", "X4" };
+    out[0] = 0;
+    int t = s->sel;
+    if (!t) return;
+    if (s->zoom_t == t && s->clock_frames < s->zoom_until) return;      /* the zoomed waveform takes over */
+    long len = get_t(s, t, "len"), off = get_t(s, t, "off"), full = get_t(s, t, "full");
+    long total = full > len ? full : len;
+    double pin = 0.0, pout = 0.0;
+    char tin[24] = "--", tout[24] = "--", tpan[16];
+    if (total > 0 && len > 0) {
+        pin = (double)off / (double)total;
+        pout = (double)len / (double)total;
+        sixteenths_label(s, off, tin, sizeof tin);
+        len_label(s, len, tout, sizeof tout);
+    }
+    int pan = get_t(s, t, "pan"), lvl = track_level_get(s, t), fxp = get_t(s, t, "fxp");
+    int fx = get_t(s, t, "fx_on") ? clampi_(get_t(s, t, "fx"), 0, 6) : 0;
+    int spd = clampi_(get_t(s, t, "spd"), 0, MK_SPD_N - 1);
+    pan_label(pan, tpan, sizeof tpan);
+    int focus = s->clock_frames < s->focus_until ? s->last_knob : 0;
+    snprintf(out, n, "PISTA %d|%s|%d|IN;d;%.3f;%s|OUT;d;%.3f;%s|VOL;d;%.3f;%d|PAN;d;%.3f;%s|"
+             "FX;b;%s|AMT;d;%.3f;%d|SPD;b;%s|REV;b;%s",
+             t, NAME[shim_state(s, t)], focus, pin, tin, pout, tout, lvl / 200.0, lvl, pan / 100.0, tpan,
+             FX_SH[fx], fxp / 100.0, fxp, SPD_SH[spd], get_t(s, t, "rev") ? "ON" : "OFF");
+}
+
+/* ------------------------------------------------------------------ */
 /*  ui_hierarchy                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -1109,7 +1152,7 @@ static void build_hierarchy(synth_t *s) {
     APP("{\"pad_layout\":\"drums\",\"pad_leds_param\":\"pad_leds\","
         "\"status_text_param\":\"status_text\",\"display_param\":\"display\",\"delete_pad_param\":\"delete_pad\","
         "\"step_buttons_param\":\"step\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
-        "\"knob_capture_param\":\"knob_capture\",\"knob_delta_param\":\"knob_delta\",\"undo_param\":\"undo_cmd\","
+        "\"knob_capture_param\":\"knob_capture\",\"knob_page_param\":\"knob_page\",\"knob_delta_param\":\"knob_delta\",\"undo_param\":\"undo_cmd\","
         "\"pedal_param\":\"pedal\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
         APP("{\"key\":\"t%d_level\",\"name\":\"Track %d Vol\",\"short_name\":\"T%d\","
@@ -1740,6 +1783,11 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
         char d[WAVE_BINS * 4 + 128];
         build_display(s, d, sizeof d);
         RET("%s", d);
+    }
+    if (!strcmp(key, "knob_page")) {
+        char pg[700];
+        build_page(s, pg, sizeof pg);
+        RET("%s", pg);
     }
     if (!strcmp(key, "step_leds")) {
         char hx[33];

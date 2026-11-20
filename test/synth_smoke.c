@@ -1007,11 +1007,11 @@ int main(int argc, char **argv) {
         setstr("knob_delta", "1:8");
         CHECK(abs(gett(1, "off") - 44100) <= 3 && !strcmp(status_text(), "T1 IN +8/16"));
         CHECK(!strcmp(disp_head(), "PISTA 1 IN +8/16") && abs(disp_mark() - 63) <= 2);
-        setstr("knob_delta", "1:1:1");                                /* fine: 1/64 note */
-        CHECK(abs(gett(1, "off") - 44100 - 1378) <= 3);
-        setstr("knob_delta", "1:1"); CHECK(abs(gett(1, "off") - 44100 - 5512) <= 3);   /* back on the 1/16 grid */
-        down(M_SHIFT); setstr("knob_delta", "1:-1"); up(M_SHIFT);     /* SHIFT + K1 = fine */
-        CHECK(abs(gett(1, "off") - 44100 - 5512 + 1378) <= 3);
+        setstr("knob_delta", "1:1:1");                                /* Movy's fine flag is ignored: normal 1/16 step */
+        CHECK(abs(gett(1, "off") - 44100 - 5512) <= 3);
+        down(M_SHIFT); setstr("knob_delta", "1:-1"); up(M_SHIFT);     /* SHIFT + K1 = normal step too */
+        CHECK(abs(gett(1, "off") - 44100) <= 3);
+        setstr("knob_delta", "1:1"); CHECK(abs(gett(1, "off") - 44100 - 5512) <= 3);
         setstr("knob_delta", "9:1"); setstr("knob_delta", "x"); setstr("knob_delta", "1:0");
         setstr("loop_knob", "1:-8");                                  /* Loop + knob keeps working */
         CHECK(gett(1, "off") < 20000 && !strncmp(status_text(), "START 1", 7));
@@ -1024,8 +1024,8 @@ int main(int argc, char **argv) {
         UNDO(); CHECK(labs(gett(1, "len") - L) < 8);
         REDO(); CHECK(labs(gett(1, "len") - 55125) < 2);
         UNDO();
-        down(M_SHIFT); setstr("knob_delta", "2:-1"); up(M_SHIFT);     /* SHIFT + K2 = fine 1/64 */
-        CHECK(labs(gett(1, "len") - 86822) < 3);                    /* one 1/64 step shorter, on the 1/64 grid */
+        down(M_SHIFT); setstr("knob_delta", "2:-1"); up(M_SHIFT);     /* SHIFT + K2 = normal 1/16 step */
+        CHECK(labs(gett(1, "len") - 82687) < 3);
         UNDO();
         setstr("knob_delta", "2:-16"); setstr("knob_delta", "2:-16"); setstr("knob_delta", "2:-16");
         CHECK(gett(1, "len") >= 5512 && gett(1, "len") <= 5513);      /* never below one 1/16 note */
@@ -1277,15 +1277,21 @@ int main(int argc, char **argv) {
           for (int i = 0; i < n; i++) if (tk[i] & 0x80) beats++;
           CHECK(n == 7 && beats == 6 && np == 1 && abs(ph[0] - 64) <= 1);   /* 2 bars: bar tick at 0, phrase tick at IN (bar 1 of its phrase), 6 beats */
           CHECK(!(tk[0] & 0x80) && tk[0] <= 1); }
-        /* fine (SHIFT) = half a bar window; IN moves by a 1/64 note */
-        down(M_SHIFT); setstr("knob_delta", "1:1"); up(M_SHIFT);
+        /* fine (Loop + knob, fine flag) = half a bar window; IN moves by a 1/64 note */
+        setstr("loop_knob", "1:1:1");
         { int n = disp_ticks(tk); CHECK(n <= 3 && strstr(disp_head(), "ZOOM") && disp_mark() >= 0); }
+        /* knob_page: empty while the zoom is up */
+        { char pg[400] = ""; A->get_param(S, "knob_page", pg, sizeof pg); CHECK(pg[0] == 0); }
         /* playhead stays inside 0..127 whatever the window */
         for (int i = 0; i < 50; i++) { run(100); int p = disp_pos(); CHECK(p >= 0 && p < 128); }
         /* the timer ends the zoom: whole buffer again, markers in buffer coordinates */
         run(1000);
         CHECK(strstr(disp_head(), "ZOOM") == NULL);
         CHECK(abs(disp_mark() - 64) <= 2 && disp_end() == 127);
+        { char pg[400] = ""; A->get_param(S, "knob_page", pg, sizeof pg);      /* zoom over: the page is back */
+          CHECK(!strncmp(pg, "PISTA 1|PLAY|0|IN;d;0.50", 24) && strstr(pg, "|VOL;d;0.500;100|PAN;d;0.500;C|FX;b;OFF|AMT;d;0.500;50|SPD;b;X1|REV;b;OFF"));
+          setstr("knob_delta", "3:2"); A->get_param(S, "knob_page", pg, sizeof pg);   /* VOL +10: its value text is focused */
+          CHECK(!strncmp(pg, "PISTA 1|PLAY|3|", 15) && strstr(pg, "|VOL;d;0.550;110|")); }
         /* OUT: K2 down a bar -> window [6,8) bars centred on OUT = 7 bars, clamped */
         setstr("knob_delta", "2:-16");
         CHECK(labs(gett(1, "len") - 7 * BAR) <= 4);

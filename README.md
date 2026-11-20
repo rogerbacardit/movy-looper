@@ -25,10 +25,12 @@ fila 1  TODO     REC/   REC/   REC/   REC/   REC/   REC/   Quantize
 
 **Selector de pista (fila 4, columnas 2-7) y vista PISTA.** Tocar el pad de una pista la selecciona: los 8 knobs pasan a ser de esa pista (Movy los captura con `knob_capture_param`) y la onda la sigue. Tocar la pista ya seleccionada vuelve a MIX (knobs = volumenes, como siempre). Cada pad usa el color de la pista, tenue; la seleccionada, brillante (nunca verde ni rojo). La pantalla muestra `PISTA 3` y el ultimo valor tocado, y cada giro lanza un aviso tipo `T3 IN +8/16`. Con la vista PISTA activa, los pedales 3/4 mueven tambien la seleccion, y los pads de otras pistas no cambian la pista de la onda.
 
+**Pagina de la vista PISTA (v0.7.0).** Con una pista seleccionada, la pantalla del Move muestra los 8 knobs como una pagina de parametros estilo Schwung (2 filas x 4: dial redondo para valores continuos, caja con texto para opciones, etiqueta corta debajo; titulo `PISTA 3` a la izquierda y el estado, p. ej. `PLAY`, a la derecha; el ultimo knob girado muestra su valor 1,5 s en lugar de la etiqueta). Mientras giras IN/OUT (y 2,5 s despues) se ve la onda con zoom; luego vuelve la pagina. En MIX sigue la onda. Requiere Movy `module-leds` v8 (el modulo lo publica con `knob_page_param`/`knob_page`).
+
 | Knob | Vista PISTA (pista seleccionada) |
 |---|---|
-| K1 | IN: inicio del clip (rejilla 1/16; SHIFT = fino 1/64). Mientras lo giras (y 2,5 s despues) la onda hace ZOOM: ventana de 2 compases centrada en IN (1/2 compas con SHIFT), cabecera `PISTA 3 IN +8/16 ZOOM` |
-| K2 | OUT: fin/largo del loop (rejilla 1/16; SHIFT = fino 1/64; nunca menos de 1/16; acortar no destruye; una racha de giros = un paso de Undo; la onda muestra todo lo grabado con marcas de inicio y fin; mientras lo giras hace ZOOM de 2 compases centrado en OUT, igual que K1) |
+| K1 | IN: inicio del clip (rejilla 1/16; sin modo fino: SHIFT no cambia el paso). Mientras lo giras (y 2,5 s despues) la onda hace ZOOM: ventana de 2 compases centrada en IN (1/2 compas con Loop + knob fino), cabecera `PISTA 3 IN +8/16 ZOOM` |
+| K2 | OUT: fin/largo del loop (rejilla 1/16, sin fino; nunca menos de 1/16; acortar no destruye; una racha de giros = un paso de Undo; la onda muestra todo lo grabado con marcas de inicio y fin; mientras lo giras hace ZOOM de 2 compases centrado en OUT, igual que K1) |
 | K3 | Volumen de la pista |
 | K4 | Pan |
 | K5 | Tipo de FX: OFF / LPF / HPF / CRUSH / DELAY / PHASER / RING (3 clics por paso) |
@@ -44,7 +46,7 @@ En MIX (nada seleccionado): K1-K6 volumenes de las pistas, K7 entrada, K8 master
 
 | SHIFT + | Efecto |
 |---|---|
-| K1 / K2 (en vista PISTA) | IN / OUT fino (1/64) |
+| K1 / K2 (en vista PISTA) | sin efecto especial (pasos normales; SHIFT tendra una segunda pagina de knobs) |
 | pad fila 4 de una pista | FX on/off de esa pista (mantiene tipo y cantidad; mientras SHIFT esta pulsado el pad se ve blanco si tiene FX) |
 | pad fila 1 de una pista | Reverse de esa pista (nunca graba) |
 | pad fila 3 de una pista | SOLO: silencia las demas; otra vez = quita el solo y restaura los mutes anteriores (el pad de la pista en solo parpadea) |
