@@ -1,14 +1,13 @@
-# Movy Looper: brief
+# Looper 606: brief
 
 A 6-track live looper that loads **inside a Movy track** as a Schwung `sound_generator` (plugin api v2, `audio_in`). It takes ideas from the Boss RC-505 (faders and Rec Action), from Loopex (arm with threshold, hold to clear) and from Mark. The audio engine is Mark's.
 
-- Module id: `movy-looper`
-- Display name: `Looper`
-- Abbreviation: `LOOP`
+- Module id: `looper-606`
+- Display name: `Looper 606`
+- Abbreviation: `L606`
 
 ## Base and license
-- Engine: `mark_core.c/.h` from https://github.com/timncox/schwung-mark (MIT, © Tim Cox). Copy it into `src/` **without modifying it**, and keep `LICENSE-mark` and the credits.
-  - Build it with `-DMARK_TRACKS=6`.
+- Engine: `mark_core.c/.h` from https://github.com/timncox/schwung-mark (MIT, © Tim Cox). From phase 1.1 we OWN a fork (MIT): keep `LICENSE-mark` and the (c) Tim Cox credit, marked "modified for Looper 606". Changes are tagged `L606` in `src/mark_core.c`: native `MARK_TRACKS=6` (no sed patch), undoable CLEAR, per-track varispeed, 120 s default per track.
 - Reference shim already written: `~/movy-twister-patch/schwung-mark-movy/src/mark_synth.c` (module `mark-loop`). It is the starting point.
 - **Loopex: ideas only, never its code.** It has no license.
 
@@ -50,5 +49,13 @@ The cause of today's "0 params" is that Movy reads params from module.json. Dupl
 - `src/looper_synth.c` (shim), `module.json`, `Makefile` (host test build and ARM build, copying the Mark mechanism: `scripts/build-synth.sh`).
 - Host tests: smoke test (load, process with a sine input, arm + threshold → REC, cycle, mute, reverse, clear/undo, params).
 - `README.md` in Spanish for the user: pad layout (ASCII), knobs, installation.
-- Package `build/movy-looper-module.tar.gz` (folder `movy-looper/` with `dsp.so` and `module.json`).
-- Install path on the Move: `/data/UserData/schwung/modules/sound_generators/movy-looper` (owner `ableton:users`).
+- Package `build/looper-606-module.tar.gz` (folder `looper-606/` with `dsp.so` and `module.json`).
+- Install path on the Move: `/data/UserData/schwung/modules/sound_generators/looper-606` (owner `ableton:users`).
+
+## Entrada de audio en Movy standalone (phase 1.1 findings)
+
+- Movy on the device runs as the standalone `movy-host` (`/data/UserData/schwung/modules/tools/movy/movy-host`), not under the Schwung shim. Its vtable exposes the SPI page (`schwung-movy/host/vtable.c:59,65`, `audio.c:157`); a chain module reads `mapped_memory + audio_in_offset` exactly like the stock `linein` module (`schwung/src/modules/sound_generators/linein/linein.c:1016`). The chain host forwards that vtable unchanged (`chain_host.c:108`), so there is no other input mechanism for a sound_generator inside a chain.
+- Movy's own docs only *assume* audio-in is live in standalone (`schwung-movy/plans/2026-10-09-standalone-migration.md:586`, `docs/standalone/inventory.md:79`); nothing in `host/` reads or routes it. Schwung documents that input routing "depends on the last selected input in the stock Move interface" (`schwung/docs/API.md:696`) and that the XMOS routing is set by Move firmware SysEx (`docs/SPI_PROTOCOL.md`, `37 12`). With the Move firmware not running, nobody configures it.
+- To discriminate: load the stock `linein` in a Movy track; if it is silent too, the fix belongs in `movy-host` (send the XMOS input-select SysEx at start-up), not in this module.
+- This module now logs the mechanism and the peak after 1 s, and still plays loops with no input.
+- Movy's idle gate (`chain_idle.rs`: SLEEP_AFTER 344 blocks, probe every 172) parks a silent synth and ignores a synth's `requires_continuous_processing`; the module keeps itself awake with a -74 dBFS dither while tracks are in use.
