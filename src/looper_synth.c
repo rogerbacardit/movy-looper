@@ -74,7 +74,7 @@ static const pad_def_t PAD_GRID[4][8] = {
                       P(A_REC,6,"Rec/Dub 6"), P(A_QUANT,0,"Quantize") },
 };
 
-#define DEFAULT_THRESHOLD 8          /* percent of full scale = 0.08 */
+#define DEFAULT_THRESHOLD 2          /* percent of full scale; line-in often peaks ~4% */
 #define NTRK              MARK_TRACKS
 #define MAXBLK            128        /* core block size */
 
