@@ -74,7 +74,7 @@ static const pad_def_t PAD_GRID[4][8] = {
                       P(A_REC,6,"Rec/Dub 6"), P(A_QUANT,0,"Quantize") },
 };
 
-#define DEFAULT_THRESHOLD 2          /* percent of full scale; line-in often peaks ~4% */
+#define DEFAULT_THRESHOLD (-42)      /* dBFS (~260/32768): above line-in noise (~-66), below quiet playing */
 #define NTRK              MARK_TRACKS
 #define MAXBLK            128        /* core block size */
 
@@ -106,7 +106,7 @@ typedef struct {
     long rec_frames[NTRK];         /* frames spent in REC */
     int  rec_fired[NTRK];
     int  prev_st[NTRK];
-    int  threshold;                /* 1..100 percent */
+    int  threshold;                /* -70..-6 dBFS */
     int  count_in;
     int  rec_len;                  /* fixed recording length in bars, 0 = free */
     int  in_gain;                  /* 0..200 percent */
@@ -191,6 +191,7 @@ static void set_t(synth_t *s, int t, const char *k, int v) {
 }
 static void toggle_t(synth_t *s, int t, const char *k) { set_t(s, t, k, !get_t(s, t, k)); }
 
+static int peak_db(int p) { return p < 1 ? -99 : (int)floor(20.0 * log10(p / 32768.0) + 0.5); }
 static int clampi_(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 static int core_state(synth_t *s, int t) { return get_t(s, t, "state"); }
@@ -676,7 +677,7 @@ static void build_hierarchy(synth_t *s) {
 
     APP("\"setup\":{\"name\":\"Setup\",\"params\":["
         "{\"key\":\"threshold\",\"name\":\"Arm Threshold\",\"short_name\":\"THR\",\"type\":\"int\","
-        "\"min\":1,\"max\":100,\"default\":%d,\"step\":1,\"unit\":\"%%\"},"
+        "\"min\":-70,\"max\":-6,\"default\":%d,\"step\":1,\"unit\":\"dB\"},"
         "{\"key\":\"quantize\",\"name\":\"Quantize\",\"short_name\":\"QNT\",\"type\":\"enum\","
         "\"options\":%s,\"default\":1},"
         "{\"key\":\"rec_len\",\"name\":\"Fixed Length\",\"short_name\":\"LEN\",\"type\":\"enum\","
@@ -917,7 +918,7 @@ static int state_get(synth_t *s, char *buf, int buf_len) {
         strncat(lv, c, sizeof lv - strlen(lv) - 1);
     }
     int w = snprintf(buf + n, (size_t)(buf_len - n),
-        ",\"l6id\":\"%s\",\"l6rl\":%d,\"l6ci\":%d,\"l6th\":%d,\"l6ig\":%d,"
+        ",\"l6id\":\"%s\",\"l6rl\":%d,\"l6ci\":%d,\"l6thdb\":%d,\"l6ig\":%d,"
         "\"l6sp\":\"%s\",\"l6mu\":\"%s\",\"l6lv\":\"%s\"}",
         loop_id_now(s), s->rec_len, s->count_in, s->threshold, s->in_gain, sp, mu, lv);
     if (w < 0 || w >= buf_len - n) { buf[n] = '}'; buf[n + 1] = 0; return n + 1; }
@@ -932,7 +933,7 @@ static void state_set(synth_t *s, const char *val) {
     if (strstr(val, "\"l6rl\":")) {                 /* written by state_get below */
         s->rec_len   = clampi_((int)jnum(val, "l6rl", s->rec_len), 0, MAX_BARS);
         s->count_in  = jnum(val, "l6ci", s->count_in) ? 1 : 0;
-        s->threshold = clampi_((int)jnum(val, "l6th", s->threshold), 1, 100);
+        s->threshold = clampi_((int)jnum(val, "l6thdb", s->threshold), -70, -6);
         s->in_gain   = clampi_((int)jnum(val, "l6ig", s->in_gain), 0, 200);
         for (int t = 1; t <= NTRK; t++) {
             set_t(s, t, "spd", clampi_(jcsv(val, "l6sp", t - 1, 1), 0, 2));
@@ -1016,7 +1017,7 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
         }
     }
     /* ARM: threshold crossing starts recording; count-in expiry too */
-    int thr = s->threshold * 32768 / 100;
+    int thr = (int)(32768.0 * pow(10.0, s->threshold / 20.0));
     {
         int any_armed = 0;
         for (int t = 0; t < NTRK; t++) any_armed |= s->armed[t];
@@ -1024,8 +1025,8 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
             if (peak > s->arm_diag_peak) s->arm_diag_peak = peak;
             s->arm_diag_frames += frames;
             if (s->arm_diag_frames >= MARK_SR) {
-                hlog("looper-606: armed, input peak (after gain %d%%) = %d, threshold = %d (%d%%)",
-                     s->in_gain, s->arm_diag_peak, thr, s->threshold);
+                hlog("looper-606: armed, input peak (after gain %d%%) = %d, threshold = %d (%d dB), peak = %d dB",
+                     s->in_gain, s->arm_diag_peak, thr, s->threshold, peak_db(s->arm_diag_peak));
                 s->arm_diag_frames = 0; s->arm_diag_peak = 0;
             }
         } else { s->arm_diag_frames = 0; s->arm_diag_peak = 0; }
@@ -1204,7 +1205,7 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     int v = atoi(val);
     if (!strcmp(key, "delete_pad")) { if (v >= 0 && v < 32) delete_pad(s, v); return; }
     if (!strcmp(key, "cur_track")) { s->cur_track = clampi(v, 1, NTRK); return; }
-    if (!strcmp(key, "threshold")) { s->threshold = clampi(v, 1, 100); return; }
+    if (!strcmp(key, "threshold")) { s->threshold = clampi(v, -70, -6); return; }
     if (!strcmp(key, "count_in"))  { s->count_in = v ? 1 : 0; return; }
     if (!strcmp(key, "rec_len"))   { s->rec_len = clampi(v, 0, MAX_BARS); return; }
     if (!strcmp(key, "step"))      { step_press(s, v); return; }

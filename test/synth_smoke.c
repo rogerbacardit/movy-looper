@@ -45,12 +45,13 @@ static int fails, checks;
 #define CHECK(c) do { checks++; if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
 
 enum { IN_SINE, IN_SILENCE, IN_LOUD };
-static int in_mode = IN_SINE; static double ph;
+static int in_mode = IN_SINE; static double ph; static int in_dc = 0;
 static void fill_input(void) {
     int16_t *in = (int16_t *)(mem + 2304);
     for (int i = 0; i < 128; i++) {
         double a = in_mode == IN_SILENCE ? 0.0 : in_mode == IN_LOUD ? 0.5 : 0.25;
         int16_t v = (int16_t)(sin(ph) * a * 32767.0); ph += 2 * M_PI * 220.0 / 44100.0;
+        if (in_dc) v = (int16_t)in_dc;
         in[2 * i] = in[2 * i + 1] = v;
     }
 }
@@ -150,7 +151,8 @@ int main(int argc, char **argv) {
     FILE *f = fopen(argv[2], "w"); fputs(hb, f); fclose(f);
     seti("t6_level", 77); CHECK(geti("t6_level") == 77);          /* track 6 reaches the core */
     seti("t6_level", 100);
-    seti("threshold", 12); CHECK(geti("threshold") == 12); seti("threshold", 8);
+    CHECK(geti("threshold") == -42);
+    seti("threshold", -30); CHECK(geti("threshold") == -30); seti("threshold", -42);
     seti("in_gain", 150); CHECK(geti("in_gain") == 150); seti("in_gain", 100);
     seti("master", 90); CHECK(geti("master") == 90); seti("master", 100);
     seti("bpm_override", 100); CHECK(geti("bpm_override") == 100); seti("bpm_override", 0);
@@ -202,7 +204,13 @@ int main(int argc, char **argv) {
     tap(M_ARM); CHECK(geti("arm") == 1); run(400);                 /* past the 1 s REVERSE window */
     in_mode = IN_SILENCE; tap(REC(2)); CHECK(state(2) == S_ARMED);
     run(100); CHECK(state(2) == S_ARMED);                          /* below threshold */
-    in_mode = IN_SINE; run(3); CHECK(state(2) == S_REC);           /* crossed threshold */
+    in_mode = IN_SILENCE; tap(REC(5)); CHECK(state(5) == S_ARMED);
+    in_dc = 16; run(100); CHECK(state(5) == S_ARMED);              /* noise floor (-66 dB) < -42 dB */
+    in_dc = 400; run(3); CHECK(state(5) == S_REC);                 /* quiet playing (-38 dB) >= -42 dB */
+    in_dc = 0; run(2); tap(REC(5)); run(2); CHECK(state(5) == S_PLAY);
+    seti("delete_pad", MUTE(5) - 36); CHECK(state(5) == S_EMPTY);
+    in_mode = IN_SILENCE;
+    in_mode = IN_SINE; run(3); CHECK(state(2) == S_REC); /* crossed threshold */
     run(200); tap(REC(2)); run(2); CHECK(state(2) == S_PLAY);
     tap(M_ARM); CHECK(geti("arm") == 0); run(400);
     in_mode = IN_SILENCE; tap(REC(3)); tap(REC(3));                /* arm off: plain REC, then cancel */

@@ -27,7 +27,7 @@ Row 1 is the bottom row. Notes are declared as drum voices in the hierarchy (`pa
 ## Auto-rec (in the shim, not in the core)
 - With ARM on, tapping REC on an empty track leaves it **ARMED**.
 - When the input peak crosses `threshold`, the shim sends the core `tN_btn` (with quantize on, the core does its usual quantization).
-- Configurable threshold, default 2 % (on the device line-in peaked at ~4 %, so 8 % never triggered).
+- Configurable threshold, -70..-6 dBFS, default -42 dB (~260/32768; device line-in noise floor peaks ~-66 dB, quiet playing ~-40..-30 dB).
 
 ## Knobs (hierarchy pages; also in `capabilities.ui_hierarchy` of module.json)
 The cause of today's "0 params" is that Movy reads params from module.json. Duplicate the hierarchy there and keep `get_param("ui_hierarchy")`. Working example: `schwung-movy/browser-test/fixtures/module-contracts/sound_generator--smack-in.json`.
