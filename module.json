@@ -1,0 +1,710 @@
+{
+  "id": "movy-looper",
+  "name": "Looper",
+  "abbrev": "LOOP",
+  "version": "0.1.0",
+  "description": "6-track live looper (Mark engine by Tim Cox) as a sound generator: pads drive rec/play/overdub/mute, knobs mix",
+  "dsp": "dsp.so",
+  "api_version": 2,
+  "component_type": "sound_generator",
+  "capabilities": {
+    "audio_in": true,
+    "audio_out": true,
+    "midi_in": true,
+    "midi_out": false,
+    "chainable": true,
+    "component_type": "sound_generator",
+    "requires_continuous_processing": true,
+    "ui_hierarchy": {
+      "pad_layout": "drums",
+      "levels": {
+        "root": {
+          "name": "Looper",
+          "params": [
+            {
+              "key": "t1_level",
+              "name": "Track 1 Vol",
+              "short_name": "T1",
+              "type": "int",
+              "min": 0,
+              "max": 200,
+              "default": 100,
+              "step": 5
+            },
+            {
+              "key": "t2_level",
+              "name": "Track 2 Vol",
+              "short_name": "T2",
+              "type": "int",
+              "min": 0,
+              "max": 200,
+              "default": 100,
+              "step": 5
+            },
+            {
+              "key": "t3_level",
+              "name": "Track 3 Vol",
+              "short_name": "T3",
+              "type": "int",
+              "min": 0,
+              "max": 200,
+              "default": 100,
+              "step": 5
+            },
+            {
+              "key": "t4_level",
+              "name": "Track 4 Vol",
+              "short_name": "T4",
+              "type": "int",
+              "min": 0,
+              "max": 200,
+              "default": 100,
+              "step": 5
+            },
+            {
+              "key": "t5_level",
+              "name": "Track 5 Vol",
+              "short_name": "T5",
+              "type": "int",
+              "min": 0,
+              "max": 200,
+              "default": 100,
+              "step": 5
+            },
+            {
+              "key": "t6_level",
+              "name": "Track 6 Vol",
+              "short_name": "T6",
+              "type": "int",
+              "min": 0,
+              "max": 200,
+              "default": 100,
+              "step": 5
+            },
+            {
+              "key": "in_gain",
+              "name": "Input Vol",
+              "short_name": "IN",
+              "type": "int",
+              "min": 0,
+              "max": 200,
+              "default": 100,
+              "step": 5
+            },
+            {
+              "key": "master",
+              "name": "Master",
+              "short_name": "MST",
+              "type": "int",
+              "min": 0,
+              "max": 200,
+              "default": 100,
+              "step": 5
+            },
+            {
+              "level": "track",
+              "name": "Track"
+            },
+            {
+              "level": "setup",
+              "name": "Setup"
+            },
+            {
+              "level": "status",
+              "name": "Status"
+            },
+            {
+              "level": "v01",
+              "label": "Pad 01"
+            },
+            {
+              "level": "v02",
+              "label": "Pad 02"
+            },
+            {
+              "level": "v03",
+              "label": "Pad 03"
+            },
+            {
+              "level": "v04",
+              "label": "Pad 04"
+            },
+            {
+              "level": "v05",
+              "label": "Pad 05"
+            },
+            {
+              "level": "v06",
+              "label": "Pad 06"
+            },
+            {
+              "level": "v07",
+              "label": "Pad 07"
+            },
+            {
+              "level": "v08",
+              "label": "Pad 08"
+            },
+            {
+              "level": "v09",
+              "label": "Pad 09"
+            },
+            {
+              "level": "v10",
+              "label": "Pad 10"
+            },
+            {
+              "level": "v11",
+              "label": "Pad 11"
+            },
+            {
+              "level": "v12",
+              "label": "Pad 12"
+            },
+            {
+              "level": "v13",
+              "label": "Pad 13"
+            },
+            {
+              "level": "v14",
+              "label": "Pad 14"
+            },
+            {
+              "level": "v15",
+              "label": "Pad 15"
+            },
+            {
+              "level": "v16",
+              "label": "Pad 16"
+            },
+            {
+              "level": "v17",
+              "label": "Pad 17"
+            },
+            {
+              "level": "v18",
+              "label": "Pad 18"
+            },
+            {
+              "level": "v19",
+              "label": "Pad 19"
+            },
+            {
+              "level": "v20",
+              "label": "Pad 20"
+            },
+            {
+              "level": "v21",
+              "label": "Pad 21"
+            },
+            {
+              "level": "v22",
+              "label": "Pad 22"
+            },
+            {
+              "level": "v23",
+              "label": "Pad 23"
+            },
+            {
+              "level": "v24",
+              "label": "Pad 24"
+            },
+            {
+              "level": "v25",
+              "label": "Pad 25"
+            },
+            {
+              "level": "v26",
+              "label": "Pad 26"
+            },
+            {
+              "level": "v27",
+              "label": "Pad 27"
+            },
+            {
+              "level": "v28",
+              "label": "Pad 28"
+            },
+            {
+              "level": "v29",
+              "label": "Pad 29"
+            },
+            {
+              "level": "v30",
+              "label": "Pad 30"
+            },
+            {
+              "level": "v31",
+              "label": "Pad 31"
+            },
+            {
+              "level": "v32",
+              "label": "Pad 32"
+            }
+          ],
+          "knobs": [
+            "t1_level",
+            "t2_level",
+            "t3_level",
+            "t4_level",
+            "t5_level",
+            "t6_level",
+            "in_gain",
+            "master"
+          ]
+        },
+        "track": {
+          "name": "Track",
+          "params": [
+            {
+              "key": "fx_type",
+              "name": "FX Type",
+              "short_name": "FX",
+              "type": "enum",
+              "options": [
+                "Off",
+                "LPF",
+                "HPF",
+                "Crush",
+                "Delay",
+                "Phaser",
+                "Ring"
+              ],
+              "default": 0
+            },
+            {
+              "key": "fx_amt",
+              "name": "FX Amount",
+              "short_name": "AMT",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "default": 50,
+              "step": 2
+            },
+            {
+              "key": "trk_pan",
+              "name": "Pan",
+              "short_name": "PAN",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "default": 50,
+              "step": 2
+            },
+            {
+              "key": "trk_rev",
+              "name": "Reverse",
+              "short_name": "REV",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "default": 0
+            },
+            {
+              "key": "trk_shot",
+              "name": "One-shot",
+              "short_name": "1SHOT",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "default": 0
+            }
+          ],
+          "knobs": [
+            "fx_type",
+            "fx_amt",
+            "trk_pan",
+            "trk_rev",
+            "trk_shot"
+          ]
+        },
+        "setup": {
+          "name": "Setup",
+          "params": [
+            {
+              "key": "threshold",
+              "name": "Arm Threshold",
+              "short_name": "THR",
+              "type": "int",
+              "min": 1,
+              "max": 100,
+              "default": 8,
+              "step": 1,
+              "unit": "%"
+            },
+            {
+              "key": "quantize",
+              "name": "Quantize",
+              "short_name": "QNT",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "default": 1
+            },
+            {
+              "key": "rec_len",
+              "name": "Fixed Length",
+              "short_name": "LEN",
+              "type": "enum",
+              "options": [
+                "Free",
+                "1 bar",
+                "2 bars",
+                "4 bars",
+                "8 bars"
+              ],
+              "default": 0
+            },
+            {
+              "key": "rec_action",
+              "name": "Rec Action",
+              "short_name": "RECACT",
+              "type": "enum",
+              "options": [
+                "Rec>Play",
+                "Rec>Dub"
+              ],
+              "default": 0
+            },
+            {
+              "key": "count_in",
+              "name": "Count-in",
+              "short_name": "CNT",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "default": 0
+            },
+            {
+              "key": "bpm_override",
+              "name": "BPM Override (0=off)",
+              "short_name": "BPM",
+              "type": "int",
+              "min": 0,
+              "max": 200,
+              "default": 0,
+              "step": 1
+            },
+            {
+              "key": "monitor",
+              "name": "Monitor",
+              "short_name": "MON",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "default": 1
+            },
+            {
+              "key": "arm",
+              "name": "Arm Auto-rec",
+              "short_name": "ARM",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "default": 0
+            }
+          ],
+          "knobs": [
+            "threshold",
+            "quantize",
+            "rec_len",
+            "rec_action",
+            "count_in",
+            "bpm_override",
+            "monitor",
+            "arm"
+          ]
+        },
+        "status": {
+          "name": "Status",
+          "params": [
+            {
+              "key": "t1_state",
+              "name": "Track 1",
+              "short_name": "S1",
+              "type": "enum",
+              "access": "read",
+              "options": [
+                "Empty",
+                "Armed",
+                "Rec",
+                "Play",
+                "Dub",
+                "Stop",
+                "Mute"
+              ],
+              "default": 0
+            },
+            {
+              "key": "t2_state",
+              "name": "Track 2",
+              "short_name": "S2",
+              "type": "enum",
+              "access": "read",
+              "options": [
+                "Empty",
+                "Armed",
+                "Rec",
+                "Play",
+                "Dub",
+                "Stop",
+                "Mute"
+              ],
+              "default": 0
+            },
+            {
+              "key": "t3_state",
+              "name": "Track 3",
+              "short_name": "S3",
+              "type": "enum",
+              "access": "read",
+              "options": [
+                "Empty",
+                "Armed",
+                "Rec",
+                "Play",
+                "Dub",
+                "Stop",
+                "Mute"
+              ],
+              "default": 0
+            },
+            {
+              "key": "t4_state",
+              "name": "Track 4",
+              "short_name": "S4",
+              "type": "enum",
+              "access": "read",
+              "options": [
+                "Empty",
+                "Armed",
+                "Rec",
+                "Play",
+                "Dub",
+                "Stop",
+                "Mute"
+              ],
+              "default": 0
+            },
+            {
+              "key": "t5_state",
+              "name": "Track 5",
+              "short_name": "S5",
+              "type": "enum",
+              "access": "read",
+              "options": [
+                "Empty",
+                "Armed",
+                "Rec",
+                "Play",
+                "Dub",
+                "Stop",
+                "Mute"
+              ],
+              "default": 0
+            },
+            {
+              "key": "t6_state",
+              "name": "Track 6",
+              "short_name": "S6",
+              "type": "enum",
+              "access": "read",
+              "options": [
+                "Empty",
+                "Armed",
+                "Rec",
+                "Play",
+                "Dub",
+                "Stop",
+                "Mute"
+              ],
+              "default": 0
+            }
+          ],
+          "knobs": [
+            "t1_state",
+            "t2_state",
+            "t3_state",
+            "t4_state",
+            "t5_state",
+            "t6_state"
+          ]
+        },
+        "v01": {
+          "name": "All Start/Stop",
+          "note": 36,
+          "knobs": []
+        },
+        "v02": {
+          "name": "Rec 1",
+          "note": 37,
+          "knobs": []
+        },
+        "v03": {
+          "name": "Rec 2",
+          "note": 38,
+          "knobs": []
+        },
+        "v04": {
+          "name": "Rec 3",
+          "note": 39,
+          "knobs": []
+        },
+        "v05": {
+          "name": "Stop All",
+          "note": 40,
+          "knobs": []
+        },
+        "v06": {
+          "name": "Stop 1",
+          "note": 41,
+          "knobs": []
+        },
+        "v07": {
+          "name": "Stop 2",
+          "note": 42,
+          "knobs": []
+        },
+        "v08": {
+          "name": "Stop 3",
+          "note": 43,
+          "knobs": []
+        },
+        "v09": {
+          "name": "Arm/Reverse",
+          "note": 44,
+          "knobs": []
+        },
+        "v10": {
+          "name": "Mute 1",
+          "note": 45,
+          "knobs": []
+        },
+        "v11": {
+          "name": "Mute 2",
+          "note": 46,
+          "knobs": []
+        },
+        "v12": {
+          "name": "Mute 3",
+          "note": 47,
+          "knobs": []
+        },
+        "v13": {
+          "name": "Undo/Redo",
+          "note": 48,
+          "knobs": []
+        },
+        "v14": {
+          "name": "FX 1",
+          "note": 49,
+          "knobs": []
+        },
+        "v15": {
+          "name": "FX 2",
+          "note": 50,
+          "knobs": []
+        },
+        "v16": {
+          "name": "FX 3",
+          "note": 51,
+          "knobs": []
+        },
+        "v17": {
+          "name": "Rec 4",
+          "note": 52,
+          "knobs": []
+        },
+        "v18": {
+          "name": "Rec 5",
+          "note": 53,
+          "knobs": []
+        },
+        "v19": {
+          "name": "Rec 6",
+          "note": 54,
+          "knobs": []
+        },
+        "v20": {
+          "name": "Quantize",
+          "note": 55,
+          "knobs": []
+        },
+        "v21": {
+          "name": "Stop 4",
+          "note": 56,
+          "knobs": []
+        },
+        "v22": {
+          "name": "Stop 5",
+          "note": 57,
+          "knobs": []
+        },
+        "v23": {
+          "name": "Stop 6",
+          "note": 58,
+          "knobs": []
+        },
+        "v24": {
+          "name": "Fixed Length",
+          "note": 59,
+          "knobs": []
+        },
+        "v25": {
+          "name": "Mute 4",
+          "note": 60,
+          "knobs": []
+        },
+        "v26": {
+          "name": "Mute 5",
+          "note": 61,
+          "knobs": []
+        },
+        "v27": {
+          "name": "Mute 6",
+          "note": 62,
+          "knobs": []
+        },
+        "v28": {
+          "name": "Rec Action",
+          "note": 63,
+          "knobs": []
+        },
+        "v29": {
+          "name": "FX 4",
+          "note": 64,
+          "knobs": []
+        },
+        "v30": {
+          "name": "FX 5",
+          "note": 65,
+          "knobs": []
+        },
+        "v31": {
+          "name": "FX 6",
+          "note": 66,
+          "knobs": []
+        },
+        "v32": {
+          "name": "Count-in",
+          "note": 67,
+          "knobs": []
+        }
+      }
+    }
+  },
+  "author": "timncox (engine), movy-looper (shim)"
+}
