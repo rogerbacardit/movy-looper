@@ -443,7 +443,9 @@ static void end_knob(synth_t *s, int t, int d, int fine) {
     d = clampi_(d, -16, 16);
     long k = lround((double)len / u) + d;
     long nl = lround((double)k * u);
-    if (nl < (long)umin) nl = (long)umin;
+    /* OUT stops one 1/16 after IN: it never pushes the clip start. */
+    long floor_ = get_t(s, t, "off") + (long)ceil(umin);
+    if (nl < floor_) nl = floor_;
     if (nl > cap_frames(s)) nl = cap_frames(s);
     if (nl != len) {
         int co = s->end_t == t && s->clock_frames < s->end_until;

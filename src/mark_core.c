@@ -1546,6 +1546,10 @@ static int track_set_length(mark_t *m, int ti, uint32_t nl, int coalesce) {
     if (m->io_busy || m->swap_track == ti) return 0;
     if (t->len == 0 || t->full_len == 0 || t->st == MK_REC || !t->buf) return 0;
     if (nl < 64) nl = 64;
+    {   /* L606: the end stops one minimum region after the clip start; it never pushes it */
+        uint32_t mr = min_region(m, t);
+        if (t->off && nl < t->off + mr) nl = t->off + mr;
+    }
     if (nl > m->track_frames) return 0;
     if (nl == t->len) return 0;
     if (t->st == MK_DUB) {               /* the write head would cross the new edge */

@@ -2,7 +2,7 @@
   "id": "looper-606",
   "name": "Looper 606",
   "abbrev": "L606",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "6-track live looper (Mark engine by Tim Cox, modified) as a sound generator: pads drive rec/play/overdub/mute, knobs mix",
   "dsp": "dsp.so",
   "api_version": 2,

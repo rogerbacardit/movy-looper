@@ -1030,6 +1030,11 @@ int main(int argc, char **argv) {
         setstr("knob_delta", "2:-16"); setstr("knob_delta", "2:-16"); setstr("knob_delta", "2:-16");
         CHECK(gett(1, "len") >= 5512 && gett(1, "len") <= 5513);      /* never below one 1/16 note */
         UNDO();
+        /* OUT stops one 1/16 after IN: it never pushes the start */
+        setstr("knob_delta", "1:8"); { int o = gett(1, "off");
+        setstr("knob_delta", "2:-16"); setstr("knob_delta", "2:-16"); setstr("knob_delta", "2:-16");
+        CHECK(gett(1, "off") == o && gett(1, "len") >= o + 5512 && gett(1, "len") <= o + 5530); }
+        UNDO(); setstr("knob_delta", "1:-30"); CHECK(gett(1, "off") == 0);
 
         /* K3 volume, K4 pan */
         setstr("knob_delta", "3:-4"); CHECK(gett(1, "level") == 80 && !strcmp(status_text(), "T1 VOL 80"));
