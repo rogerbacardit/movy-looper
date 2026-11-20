@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Looper 606: manual</title>
+<meta name="description" content="Looper 606: looper de 6 pistas para Ableton Move que corre dentro de Movy. Manual interactivo en español: pads, knobs, vista PISTA, auto-rec, pedalera y más.">
+<meta name="theme-color" content="#212121">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23212121'/%3E%3Ccircle cx='16' cy='16' r='8' fill='%23ff3b3b'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<script>(function(){try{var q=(location.search.match(/[?&]lang=([a-z]{2})/)||[])[1],s=null;try{s=localStorage.getItem('l606lang')}catch(e){}var l=q||s||(navigator.language||'es').slice(0,2).toLowerCase();if(l!=='es'&&/^(en|de|fr|pt|ja|it|ca)$/.test(l)){document.documentElement.className+=' i18n-load';setTimeout(function(){document.documentElement.className=document.documentElement.className.replace(' i18n-load','')},3000)}}catch(e){}})()</script>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<template id="tpl-move"><svg width="1788" height="832" viewBox="0 0 1788 832" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="1788" height="832" fill="#212121"/>
+<g id="controller_vector_flat 1" clip-path="url(#clip0_126_2)">
+<path id="Vector" d="M1770 0H18C8.05887 0 0 8.05887 0 18V814C0 823.941 8.05887 832 18 832H1770C1779.94 832 1788 823.941 1788 814V18C1788 8.05887 1779.94 0 1770 0Z" fill="#2B2B2B" stroke-width="2" stroke="#1A1A1A"/>
+<g id="display">
+<path id="Vector_2" d="M213 50H39C37.8954 50 37 50.8954 37 52V144C37 145.105 37.8954 146 39 146H213C214.105 146 215 145.105 215 144V52C215 50.8954 214.105 50 213 50Z" fill="#252525" stroke-width="2" stroke="#0D0D0D"/>
+</g>
+<g id="top-knob-1">
+<path id="Vector_3" d="M394 103C410.016 103 423 90.0163 423 74C423 57.9837 410.016 45 394 45C377.984 45 365 57.9837 365 74C365 90.0163 377.984 103 394 103Z" fill="#2F2F2F" stroke-width="2" stroke="#171717"/>
+<path id="Vector_4" d="M394 154.5C397.038 154.5 399.5 152.038 399.5 149C399.5 145.962 397.038 143.5 394 143.5C390.962 143.5 388.5 145.962 388.5 149C388.5 152.038 390.962 154.5 394 154.5Z" fill="#D0D0D0"/>
+</g>
+<g id="top-knob-2">
+<path id="Vector_5" d="M545 103C561.016 103 574 90.0163 574 74C574 57.9837 561.016 45 545 45C528.984 45 516 57.9837 516 74C516 90.0163 528.984 103 545 103Z" fill="#2F2F2F" stroke-width="2" stroke="#171717"/>
+<path id="Vector_6" d="M545 154.5C548.038 154.5 550.5 152.038 550.5 149C550.5 145.962 548.038 143.5 545 143.5C541.962 143.5 539.5 145.962 539.5 149C539.5 152.038 541.962 154.5 545 154.5Z" fill="#D0D0D0"/>
+</g>
+<g id="top-knob-3">
+<path id="Vector_7" d="M700 103C716.016 103 729 90.0163 729 74C729 57.9837 716.016 45 700 45C683.984 45 671 57.9837 671 74C671 90.0163 683.984 103 700 103Z" fill="#2F2F2F" stroke-width="2" stroke="#171717"/>
+<path id="Vector_8" d="M700 154.5C703.038 154.5 705.5 152.038 705.5 149C705.5 145.962 703.038 143.5 700 143.5C696.962 143.5 694.5 145.962 694.5 149C694.5 152.038 696.962 154.5 700 154.5Z" fill="#D0D0D0"/>
+</g>
+<g id="top-knob-4">
+<path id="Vector_9" d="M853 103C869.016 103 882 90.0163 882 74C882 57.9837 869.016 45 853 45C836.984 45 824 57.9837 824 74C824 90.0163 836.984 103 853 103Z" fill="#2F2F2F" stroke-width="2" stroke="#171717"/>
+<path id="Vector_10" d="M853 154.5C856.038 154.5 858.5 152.038 858.5 149C858.5 145.962 856.038 143.5 853 143.5C849.962 143.5 847.5 145.962 847.5 149C847.5 152.038 849.962 154.5 853 154.5Z" fill="#D0D0D0"/>
+</g>
+<g id="top-knob-5">
+<path id="Vector_11" d="M1007 103C1023.02 103 1036 90.0163 1036 74C1036 57.9837 1023.02 45 1007 45C990.984 45 978 57.9837 978 74C978 90.0163 990.984 103 1007 103Z" fill="#2F2F2F" stroke-width="2" stroke="#171717"/>
+<path id="Vector_12" d="M1007 154.5C1010.04 154.5 1012.5 152.038 1012.5 149C1012.5 145.962 1010.04 143.5 1007 143.5C1003.96 143.5 1001.5 145.962 1001.5 149C1001.5 152.038 1003.96 154.5 1007 154.5Z" fill="#D0D0D0"/>
+</g>
+<g id="top-knob-6">
+<path id="Vector_13" d="M1165 103C1181.02 103 1194 90.0163 1194 74C1194 57.9837 1181.02 45 1165 45C1148.98 45 1136 57.9837 1136 74C1136 90.0163 1148.98 103 1165 103Z" fill="#2F2F2F" stroke-width="2" stroke="#171717"/>
+<path id="Vector_14" d="M1165 154.5C1168.04 154.5 1170.5 152.038 1170.5 149C1170.5 145.962 1168.04 143.5 1165 143.5C1161.96 143.5 1159.5 145.962 1159.5 149C1159.5 152.038 1161.96 154.5 1165 154.5Z" fill="#D0D0D0"/>
+</g>
+<g id="top-knob-7">
+<path id="Vector_15" d="M1318 103C1334.02 103 1347 90.0163 1347 74C1347 57.9837 1334.02 45 1318 45C1301.98 45 1289 57.9837 1289 74C1289 90.0163 1301.98 103 1318 103Z" fill="#2F2F2F" stroke-width="2" stroke="#171717"/>
+<path id="Vector_16" d="M1318 154.5C1321.04 154.5 1323.5 152.038 1323.5 149C1323.5 145.962 1321.04 143.5 1318 143.5C1314.96 143.5 1312.5 145.962 1312.5 149C1312.5 152.038 1314.96 154.5 1318 154.5Z" fill="#D0D0D0"/>
+</g>
+<g id="top-knob-8">
+<path id="Vector_17" d="M1473 103C1489.02 103 1502 90.0163 1502 74C1502 57.9837 1489.02 45 1473 45C1456.98 45 1444 57.9837 1444 74C1444 90.0163 1456.98 103 1473 103Z" fill="#2F2F2F" stroke-width="2" stroke="#171717"/>
+<path id="Vector_18" d="M1473 154.5C1476.04 154.5 1478.5 152.038 1478.5 149C1478.5 145.962 1476.04 143.5 1473 143.5C1469.96 143.5 1467.5 145.962 1467.5 149C1467.5 152.038 1469.96 154.5 1473 154.5Z" fill="#D0D0D0"/>
+</g>
+<g id="master">
+<path id="Vector_19" d="M1713 118C1736.2 118 1755 99.196 1755 76C1755 52.804 1736.2 34 1713 34C1689.8 34 1671 52.804 1671 76C1671 99.196 1689.8 118 1713 118Z" fill="#2F2F2F" stroke-width="2" stroke="#191919"/>
+<path id="Vector_20" d="M1584 84C1587.31 84 1590 81.3137 1590 78C1590 74.6863 1587.31 72 1584 72C1580.69 72 1578 74.6863 1578 78C1578 81.3137 1580.69 84 1584 84Z" fill="#111111"/>
+</g>
+<g id="large-left">
+<path id="Vector_21" d="M120 374C160.869 374 194 340.869 194 300C194 259.131 160.869 226 120 226C79.1309 226 46 259.131 46 300C46 340.869 79.1309 374 120 374Z" fill="#2F2F2F" stroke-width="2" stroke="#151515"/>
+</g>
+<g id="slider-1">
+<path id="Vector_22" d="M298 219.5C298 206.521 287.479 196 274.5 196C261.521 196 251 206.521 251 219.5V271.5C251 284.479 261.521 295 274.5 295C287.479 295 298 284.479 298 271.5V219.5Z" fill="#171717" stroke-width="3" stroke="#080808"/>
+<path id="Vector_23" d="M277 218C277 215.791 275.209 214 273 214C270.791 214 269 215.791 269 218V271C269 273.209 270.791 275 273 275C275.209 275 277 273.209 277 271V218Z" fill="#D8D8D8"/>
+</g>
+<g id="slider-2">
+<path id="Vector_24" d="M298 336.5C298 323.521 287.479 313 274.5 313C261.521 313 251 323.521 251 336.5V388.5C251 401.479 261.521 412 274.5 412C287.479 412 298 401.479 298 388.5V336.5Z" fill="#171717" stroke-width="3" stroke="#080808"/>
+<path id="Vector_25" d="M277 335C277 332.791 275.209 331 273 331C270.791 331 269 332.791 269 335V388C269 390.209 270.791 392 273 392C275.209 392 277 390.209 277 388V335Z" fill="#D8D8D8"/>
+</g>
+<g id="slider-3">
+<path id="Vector_26" d="M298 453.5C298 440.521 287.479 430 274.5 430C261.521 430 251 440.521 251 453.5V505.5C251 518.479 261.521 529 274.5 529C287.479 529 298 518.479 298 505.5V453.5Z" fill="#171717" stroke-width="3" stroke="#080808"/>
+<path id="Vector_27" d="M277 452C277 449.791 275.209 448 273 448C270.791 448 269 449.791 269 452V505C269 507.209 270.791 509 273 509C275.209 509 277 507.209 277 505V452Z" fill="#D8D8D8"/>
+</g>
+<g id="slider-4">
+<path id="Vector_28" d="M298 569.5C298 556.521 287.479 546 274.5 546C261.521 546 251 556.521 251 569.5V621.5C251 634.479 261.521 645 274.5 645C287.479 645 298 634.479 298 621.5V569.5Z" fill="#171717" stroke-width="3" stroke="#080808"/>
+<path id="Vector_29" d="M277 568C277 565.791 275.209 564 273 564C270.791 564 269 565.791 269 568V621C269 623.209 270.791 625 273 625C275.209 625 277 623.209 277 621V568Z" fill="#D8D8D8"/>
+</g>
+<g id="pad-1">
+<path id="Vector_30" d="M462 196H334C331.791 196 330 197.791 330 200V290C330 292.209 331.791 294 334 294H462C464.209 294 466 292.209 466 290V200C466 197.791 464.209 196 462 196Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-2">
+<path id="Vector_31" d="M615 196H487C484.791 196 483 197.791 483 200V290C483 292.209 484.791 294 487 294H615C617.209 294 619 292.209 619 290V200C619 197.791 617.209 196 615 196Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-3">
+<path id="Vector_32" d="M767 196H639C636.791 196 635 197.791 635 200V290C635 292.209 636.791 294 639 294H767C769.209 294 771 292.209 771 290V200C771 197.791 769.209 196 767 196Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-4">
+<path id="Vector_33" d="M920 196H792C789.791 196 788 197.791 788 200V290C788 292.209 789.791 294 792 294H920C922.209 294 924 292.209 924 290V200C924 197.791 922.209 196 920 196Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-5">
+<path id="Vector_34" d="M1072 196H944C941.791 196 940 197.791 940 200V290C940 292.209 941.791 294 944 294H1072C1074.21 294 1076 292.209 1076 290V200C1076 197.791 1074.21 196 1072 196Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-6">
+<path id="Vector_35" d="M1224 196H1096C1093.79 196 1092 197.791 1092 200V290C1092 292.209 1093.79 294 1096 294H1224C1226.21 294 1228 292.209 1228 290V200C1228 197.791 1226.21 196 1224 196Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-7">
+<path id="Vector_36" d="M1376 196H1248C1245.79 196 1244 197.791 1244 200V290C1244 292.209 1245.79 294 1248 294H1376C1378.21 294 1380 292.209 1380 290V200C1380 197.791 1378.21 196 1376 196Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-8">
+<path id="Vector_37" d="M1529 196H1401C1398.79 196 1397 197.791 1397 200V290C1397 292.209 1398.79 294 1401 294H1529C1531.21 294 1533 292.209 1533 290V200C1533 197.791 1531.21 196 1529 196Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-9">
+<path id="Vector_38" d="M462 313H334C331.791 313 330 314.791 330 317V407C330 409.209 331.791 411 334 411H462C464.209 411 466 409.209 466 407V317C466 314.791 464.209 313 462 313Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-10">
+<path id="Vector_39" d="M615 313H487C484.791 313 483 314.791 483 317V407C483 409.209 484.791 411 487 411H615C617.209 411 619 409.209 619 407V317C619 314.791 617.209 313 615 313Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-11">
+<path id="Vector_40" d="M767 313H639C636.791 313 635 314.791 635 317V407C635 409.209 636.791 411 639 411H767C769.209 411 771 409.209 771 407V317C771 314.791 769.209 313 767 313Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-12">
+<path id="Vector_41" d="M920 313H792C789.791 313 788 314.791 788 317V407C788 409.209 789.791 411 792 411H920C922.209 411 924 409.209 924 407V317C924 314.791 922.209 313 920 313Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-13">
+<path id="Vector_42" d="M1072 313H944C941.791 313 940 314.791 940 317V407C940 409.209 941.791 411 944 411H1072C1074.21 411 1076 409.209 1076 407V317C1076 314.791 1074.21 313 1072 313Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-14">
+<path id="Vector_43" d="M1224 313H1096C1093.79 313 1092 314.791 1092 317V407C1092 409.209 1093.79 411 1096 411H1224C1226.21 411 1228 409.209 1228 407V317C1228 314.791 1226.21 313 1224 313Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-15">
+<path id="Vector_44" d="M1376 313H1248C1245.79 313 1244 314.791 1244 317V407C1244 409.209 1245.79 411 1248 411H1376C1378.21 411 1380 409.209 1380 407V317C1380 314.791 1378.21 313 1376 313Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-16">
+<path id="Vector_45" d="M1529 313H1401C1398.79 313 1397 314.791 1397 317V407C1397 409.209 1398.79 411 1401 411H1529C1531.21 411 1533 409.209 1533 407V317C1533 314.791 1531.21 313 1529 313Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-17">
+<path id="Vector_46" d="M462 430H334C331.791 430 330 431.791 330 434V524C330 526.209 331.791 528 334 528H462C464.209 528 466 526.209 466 524V434C466 431.791 464.209 430 462 430Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-18">
+<path id="Vector_47" d="M615 430H487C484.791 430 483 431.791 483 434V524C483 526.209 484.791 528 487 528H615C617.209 528 619 526.209 619 524V434C619 431.791 617.209 430 615 430Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-19">
+<path id="Vector_48" d="M767 430H639C636.791 430 635 431.791 635 434V524C635 526.209 636.791 528 639 528H767C769.209 528 771 526.209 771 524V434C771 431.791 769.209 430 767 430Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-20">
+<path id="Vector_49" d="M920 430H792C789.791 430 788 431.791 788 434V524C788 526.209 789.791 528 792 528H920C922.209 528 924 526.209 924 524V434C924 431.791 922.209 430 920 430Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-21">
+<path id="Vector_50" d="M1072 430H944C941.791 430 940 431.791 940 434V524C940 526.209 941.791 528 944 528H1072C1074.21 528 1076 526.209 1076 524V434C1076 431.791 1074.21 430 1072 430Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-22">
+<path id="Vector_51" d="M1224 430H1096C1093.79 430 1092 431.791 1092 434V524C1092 526.209 1093.79 528 1096 528H1224C1226.21 528 1228 526.209 1228 524V434C1228 431.791 1226.21 430 1224 430Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-23">
+<path id="Vector_52" d="M1376 430H1248C1245.79 430 1244 431.791 1244 434V524C1244 526.209 1245.79 528 1248 528H1376C1378.21 528 1380 526.209 1380 524V434C1380 431.791 1378.21 430 1376 430Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-24">
+<path id="Vector_53" d="M1529 430H1401C1398.79 430 1397 431.791 1397 434V524C1397 526.209 1398.79 528 1401 528H1529C1531.21 528 1533 526.209 1533 524V434C1533 431.791 1531.21 430 1529 430Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-25">
+<path id="Vector_54" d="M462 546H334C331.791 546 330 547.791 330 550V640C330 642.209 331.791 644 334 644H462C464.209 644 466 642.209 466 640V550C466 547.791 464.209 546 462 546Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-26">
+<path id="Vector_55" d="M615 546H487C484.791 546 483 547.791 483 550V640C483 642.209 484.791 644 487 644H615C617.209 644 619 642.209 619 640V550C619 547.791 617.209 546 615 546Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-27">
+<path id="Vector_56" d="M767 546H639C636.791 546 635 547.791 635 550V640C635 642.209 636.791 644 639 644H767C769.209 644 771 642.209 771 640V550C771 547.791 769.209 546 767 546Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-28">
+<path id="Vector_57" d="M920 546H792C789.791 546 788 547.791 788 550V640C788 642.209 789.791 644 792 644H920C922.209 644 924 642.209 924 640V550C924 547.791 922.209 546 920 546Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-29">
+<path id="Vector_58" d="M1072 546H944C941.791 546 940 547.791 940 550V640C940 642.209 941.791 644 944 644H1072C1074.21 644 1076 642.209 1076 640V550C1076 547.791 1074.21 546 1072 546Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-30">
+<path id="Vector_59" d="M1224 546H1096C1093.79 546 1092 547.791 1092 550V640C1092 642.209 1093.79 644 1096 644H1224C1226.21 644 1228 642.209 1228 640V550C1228 547.791 1226.21 546 1224 546Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-31">
+<path id="Vector_60" d="M1376 546H1248C1245.79 546 1244 547.791 1244 550V640C1244 642.209 1245.79 644 1248 644H1376C1378.21 644 1380 642.209 1380 640V550C1380 547.791 1378.21 546 1376 546Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="pad-32">
+<path id="Vector_61" d="M1529 546H1401C1398.79 546 1397 547.791 1397 550V640C1397 642.209 1398.79 644 1401 644H1529C1531.21 644 1533 642.209 1533 640V550C1533 547.791 1531.21 546 1529 546Z" fill="#E8E8E8" stroke-width="4" stroke="#202020"/>
+</g>
+<g id="left-nav">
+<path id="Vector_62" d="M76 518C98.0914 518 116 500.091 116 478C116 455.909 98.0914 438 76 438C53.9086 438 36 455.909 36 478C36 500.091 53.9086 518 76 518Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="Vector_63" d="M82 467L70 479L82 491" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" stroke="#9A9A9A"/>
+<path id="Vector_64" d="M181 518C203.091 518 221 500.091 221 478C221 455.909 203.091 438 181 438C158.909 438 141 455.909 141 478C141 500.091 158.909 518 181 518Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<g id="Group">
+<g id="Vector_65">
+<path d="M165 465H195Z" fill="black"/>
+<path d="M165 465H195" stroke-width="5" stroke-linecap="round" stroke="#9A9A9A"/>
+</g>
+<g id="Vector_66">
+<path d="M165 478H195Z" fill="black"/>
+<path d="M165 478H195" stroke-width="5" stroke-linecap="round" stroke="#9A9A9A"/>
+</g>
+<g id="Vector_67">
+<path d="M165 491H195Z" fill="black"/>
+<path d="M165 491H195" stroke-width="5" stroke-linecap="round" stroke="#9A9A9A"/>
+</g>
+</g>
+</g>
+<g id="transport">
+<path id="Vector_68" d="M76 771C98.0914 771 116 753.091 116 731C116 708.909 98.0914 691 76 691C53.9086 691 36 708.909 36 731C36 753.091 53.9086 771 76 771Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="Vector_69" d="M67 716L91 731L67 746V716Z" stroke-width="5" stroke-linejoin="round" stroke="#AAAAAA"/>
+<path id="Vector_70" d="M181 771C203.091 771 221 753.091 221 731C221 708.909 203.091 691 181 691C158.909 691 141 708.909 141 731C141 753.091 158.909 771 181 771Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="Vector_71" d="M198 731C198 740.389 190.389 748 181 748C171.611 748 164 740.389 164 731C164 721.611 171.611 714 181 714C190.389 714 198 721.611 198 731Z" stroke-width="5" stroke="#AAAAAA"/>
+</g>
+<g id="step-1">
+<path id="Vector_72" d="M362 757C375.255 757 386 746.255 386 733C386 719.745 375.255 709 362 709C348.745 709 338 719.745 338 733C338 746.255 348.745 757 362 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_73" d="M362 739.5C365.59 739.5 368.5 736.59 368.5 733C368.5 729.41 365.59 726.5 362 726.5C358.41 726.5 355.5 729.41 355.5 733C355.5 736.59 358.41 739.5 362 739.5Z" fill="#8A8A8A"/>
+<g id="Vector_74">
+<path d="M357 743H367Z" fill="black"/>
+<path d="M357 743H367" stroke-width="2" stroke-linecap="round" stroke="#9C9C9C"/>
+</g>
+</g>
+<g id="step-2">
+<path id="Vector_75" d="M438 757C451.255 757 462 746.255 462 733C462 719.745 451.255 709 438 709C424.745 709 414 719.745 414 733C414 746.255 424.745 757 438 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_76" d="M438 739.5C441.59 739.5 444.5 736.59 444.5 733C444.5 729.41 441.59 726.5 438 726.5C434.41 726.5 431.5 729.41 431.5 733C431.5 736.59 434.41 739.5 438 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-3">
+<path id="Vector_77" d="M514 757C527.255 757 538 746.255 538 733C538 719.745 527.255 709 514 709C500.745 709 490 719.745 490 733C490 746.255 500.745 757 514 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_78" d="M514 739.5C517.59 739.5 520.5 736.59 520.5 733C520.5 729.41 517.59 726.5 514 726.5C510.41 726.5 507.5 729.41 507.5 733C507.5 736.59 510.41 739.5 514 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-4">
+<path id="Vector_79" d="M590 757C603.255 757 614 746.255 614 733C614 719.745 603.255 709 590 709C576.745 709 566 719.745 566 733C566 746.255 576.745 757 590 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_80" d="M590 739.5C593.59 739.5 596.5 736.59 596.5 733C596.5 729.41 593.59 726.5 590 726.5C586.41 726.5 583.5 729.41 583.5 733C583.5 736.59 586.41 739.5 590 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-5">
+<path id="Vector_81" d="M666 757C679.255 757 690 746.255 690 733C690 719.745 679.255 709 666 709C652.745 709 642 719.745 642 733C642 746.255 652.745 757 666 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_82" d="M666 739.5C669.59 739.5 672.5 736.59 672.5 733C672.5 729.41 669.59 726.5 666 726.5C662.41 726.5 659.5 729.41 659.5 733C659.5 736.59 662.41 739.5 666 739.5Z" fill="#8A8A8A"/>
+<g id="Vector_83">
+<path d="M661 743H671Z" fill="black"/>
+<path d="M661 743H671" stroke-width="2" stroke-linecap="round" stroke="#9C9C9C"/>
+</g>
+</g>
+<g id="step-6">
+<path id="Vector_84" d="M742 757C755.255 757 766 746.255 766 733C766 719.745 755.255 709 742 709C728.745 709 718 719.745 718 733C718 746.255 728.745 757 742 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_85" d="M742 739.5C745.59 739.5 748.5 736.59 748.5 733C748.5 729.41 745.59 726.5 742 726.5C738.41 726.5 735.5 729.41 735.5 733C735.5 736.59 738.41 739.5 742 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-7">
+<path id="Vector_86" d="M819 757C832.255 757 843 746.255 843 733C843 719.745 832.255 709 819 709C805.745 709 795 719.745 795 733C795 746.255 805.745 757 819 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_87" d="M819 739.5C822.59 739.5 825.5 736.59 825.5 733C825.5 729.41 822.59 726.5 819 726.5C815.41 726.5 812.5 729.41 812.5 733C812.5 736.59 815.41 739.5 819 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-8">
+<path id="Vector_88" d="M895 757C908.255 757 919 746.255 919 733C919 719.745 908.255 709 895 709C881.745 709 871 719.745 871 733C871 746.255 881.745 757 895 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_89" d="M895 739.5C898.59 739.5 901.5 736.59 901.5 733C901.5 729.41 898.59 726.5 895 726.5C891.41 726.5 888.5 729.41 888.5 733C888.5 736.59 891.41 739.5 895 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-9">
+<path id="Vector_90" d="M973 757C986.255 757 997 746.255 997 733C997 719.745 986.255 709 973 709C959.745 709 949 719.745 949 733C949 746.255 959.745 757 973 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_91" d="M973 739.5C976.59 739.5 979.5 736.59 979.5 733C979.5 729.41 976.59 726.5 973 726.5C969.41 726.5 966.5 729.41 966.5 733C966.5 736.59 969.41 739.5 973 739.5Z" fill="#8A8A8A"/>
+<g id="Vector_92">
+<path d="M968 743H978Z" fill="black"/>
+<path d="M968 743H978" stroke-width="2" stroke-linecap="round" stroke="#9C9C9C"/>
+</g>
+</g>
+<g id="step-10">
+<path id="Vector_93" d="M1049 757C1062.25 757 1073 746.255 1073 733C1073 719.745 1062.25 709 1049 709C1035.75 709 1025 719.745 1025 733C1025 746.255 1035.75 757 1049 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_94" d="M1049 739.5C1052.59 739.5 1055.5 736.59 1055.5 733C1055.5 729.41 1052.59 726.5 1049 726.5C1045.41 726.5 1042.5 729.41 1042.5 733C1042.5 736.59 1045.41 739.5 1049 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-11">
+<path id="Vector_95" d="M1125 757C1138.25 757 1149 746.255 1149 733C1149 719.745 1138.25 709 1125 709C1111.75 709 1101 719.745 1101 733C1101 746.255 1111.75 757 1125 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_96" d="M1125 739.5C1128.59 739.5 1131.5 736.59 1131.5 733C1131.5 729.41 1128.59 726.5 1125 726.5C1121.41 726.5 1118.5 729.41 1118.5 733C1118.5 736.59 1121.41 739.5 1125 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-12">
+<path id="Vector_97" d="M1201 757C1214.25 757 1225 746.255 1225 733C1225 719.745 1214.25 709 1201 709C1187.75 709 1177 719.745 1177 733C1177 746.255 1187.75 757 1201 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_98" d="M1201 739.5C1204.59 739.5 1207.5 736.59 1207.5 733C1207.5 729.41 1204.59 726.5 1201 726.5C1197.41 726.5 1194.5 729.41 1194.5 733C1194.5 736.59 1197.41 739.5 1201 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-13">
+<path id="Vector_99" d="M1277 757C1290.25 757 1301 746.255 1301 733C1301 719.745 1290.25 709 1277 709C1263.75 709 1253 719.745 1253 733C1253 746.255 1263.75 757 1277 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_100" d="M1277 739.5C1280.59 739.5 1283.5 736.59 1283.5 733C1283.5 729.41 1280.59 726.5 1277 726.5C1273.41 726.5 1270.5 729.41 1270.5 733C1270.5 736.59 1273.41 739.5 1277 739.5Z" fill="#8A8A8A"/>
+<g id="Vector_101">
+<path d="M1272 743H1282Z" fill="black"/>
+<path d="M1272 743H1282" stroke-width="2" stroke-linecap="round" stroke="#9C9C9C"/>
+</g>
+</g>
+<g id="step-14">
+<path id="Vector_102" d="M1353 757C1366.25 757 1377 746.255 1377 733C1377 719.745 1366.25 709 1353 709C1339.75 709 1329 719.745 1329 733C1329 746.255 1339.75 757 1353 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_103" d="M1353 739.5C1356.59 739.5 1359.5 736.59 1359.5 733C1359.5 729.41 1356.59 726.5 1353 726.5C1349.41 726.5 1346.5 729.41 1346.5 733C1346.5 736.59 1349.41 739.5 1353 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-15">
+<path id="Vector_104" d="M1430 757C1443.25 757 1454 746.255 1454 733C1454 719.745 1443.25 709 1430 709C1416.75 709 1406 719.745 1406 733C1406 746.255 1416.75 757 1430 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_105" d="M1430 739.5C1433.59 739.5 1436.5 736.59 1436.5 733C1436.5 729.41 1433.59 726.5 1430 726.5C1426.41 726.5 1423.5 729.41 1423.5 733C1423.5 736.59 1426.41 739.5 1430 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="step-16">
+<path id="Vector_106" d="M1506 757C1519.25 757 1530 746.255 1530 733C1530 719.745 1519.25 709 1506 709C1492.75 709 1482 719.745 1482 733C1482 746.255 1492.75 757 1506 757Z" fill="#2A2A2A" stroke-width="3" stroke="#101010"/>
+<path id="Vector_107" d="M1506 739.5C1509.59 739.5 1512.5 736.59 1512.5 733C1512.5 729.41 1509.59 726.5 1506 726.5C1502.41 726.5 1499.5 729.41 1499.5 733C1499.5 736.59 1502.41 739.5 1506 739.5Z" fill="#8A8A8A"/>
+</g>
+<g id="right-buttons">
+<path id="Vector_108" d="M1605 284C1627.09 284 1645 266.091 1645 244C1645 221.909 1627.09 204 1605 204C1582.91 204 1565 221.909 1565 244C1565 266.091 1582.91 284 1605 284Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<g id="Group_2">
+<g id="Group 3">
+<path id="Vector_109" d="M1620.73 250V260H1611" stroke-width="3.5" stroke-linecap="round" stroke="#8F8F8F"/>
+<path id="Vector_110" d="M1620.73 239L1620.73 229L1611 229" stroke-width="3.5" stroke-linecap="round" stroke="#8F8F8F"/>
+<g id="Group 2">
+<path id="Vector_111" d="M1590 250V260H1599.73" stroke-width="3.5" stroke-linecap="round" stroke="#8F8F8F"/>
+<path id="Vector_112" d="M1590 239L1590 229L1599.73 229" stroke-width="3.5" stroke-linecap="round" stroke="#8F8F8F"/>
+</g>
+</g>
+</g>
+<path id="Vector_113" d="M1709 284C1731.09 284 1749 266.091 1749 244C1749 221.909 1731.09 204 1709 204C1686.91 204 1669 221.909 1669 244C1669 266.091 1686.91 284 1709 284Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="Vector_114" d="M1709 252C1713.42 252 1717 248.418 1717 244C1717 239.582 1713.42 236 1709 236C1704.58 236 1701 239.582 1701 244C1701 248.418 1704.58 252 1709 252Z" fill="#A0A0A0"/>
+<path id="Vector_115" d="M1605 401C1627.09 401 1645 383.091 1645 361C1645 338.909 1627.09 321 1605 321C1582.91 321 1565 338.909 1565 361C1565 383.091 1582.91 401 1605 401Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="Vector_116" d="M1619 351H1602C1594 351 1590 356 1590 362C1590 369 1596 373 1603 373H1611" stroke-width="4" stroke-linecap="round" stroke="#8F8F8F"/>
+<path id="Vector_117" d="M1613 367L1621 373L1613 379" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke="#8F8F8F"/>
+<path id="Vector_118" d="M1709 401C1731.09 401 1749 383.091 1749 361C1749 338.909 1731.09 321 1709 321C1686.91 321 1669 338.909 1669 361C1669 383.091 1686.91 401 1709 401Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="M" d="M1698.19 372V349.81H1704.9L1708.93 364.946L1712.91 349.81H1719.63V372H1715.47V354.532L1711.06 372H1706.75L1702.36 354.532V372H1698.19Z" fill="#9C9C9C"/>
+<path id="Vector_119" d="M1605 518C1627.09 518 1645 500.091 1645 478C1645 455.909 1627.09 438 1605 438C1582.91 438 1565 455.909 1565 478C1565 500.091 1582.91 518 1605 518Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<g id="Group_3">
+<g id="Vector_120">
+<path d="M1595 468L1615 488Z" fill="black"/>
+<path d="M1595 468L1615 488" stroke-width="5" stroke-linecap="round" stroke="#9A9A9A"/>
+</g>
+<g id="Vector_121">
+<path d="M1615 468L1595 488Z" fill="black"/>
+<path d="M1615 468L1595 488" stroke-width="5" stroke-linecap="round" stroke="#9A9A9A"/>
+</g>
+</g>
+<path id="Vector_122" d="M1709 518C1731.09 518 1749 500.091 1749 478C1749 455.909 1731.09 438 1709 438C1686.91 438 1669 455.909 1669 478C1669 500.091 1686.91 518 1709 518Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<g id="Group_4">
+<path id="Vector_123" d="M1699 472H1717V490H1699V472Z" stroke-width="4" stroke="#9A9A9A"/>
+<path id="Vector_124" d="M1706 465H1724V483H1717" stroke-width="4" stroke="#9A9A9A"/>
+</g>
+<path id="Vector_125" d="M1605 634C1627.09 634 1645 616.091 1645 594C1645 571.909 1627.09 554 1605 554C1582.91 554 1565 571.909 1565 594C1565 616.091 1582.91 634 1605 634Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="Vector_126" d="M1619 599C1613 589 1601 586 1590 591" stroke-width="4" stroke-linecap="round" stroke="#777777"/>
+<path id="Vector_127" d="M1594 583L1586 591L1596 596" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke="#777777"/>
+<path id="Vector_128" d="M1709 634C1731.09 634 1749 616.091 1749 594C1749 571.909 1731.09 554 1709 554C1686.91 554 1669 571.909 1669 594C1669 616.091 1686.91 634 1709 634Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="Vector_129" d="M1696 598C1698.21 598 1700 596.209 1700 594C1700 591.791 1698.21 590 1696 590C1693.79 590 1692 591.791 1692 594C1692 596.209 1693.79 598 1696 598Z" fill="#969696"/>
+<path id="Vector_130" d="M1709 598C1711.21 598 1713 596.209 1713 594C1713 591.791 1711.21 590 1709 590C1706.79 590 1705 591.791 1705 594C1705 596.209 1706.79 598 1709 598Z" fill="#969696"/>
+<path id="Vector_131" d="M1722 598C1724.21 598 1726 596.209 1726 594C1726 591.791 1724.21 590 1722 590C1719.79 590 1718 591.791 1718 594C1718 596.209 1719.79 598 1722 598Z" fill="#969696"/>
+</g>
+<g id="bottom-right">
+<path id="Vector_132" d="M1660 725C1676.02 725 1689 712.016 1689 696C1689 679.984 1676.02 667 1660 667C1643.98 667 1631 679.984 1631 696C1631 712.016 1643.98 725 1660 725Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<g id="Vector_133">
+<path d="M1649 696H1671ZM1660 685V707Z" fill="black"/>
+<path d="M1649 696H1671M1660 685V707" stroke-width="4" stroke-linecap="round" stroke="#8E8E8E"/>
+</g>
+<path id="Vector_134" d="M1660 797C1676.02 797 1689 784.016 1689 768C1689 751.984 1676.02 739 1660 739C1643.98 739 1631 751.984 1631 768C1631 784.016 1643.98 797 1660 797Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<g id="Vector_135">
+<path d="M1649 768H1671Z" fill="black"/>
+<path d="M1649 768H1671" stroke-width="4" stroke-linecap="round" stroke="#8E8E8E"/>
+</g>
+<path id="Vector_136" d="M1596 760C1610.91 760 1623 747.912 1623 733C1623 718.088 1610.91 706 1596 706C1581.09 706 1569 718.088 1569 733C1569 747.912 1581.09 760 1596 760Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="Vector_137" d="M1601 724L1592 733L1601 742" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke="#747474"/>
+<path id="Vector_138" d="M1727 760C1741.91 760 1754 747.912 1754 733C1754 718.088 1741.91 706 1727 706C1712.09 706 1700 718.088 1700 733C1700 747.912 1712.09 760 1727 760Z" fill="#2A2A2A" stroke-width="3" stroke="#111111"/>
+<path id="Vector_139" d="M1722 724L1731 733L1722 742" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke="#747474"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_126_2">
+<rect width="1788" height="832" fill="white"/>
+</clipPath>
+</defs>
+</svg></template>
+
+<header class="topnav">
+  <a class="brand" href="#top">LOOPER <i>606</i></a>
+  <button class="menu-btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="nav-list"><span aria-hidden="true">&#9776;</span> <span>Menú</span></button>
+  <nav aria-label="Secciones" id="navw"><ul id="nav-list">
+    <li><a href="#idea">Idea</a></li><li><a href="#instalacion">Instalación</a></li><li><a href="#mapa">Mapa</a></li><li><a href="#primer-loop">Primer loop</a></li><li><a href="#autorec">Auto-rec</a></li><li><a href="#pista">Vista PISTA</a></li><li><a href="#inout">IN / OUT</a></li><li><a href="#velocidad">Velocidad</a></li><li><a href="#col1">Columna 1</a></li><li><a href="#col8">Columna 8</a></li><li><a href="#pasos">Pasos</a></li><li><a href="#shift">SHIFT</a></li><li><a href="#undo">Undo / Borrar</a></li><li><a href="#pedalera">Pedalera</a></li><li><a href="#persistencia">Guardado</a></li><li><a href="#chuleta">Chuleta</a></li><li><a href="#creditos">Créditos</a></li>
+  </ul></nav>
+  <label class="langw"><span class="sr">Idioma</span><select id="lang" aria-label="Idioma"><option value="es">Español</option><option value="en">English</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="pt">Português</option><option value="ja">日本語</option><option value="it">Italiano</option><option value="ca">Català</option></select></label>
+  <a class="gh" href="https://github.com/rogerbacardit/movy-looper" rel="noopener">GitHub</a>
+</header>
+
+<main id="top">
+<div class="hero"><div class="wrap">
+  <h1><span>Looper 606</span></h1>
+  <p class="tag">Un looper de 6 pistas para Ableton Move. Vive dentro de una pista de Movy, se toca con los pads y se mezcla con los knobs.</p>
+  <div class="chips" aria-label="Características">
+    <span class="chip" style="--c:var(--t1)"><b></b>6 pistas</span>
+    <span class="chip" style="--c:var(--t2)"><b></b>120 s por pista</span>
+    <span class="chip" style="--c:var(--t3)"><b></b>7 velocidades</span>
+    <span class="chip" style="--c:var(--arm)"><b></b>auto-rec por umbral</span>
+    <span class="chip" style="--c:var(--t4)"><b></b>pedalera Live Logic</span>
+    <span class="chip" style="--c:var(--play)"><b></b>loops guardados en disco</span>
+    <span class="chip" style="--c:var(--dub)"><b></b>overdub + undo</span>
+    <span class="chip" style="--c:var(--t6)"><b></b>reverse y FX por pista</span>
+  </div>
+  <p class="madeby">Hecho por <a href="https://github.com/rogerbacardit" rel="noopener">rogerbacardit</a> <span aria-hidden="true">×</span> <a href="https://claude.com/claude-code" rel="noopener">Claude</a> (Anthropic)</p>
+  <div class="cta"><a class="btn pri" href="#primer-loop">Graba tu primer loop</a><a class="btn" href="#instalacion">Instalación</a><a class="btn" href="https://github.com/rogerbacardit/movy-looper" rel="noopener">Repositorio</a></div>
+  <div id="hero-device" role="img" aria-label="Animación del Move: las pistas graban y reproducen en sus colores"></div>
+  <p class="device-caption">Los pads se iluminan como en el aparato real: rojo = grabando, verde = sonando, violeta = overdub, naranja parpadeante = armada.</p>
+  <p class="hero-legend" data-i18n-html="hero.legend">En pantallas pequeñas las etiquetas se ocultan. Columna 1: SHIFT, ARM, STOP ALL, ALL. Pistas, de arriba abajo: selector, MUTE, PLAY/STOP, REC. Columna 8: COUNT-IN, REC&gt;PLAY/DUB, LEN, QUANT. Botones de paso: 1 a 16 = largo en compases.</p>
+  <div class="legend-colors" aria-label="Colores de pista">
+    <span style="--c:var(--t1)"><i></i>Pista 1</span><span style="--c:var(--t2)"><i></i>Pista 2</span><span style="--c:var(--t3)"><i></i>Pista 3</span><span style="--c:var(--t4)"><i></i>Pista 4</span><span style="--c:var(--t5)"><i></i>Pista 5</span><span style="--c:var(--t6)"><i></i>Pista 6</span>
+    <span style="--c:var(--play)"><i></i>PLAY</span><span style="--c:var(--rec)"><i></i>REC</span><span style="--c:var(--dub)"><i></i>DUB</span><span style="--c:var(--arm)"><i></i>ARM</span>
+  </div>
+</div></div>
+
+<section id="idea" style="--sec:var(--t1)"><div class="wrap reveal">
+  <div class="eyebrow">La idea</div>
+  <h2>Un looper de directo dentro de Movy</h2>
+  <p class="lede">Looper 606 se carga como <strong>sonido de una pista de Movy</strong> (un <code>sound_generator</code> de Schwung con entrada de audio activada). Graba lo que entra por la entrada de audio del Move y lo reproduce en bucle, en seis pistas independientes. Los pads controlan grabar, reproducir y sobregrabar; los knobs son el mezclador.</p>
+  <div class="grid3" style="margin-top:26px">
+    <div class="card" style="--c:var(--t1)"><h3>6 pistas × 120 s</h3><p>Cada pista tiene su propio buffer (por defecto 120 segundos). Si la memoria no alcanza, el motor baja solo a 90, 60, 45, 30 s.</p></div>
+    <div class="card" style="--c:var(--t3)"><h3>Todo con pads</h3><p>Una cuadrícula de 4×8: columna 1 = master, columnas 2 a 7 = pistas, columna 8 = ajustes de grabación. Los pads son los LED: el color cuenta el estado.</p></div>
+    <div class="card" style="--c:var(--t4)"><h3>Vista PISTA</h3><p>Selecciona una pista y los 8 knobs pasan a ser de esa pista: inicio y fin del clip, volumen, pan, FX, velocidad y reverse.</p></div>
+    <div class="card" style="--c:var(--arm)"><h3>Auto-rec</h3><p>Arma una pista vacía y empieza a grabar sola cuando la entrada supera un umbral. Ideas de la RC-505 y Loopex.</p></div>
+    <div class="card" style="--c:var(--play)"><h3>Los loops no se pierden</h3><p>Se guardan en segundo plano en la partición de datos de usuario y vuelven al recargar Movy o apagar la Move.</p></div>
+    <div class="card" style="--c:var(--t6)"><h3>Manos libres</h3><p>Soporta la pedalera Blackstar Live Logic en el hub USB-A, en modo CUSTOM.</p></div>
+  </div>
+  <p class="note">El motor de audio es <strong>Mark</strong> de Tim Cox (MIT), con un fork propio modificado para Looper 606. Las ideas de uso vienen de la Boss RC-505 y de Loopex (solo ideas, ningún código).</p>
+</div></section>
+
+<section id="instalacion" style="--sec:var(--t2)"><div class="wrap reveal">
+  <div class="eyebrow">Instalación</div>
+  <h2>Compilar, copiar y cargar</h2>
+  <p class="lede">El módulo se compila para ARM y se copia a la carpeta de módulos de Schwung en la Move.</p>
+  <ol class="steps-list">
+    <li><div><strong>Compila el paquete</strong><p>Hace falta <code>aarch64-linux-gnu-gcc</code> (toolchain <code>aarch64-linux-gnu</code>) o Docker en marcha.</p>
+      <div class="cmd"><button type="button">copiar</button><pre>make arm-synth
+# segundos máximos por pista (por defecto 120):
+make arm-synth MARK_SECONDS=60</pre></div></div></li>
+    <li><div><strong>Descomprime el paquete</strong><p>Crea la carpeta <code>looper-606/</code> con <code>dsp.so</code> y <code>module.json</code>.</p>
+      <div class="cmd"><button type="button">copiar</button><pre>tar -xzf build/looper-606-module.tar.gz</pre></div></div></li>
+    <li><div><strong>Cópiala a la Move</strong>
+      <div class="cmd"><button type="button">copiar</button><pre>scp -r looper-606 ableton@move.local:/data/UserData/schwung/modules/sound_generators/</pre></div></div></li>
+    <li><div><strong>Ajusta el propietario</strong><p>En la Move, sobre esa carpeta: <code>ableton:users</code>.</p>
+      <div class="cmd"><button type="button">copiar</button><pre>chown -R ableton:users /data/UserData/schwung/modules/sound_generators/looper-606</pre></div></div></li>
+    <li><div><strong>Reinicia Schwung y carga el módulo</strong><p>Reinicia Schwung (o vuelve a escanear módulos). En Movy, carga <strong>Looper 606</strong> como sonido de una pista.</p></div></li>
+  </ol>
+  <p class="note">Para los LED de los pads, la página de parámetros en pantalla, los botones de paso, Undo, borrar con X y la pedalera necesitas un Movy con el build <code>module-leds</code> (v8 para la página de la vista PISTA). Sin él, el módulo funciona pero Movy ignora esos parámetros.</p>
+</div></section>
+
+<section id="mapa" style="--sec:var(--t3)"><div class="wrap reveal">
+  <div class="eyebrow">Mapa del hardware</div>
+  <h2>Cada pad, knob y botón</h2>
+  <p class="lede">Rejilla de 4 filas × 8 columnas. <strong>Fila 1 = la de abajo.</strong> Columna 1 = master, columnas 2 a 7 = pistas 1 a 6, columna 8 = ajustes de grabación (REC SETTINGS). Pasa el ratón (o toca) sobre el dibujo.</p>
+  <div class="btnrow">
+    <div class="seg" role="group" aria-label="SHIFT"><button class="setmode" data-k="noshift" aria-pressed="true">Normal</button><button class="setmode" data-k="shift" aria-pressed="false">Con SHIFT</button></div>
+    <div class="seg" role="group" aria-label="Vista de knobs"><button data-view="mix" aria-pressed="false">Knobs: MIX</button><button data-view="pista" aria-pressed="true">Knobs: PISTA</button></div>
+  </div>
+  <div id="map-device" aria-label="Mapa interactivo del Move"></div>
+  <div class="colleg" role="group" aria-label="Filtrar por columna">
+    <button data-col="1" aria-pressed="false"><i style="--c:#fff"></i>Col. 1 · MASTER</button>
+    <button data-col="2" aria-pressed="false"><i style="--c:var(--t2)"></i>Cols. 2-7 · PISTAS 1-6</button>
+    <button data-col="8" aria-pressed="false"><i style="--c:var(--t3)"></i>Col. 8 · REC SETTINGS</button>
+  </div>
+  <div class="panel info" id="map-info" aria-live="polite"></div>
+  <div class="tw" style="margin-top:22px"><table>
+    <thead><tr><th></th><th>MASTER</th><th>Pistas 1-6</th><th>REC SETTINGS</th></tr></thead>
+    <tbody>
+      <tr><td>Fila 4</td><td>SHIFT (mantener)</td><td>Selector de pista</td><td>Count-in on/off</td></tr>
+      <tr><td>Fila 3</td><td>ARM (auto-rec)</td><td>MUTE</td><td>Rec Action REC&gt;PLAY / REC&gt;DUB</td></tr>
+      <tr><td>Fila 2</td><td>STOP ALL</td><td>PLAY / STOP</td><td>Longitud fija libre / 1 / 2 / 4 / 8</td></tr>
+      <tr><td>Fila 1</td><td>ALL START / STOP</td><td>REC / DUB</td><td>Quantize on/off</td></tr>
+    </tbody></table></div>
+  <p class="note">Todos los gestos actúan al note-on. Verde = reproduciendo, rojo = grabando, violeta = overdub, naranja parpadeante = ARM. Las columnas 1 y 8 no usan ni verde ni rojo. Detalle de cada pad en <a href="#col1">Columna 1</a>, <a href="#col8">Columna 8</a> y <a href="#pasos">Botones de paso</a>.</p>
+  <h3 data-i18n="v08.h">Transporte y mute de Movy (v0.8.0)</h3>
+  <div class="grid2" style="margin-top:12px">
+    <div class="card" style="--c:var(--play)"><h3 data-i18n="v08.play.h">Play / Stop de la Move</h3><p data-i18n-html="v08.play.p">El Play/Stop de la Move controla el looper. <strong>Stop</strong> = STOP ALL, pero recordando qué pistas sonaban (un segundo Stop conserva esa memoria). <strong>Play</strong> arranca exactamente esas pistas desde el inicio del loop, a compás si Quantize está activo; si no hay nada recordado, arranca todas las pistas con audio (como ALL START). No toca una pista que esté grabando.</p></div>
+    <div class="card" style="--c:var(--t4)"><h3 data-i18n="v08.mute.h">M + pista = mute de todo el looper</h3><p data-i18n-html="v08.mute.p">El mute de pista de Movy (<kbd>M</kbd> + el botón de pista) silencia toda la salida del looper con un fundido corto. Las 6 pistas siguen girando en tiempo y la cabecera de la pantalla muestra <code>MUTED</code>. Requiere el build <code>module-leds</code> de Movy.</p></div>
+  </div>
+</div></section>
+
+<section id="primer-loop" style="--sec:var(--rec)"><div class="wrap reveal">
+  <div class="eyebrow">Grabar tu primer loop</div>
+  <h2>Paso a paso</h2>
+  <p class="lede">Avanza con los botones o deja el auto-play. En el dibujo se marca el pad a pulsar; a la derecha ves la pantalla y el color del LED.</p>
+  <div class="walk">
+    <div><div id="walk-device" aria-label="Demostración paso a paso"></div></div>
+    <div class="panel">
+      <p class="sc-title" id="walk-title"></p>
+      <p id="walk-text" style="color:var(--dim)" aria-live="polite"></p>
+      <div class="screen" style="margin:14px 0"><canvas id="walk-screen" aria-label="Pantalla del Move" role="img"></canvas></div>
+      <div class="ledrow"><span class="led" id="walk-led"></span><span id="walk-ledt"></span></div>
+      <div class="dots" id="walk-dots" role="group" aria-label="Escenas"></div>
+      <div class="progress" id="walk-prog"><i></i></div>
+      <div class="btnrow"><button class="btn sm" id="walk-prev" type="button">Anterior</button><button class="btn sm" id="walk-next" type="button">Siguiente</button><button class="btn sm" id="walk-play" type="button" aria-pressed="true">Pausa</button></div>
+    </div>
+  </div>
+  <p class="note"><strong>Pista parada:</strong> REC en una pista parada con clip empieza a sonar directamente en DUB. <strong>Grabando:</strong> PLAY/STOP cierra la grabación y para.</p>
+</div></section>
+
+<section id="autorec" style="--sec:var(--arm)"><div class="wrap reveal">
+  <div class="eyebrow">Auto-rec</div>
+  <h2>Grabar al detectar sonido</h2>
+  <p class="lede">Pisa <strong>ARM</strong> (columna 1, fila 3, <a href="#col1">detalle</a>): un toque activa el modo. Al tocar REC en una pista vacía queda <em>armada</em> (naranja parpadeante) y empieza a grabar sola cuando la entrada supera el <strong>umbral</strong>. Tocar REC otra vez cancela.</p>
+  <div class="panel" style="margin-top:22px">
+    <div class="meter-wrap">
+      <canvas id="meter" role="img" aria-label="Nivel de entrada cruzando la línea del umbral"></canvas>
+      <div><div class="recpad" id="recpad">REC</div><div class="state-badge" id="recbadge"></div>
+        <p style="font-size:.85rem;color:var(--dim)">Umbral en dB (SHIFT + Rec Action, col. 8 fila 3, los cicla):</p>
+        <div class="speedchips" role="group" aria-label="Umbral"><button data-thr="-54" aria-pressed="false">-54</button><button data-thr="-48" aria-pressed="false">-48</button><button data-thr="-42" aria-pressed="true">-42</button><button data-thr="-36" aria-pressed="false">-36</button><button data-thr="-30" aria-pressed="false">-30</button></div></div>
+    </div>
+  </div>
+  <p class="note">Por defecto -42 dB: por encima del ruido de fondo de la entrada de línea (hacia -66 dB) y por debajo de tocar flojito. El aviso en pantalla es <code>THR -36 DB</code>. El módulo admite de -70 a -6 dBFS en sus ajustes.</p>
+</div></section>
+
+<section id="pista" style="--sec:var(--t4)"><div class="wrap reveal">
+  <div class="eyebrow">Vista PISTA</div>
+  <h2>Los 8 knobs de una pista</h2>
+  <p class="lede">En la fila 4, tocar el pad de una pista la selecciona: los 8 knobs pasan a ser de esa pista y la onda la sigue. Tocar otra vez la misma vuelve a MIX (knobs = volúmenes). Cada giro lanza un aviso del tipo <code>T3 IN +8/16</code>. La pantalla del Move muestra una <strong>página de parámetros</strong> estilo Schwung; mientras giras IN/OUT (y unos 2,5 s después) cambia a la <strong>onda con zoom</strong>, y luego vuelve a la página. El valor del último knob girado sustituye a su etiqueta durante 1,5 s.</p>
+  <div class="grid2" style="margin-top:24px;align-items:start">
+    <div><div id="pista-device" aria-label="Selector de pista y knobs"></div>
+      <div class="btnrow" style="justify-content:center"><button class="btn sm" id="pista-tour" type="button" aria-pressed="true">Demo automática</button><span class="chip">toca un pad de la fila 4 o un knob</span></div></div>
+    <div>
+      <div class="screen"><canvas id="pista-screen" role="img" aria-label="Página de parámetros de la vista PISTA, animada"></canvas></div>
+      <div class="toast" style="margin-top:10px"><span id="pista-toast"></span></div>
+      <p class="device-caption" style="text-align:left">Pantalla animada (2 filas × 4: dial para valores continuos, caja con texto para opciones). Gira IN/OUT para ver el zoom.</p>
+      <img class="pixel" src="assets/module_page_focus.png" alt="Captura real de la página de la vista PISTA en el Move" width="512" style="max-width:512px;border:6px solid #111;border-radius:6px;image-rendering:pixelated">
+      <p class="device-caption" style="text-align:left">Captura real (128×64, ampliada ×4).</p>
+    </div>
+  </div>
+  <div class="tw" style="margin-top:26px"><table>
+    <thead><tr><th>Knob</th><th>Vista PISTA</th></tr></thead><tbody>
+    <tr><td>K1</td><td><strong>IN</strong>: inicio del clip (rejilla 1/16, sin modo fino). Mientras lo giras, la pantalla pasa a la onda con ZOOM.</td></tr>
+    <tr><td>K2</td><td><strong>OUT</strong>: fin/largo del loop (rejilla 1/16, sin modo fino; acortar no destruye). OUT nunca empuja a IN: se queda 1/16 después de IN.</td></tr>
+    <tr><td>K3</td><td>Volumen de la pista</td></tr>
+    <tr><td>K4</td><td>Pan</td></tr>
+    <tr><td>K5</td><td>Tipo de FX: OFF / LPF / HPF / CRUSH / DELAY / PHASER / RING (3 clics por paso)</td></tr>
+    <tr><td>K6</td><td>Cantidad de FX</td></tr>
+    <tr><td>K7</td><td>Velocidad x1/4, x1/2, x3/4, x1, x1.5, x2, x4 (3 clics por paso; overdub solo a x1 y sin reverse)</td></tr>
+    <tr><td>K8</td><td>Reverse off / on (3 clics; a la derecha on, a la izquierda off)</td></tr>
+    <tr><td colspan="2" style="color:var(--dim)">En MIX: K1 a K6 volumen de pistas 1 a 6, K7 entrada, K8 master.</td></tr></tbody></table></div>
+  <p class="note">Con la vista PISTA activa, los pedales 3 y 4 también mueven la selección, y los pads de otras pistas no cambian la pista de la onda. Los pads de selección son del color de la pista (tenue) y brillante la seleccionada, nunca verde ni rojo.</p>
+</div></section>
+
+<section id="inout" style="--sec:var(--t5)"><div class="wrap reveal">
+  <div class="eyebrow">IN / OUT y zoom</div>
+  <h2>Recorta sin destruir</h2>
+  <p class="lede">En la onda (128×64) ves marcas de compás (cortas, arriba y abajo), marcas de frase cada 4 compases (más altas: compases 1, 5, 9…) y puntos de pulso, contados desde IN. <strong>K1 mueve IN</strong>, <strong>K2 mueve OUT</strong>: mientras giras (y unos 2,5 s después) la pantalla pasa de la página de knobs a la onda con <strong>zoom</strong> de 2 compases centrada en el punto. Después vuelve sola a la página.</p>
+  <div class="grid2" style="margin-top:22px;align-items:start">
+    <div class="screen"><canvas id="inout-screen" role="img" aria-label="Onda con marcas IN y OUT y zoom animado"></canvas></div>
+    <div>
+      <div class="btnrow"><span class="chip" style="--c:var(--t5)"><b></b>K1 · IN</span><button class="btn sm" data-io="in:-1" type="button">-1/16</button><button class="btn sm" data-io="in:1" type="button">+1/16</button></div>
+      <div class="btnrow"><span class="chip" style="--c:var(--t5)"><b></b>K2 · OUT</span><button class="btn sm" data-io="out:-1" type="button">-1/16</button><button class="btn sm" data-io="out:1" type="button">+1/16</button></div>
+      <div class="btnrow"><div class="seg" role="group" aria-label="Vista de la onda"><button data-iov="pista" aria-pressed="true">Vista PISTA</button><button data-iov="mix" aria-pressed="false">Vista MIX</button></div><button class="btn sm" id="io-auto" type="button" aria-pressed="true">Pausar demo</button></div>
+      <p class="log" id="io-info" aria-live="off"></p>
+      <ul style="color:var(--dim);font-size:.92rem;padding-left:1.1em">
+        <li><strong>PISTA</strong>: la pantalla muestra la página de knobs; al girar IN/OUT salta a la onda con zoom y marcas IN/OUT (el buffer entero si el clip es más corto que la ventana).</li>
+        <li><strong>MIX</strong>: la onda muestra solo la región que suena (IN a OUT) a todo el ancho, con los compases contados desde IN: el clip cambia de tamaño al recortarlo.</li>
+        <li>K1 y K2 van siempre en pasos de 1/16, sin modo fino. <strong>OUT nunca empuja a IN</strong>: se queda 1/16 después de IN. Una racha de giros = un paso de Undo.</li>
+        <li>El cursor sigue el audio real: con reverse va de derecha a izquierda; con x2 / x1/2 al doble / mitad.</li>
+      </ul>
+    </div>
+  </div>
+  <h3>Inicio con el botón Loop</h3>
+  <p>Mantén <kbd>Loop</kbd> y gira el knob N (1 a 6): mueve el inicio de la pista N sin destruir el audio. El motor reproduce desde <code>(pos + inicio) mod largo</code> y el overdub escribe en el mismo punto, así que las capas siguen alineadas (vale con reverse y velocidad). Cada paso = 1/16 de nota; con <kbd>Shift</kbd> pulsado = 1/64 (fino, solo en este gesto; muestra <code>+N MS</code>). No se puede mover mientras la pista graba o hace overdub (<code>START 1 LOCKED</code>) ni si está vacía.</p>
+</div></section>
+
+<section id="velocidad" style="--sec:var(--t6)"><div class="wrap reveal">
+  <div class="eyebrow">Velocidad y reverse</div>
+  <h2>Siete velocidades, estilo cinta</h2>
+  <p class="lede">K7 elige la velocidad: x1/4, x1/2, x3/4, <strong>x1</strong>, x1.5, x2, x4 (3 clics por paso). Cambia el tono como una cinta y funciona con reverse. K8 (o <kbd>SHIFT</kbd> + pad de la fila 1) activa el reverse de esa pista. No se sobregraba con una velocidad distinta de x1.</p>
+  <div class="grid2" style="margin-top:22px;align-items:center">
+    <div class="screen"><canvas id="speed-screen" role="img" aria-label="Onda con cursor a distintas velocidades"></canvas></div>
+    <div><div class="speedchips" id="speed-chips" role="group" aria-label="Velocidad"></div>
+      <div class="btnrow"><button class="btn" id="rev-btn" type="button" aria-pressed="false">Reverse</button></div>
+      <p class="log" id="speed-note" style="min-height:3.6em"></p></div>
+  </div>
+  <p class="note">Los estados guardados antiguos (velocidad 1/2x, 1x, 2x) se cargan como x1/2, x1, x2. Alias antiguo del reverse: mantener ARM y tocar un pad de pista (fila 1 o 2).</p>
+</div></section>
+
+<section id="col1" style="--sec:#f4f4f4"><div class="wrap reveal">
+  <div class="eyebrow">Columna 1 · MASTER</div>
+  <h2>Los cuatro pads de MASTER</h2>
+  <p class="lede">La columna 1 no es de ninguna pista: gobierna el looper entero. De arriba abajo: <strong>SHIFT</strong>, <strong>ARM</strong>, <strong>STOP ALL</strong> y <strong>ALL START/STOP</strong>. Es gris y blanca, amarilla y naranja: no usa ni verde ni rojo. Toca una tarjeta o un pad del dibujo.</p>
+  <div id="col1-device" style="margin-top:22px" aria-label="Columna 1 (MASTER)"></div>
+  <div class="pcards" id="col1-cards">
+    <article class="pcard" data-pad="4" tabindex="0">
+      <header><span class="rowtag">Fila 4</span><h3>SHIFT</h3><span class="how">mantener</span></header>
+      <div class="ledd" data-led="shift"></div>
+      <p>Mientras lo mantienes pulsado, otros pads cambian de función. Gris tenue; blanco mientras lo mantienes.</p>
+      <ul class="combos">
+        <li><kbd>SHIFT</kbd> + selector de pista (fila 4): FX on/off de esa pista</li>
+        <li><kbd>SHIFT</kbd> + REC (fila 1): Reverse de esa pista</li>
+        <li><kbd>SHIFT</kbd> + MUTE (fila 3): SOLO</li>
+        <li><kbd>SHIFT</kbd> + Count-in (col. 8, fila 4): 1 / 2 compases</li>
+        <li><kbd>SHIFT</kbd> + Rec Action (col. 8, fila 3): umbral de ARM</li>
+      </ul>
+      <p class="more"><a href="#shift">Ver todos los combos de SHIFT</a></p>
+    </article>
+    <article class="pcard" data-pad="3" tabindex="0">
+      <header><span class="rowtag">Fila 3</span><h3>ARM</h3><span class="how">toque = on/off</span></header>
+      <div class="ledd" data-led="arm"></div>
+      <p>Un toque (pulsar y soltar) activa o desactiva el <strong>auto-rec</strong>. Con ARM activo, REC en una pista vacía la deja <em>armada</em> (naranja parpadeante) y empieza a grabar sola cuando la entrada supera el umbral. Al desactivar ARM se cancelan las pistas armadas.</p>
+      <p><strong>También es modificador:</strong> mantén ARM y toca un pad de la fila 1 o 2 de una pista para invertirla (Reverse, alias antiguo). Si lo usas así, al soltar ARM no cambia su estado; mientras está pulsado, los pads de la fila 2 se ven blancos (invertida) o del color de la pista (normal).</p>
+      <p class="more"><a href="#autorec">Ver auto-rec</a></p>
+    </article>
+    <article class="pcard" data-pad="2" tabindex="0">
+      <header><span class="rowtag">Fila 2</span><h3>STOP ALL</h3><span class="how">pánico</span></header>
+      <div class="ledd" data-led="stopall"></div>
+      <p>Botón de <strong>pánico: solo para</strong>. Detiene todas las pistas a la vez (si alguna graba, cierra la grabación y para) y cancela las pistas armadas y las cuentas atrás. Tocarlo otra vez no arranca nada.</p>
+      <p>Amarillo brillante si algo suena; gris oscuro si todo está parado.</p>
+    </article>
+    <article class="pcard" data-pad="1" tabindex="0">
+      <header><span class="rowtag">Fila 1</span><h3>ALL START/STOP</h3><span class="how">interruptor</span></header>
+      <div class="ledd" data-led="all"></div>
+      <p>Un <strong>interruptor</strong> para todo: si algo suena, graba o hace overdub, <strong>para</strong> todas las pistas (vuelven al principio). Si nada suena, <strong>arranca</strong> todas las pistas paradas que tengan clip (las vacías siguen vacías).</p>
+      <p>Blanco si algo suena; gris si no.</p>
+    </article>
+  </div>
+  <h3>STOP ALL contra ALL START/STOP</h3>
+  <div class="panel" id="allsim">
+    <p style="margin-top:0;color:var(--dim)">STOP ALL es el botón de pánico: solo para y nunca arranca. ALL START/STOP es un interruptor: el mismo pad para y arranca, según si algo suena. Pruébalo con seis pistas (1 a 4 suenan, 5 está parada con clip, 6 vacía):</p>
+    <div class="trackstrip big" id="allsim-strip" aria-label="Estado de las pistas"></div>
+    <div class="btnrow"><button class="btn sm" id="sim-stop" type="button">STOP ALL</button><button class="btn sm" id="sim-all" type="button">ALL START/STOP</button><button class="btn sm" id="sim-reset" type="button">Reiniciar</button></div>
+    <p class="log" id="allsim-log" aria-live="polite" style="min-height:3em"></p>
+    <div class="tw" style="margin-top:12px"><table>
+      <thead><tr><th>Situación</th><th>STOP ALL</th><th>ALL START/STOP</th></tr></thead><tbody>
+      <tr><td>Algo suena</td><td>Para todo</td><td>Para todo</td></tr>
+      <tr><td>Todo parado</td><td>No hace nada</td><td>Arranca las pistas con clip</td></tr>
+      <tr><td>Pistas armadas o en cuenta atrás</td><td>Las cancela</td><td>No las toca</td></tr></tbody></table></div>
+  </div>
+</div></section>
+
+<section id="col8" style="--sec:var(--t3)"><div class="wrap reveal">
+  <div class="eyebrow">Columna 8 · REC SETTINGS</div>
+  <h2>Los ajustes de grabación, pad a pad</h2>
+  <p class="lede">La columna 8 guarda cómo se graba. De arriba abajo: <strong>Count-in</strong>, <strong>Rec Action</strong>, <strong>Longitud fija</strong> y <strong>Quantize</strong>. Con <kbd>SHIFT</kbd> algunos pads tienen una segunda función. Toca una tarjeta o un pad del dibujo.</p>
+  <div id="col8-device" style="margin-top:22px" aria-label="Columna 8 (REC SETTINGS)"></div>
+  <div class="pcards" id="col8-cards">
+    <article class="pcard" data-pad="4" tabindex="0" style="--c:var(--t3)">
+      <header><span class="rowtag">Fila 4</span><h3>Count-in</h3><span class="how">on / off</span></header>
+      <div class="ledd" data-led="countin"></div>
+      <p>Al grabar en una pista vacía, espera <strong>1 compás</strong> (4 tiempos) antes de empezar. Amarillo = on, amarillo tenue = off. El pad de REC parpadea en amarillo durante la cuenta.</p>
+      <p class="shl"><kbd>SHIFT</kbd> + pad: cicla la cuenta entre <strong>1 y 2 compases</strong> (aviso <code>COUNT-IN 2 BARS</code>; este valor no se guarda).</p>
+      <div class="screen demo"><canvas id="demo-count" role="img" aria-label="Cuenta atrás de count-in"></canvas></div>
+      <div class="btnrow"><div class="seg" role="group" aria-label="Count-in"><button data-ci="1" aria-pressed="true">1 compás</button><button data-ci="2" aria-pressed="false">SHIFT: 2 compases</button></div></div>
+    </article>
+    <article class="pcard" data-pad="3" tabindex="0" style="--c:var(--dub)">
+      <header><span class="rowtag">Fila 3</span><h3>Rec Action</h3><span class="how">REC&gt;PLAY / REC&gt;DUB</span></header>
+      <div class="ledd" data-led="recact"></div>
+      <p>Qué pasa cuando <strong>cierras una grabación</strong> (segundo toque en REC, o cierre automático con longitud fija). Azul oscuro = <strong>REC&gt;PLAY</strong>, violeta = <strong>REC&gt;DUB</strong>.</p>
+      <p class="shl"><kbd>SHIFT</kbd> + pad: cicla el <strong>umbral de ARM</strong> -54 / -48 / -42 / -36 / -30 dB (aviso <code>THR -36 DB</code>).</p>
+      <div class="two">
+        <div><p class="cap">REC&gt;PLAY</p><div class="screen demo"><canvas id="demo-ra0" role="img" aria-label="REC&gt;PLAY: al cerrar pasa a PLAY"></canvas></div></div>
+        <div><p class="cap">REC&gt;DUB</p><div class="screen demo"><canvas id="demo-ra1" role="img" aria-label="REC&gt;DUB: al cerrar pasa a DUB"></canvas></div></div>
+      </div>
+      <p class="log" id="ra-note" style="min-height:3.2em"></p>
+    </article>
+    <article class="pcard" data-pad="2" tabindex="0" style="--c:#e4e4e4">
+      <header><span class="rowtag">Fila 2</span><h3>Longitud fija</h3><span class="how">libre / 1 / 2 / 4 / 8</span></header>
+      <div class="ledd" data-led="fixlen"></div>
+      <p>Cada toque cicla <strong>FREE → 1 → 2 → 4 → 8 → FREE</strong> compases. Con una longitud fija, la grabación <strong>se cierra sola</strong> al llegar (y pasa a PLAY o DUB según Rec Action). El brillo del pad indica el largo.</p>
+      <p><strong>Volver a FREE:</strong> sigue tocando el pad (tras 8 vuelve a FREE; desde un valor fuera de la lista, como 12, también), o pulsa otra vez el botón de paso encendido (en una pista vacía).</p>
+      <p class="shl">Los 16 <a href="#pasos">botones de paso</a> eligen cualquier largo de 1 a 16. Es el mismo ajuste; se guarda con el Set.</p>
+      <div class="tape" id="demo-fix" aria-hidden="true"></div>
+      <div class="btnrow"><button class="btn sm" id="fix-tap" type="button">Tocar el pad</button><span class="log" id="fix-val" style="margin:0"></span></div>
+    </article>
+    <article class="pcard" data-pad="1" tabindex="0" style="--c:var(--t2)">
+      <header><span class="rowtag">Fila 1</span><h3>Quantize</h3><span class="how">on / off</span></header>
+      <div class="ledd" data-led="quant"></div>
+      <p>Con Quantize <strong>on</strong> (por defecto), si algo suena REC <strong>espera al inicio del siguiente compás</strong> (el pad de REC parpadea en rojo) y, al cerrar, el largo se redondea a compases enteros. Con <strong>off</strong> todo es inmediato y el largo es exacto. Nunca bloquea una grabación: a 1,5 compases + 0,5 s arranca sola. Cian = on, cian tenue = off.</p>
+      <p class="shl"><kbd>SHIFT</kbd> + pad: sin función por ahora. (El umbral está en <kbd>SHIFT</kbd> + Rec Action.)</p>
+      <div class="screen demo"><canvas id="demo-quant" role="img" aria-label="Quantize on contra off"></canvas></div>
+    </article>
+  </div>
+</div></section>
+
+<section id="pasos" style="--sec:var(--t5)"><div class="wrap reveal">
+  <div class="eyebrow">Botones de paso</div>
+  <h2>16 botones = largo en compases</h2>
+  <p class="lede">Los 16 botones bajo los pads (los de paso del Move) fijan el <strong>largo en compases, de 1 a 16</strong>, de la pista seleccionada (el último pad de pista tocado). <strong>Haz clic en un paso del dibujo</strong> y mira cómo cambia el loop.</p>
+  <div id="steps-device" style="margin-top:22px" aria-label="Botones de paso"></div>
+  <div class="grid2" style="margin-top:26px;align-items:start">
+    <div class="panel">
+      <div class="btnrow" style="margin-top:0"><div class="seg" role="group" aria-label="Estado de la pista"><button data-sm="clip" aria-pressed="true">Pista con clip (4 compases)</button><button data-sm="empty" aria-pressed="false">Pista vacía</button></div></div>
+      <div class="bars16" id="bars16" aria-hidden="true"></div>
+      <div class="barleg"><span><i class="rec"></i>grabado</span><span><i class="rep"></i>repetido</span><span><i class="cut"></i>fuera del loop</span></div>
+      <div class="toast" style="margin-top:12px"><span id="steps-toast"></span></div>
+      <p class="log" id="len-note" style="min-height:4.5em"></p>
+      <p class="cap" style="margin:.8em 0 .2em">LED de los botones</p>
+      <div class="ledrow16" id="led16" aria-hidden="true"></div>
+    </div>
+    <div class="stepcards">
+      <div class="card" style="--c:var(--t5)"><h3>Con clip: cambia el largo</h3><p>El paso N pone el loop a N compases (al tempo actual), también en un clip ya grabado. <strong>Más corto</strong> = recorte no destructivo: el audio se conserva y alargar de nuevo lo recupera. <strong>Más largo</strong> que lo grabado = el contenido se repite hasta llenarlo (estilo RC-505), hasta lo que cabe en la pista; si no, <code>LEN 1: TOO LONG</code>. Overdub, reverse, velocidad e inicio siguen alineados. Undo devuelve el largo anterior.</p></div>
+      <div class="card" style="--c:var(--t2)"><h3>Pista vacía: largo de la próxima grabación</h3><p>El paso N fija un largo de N compases para las siguientes grabaciones. <strong>Volver a pulsar el paso encendido = largo libre</strong> (FREE). Avisos <code>LEN 4 BARS</code> / <code>LEN FREE</code>. Es el mismo ajuste que Longitud fija (columna 8) y <code>Fixed Length</code> de Setup.</p></div>
+      <div class="card" style="--c:var(--t3)"><h3>Qué significan los LED</h3><p>Muestran el largo del clip seleccionado, o el de las próximas grabaciones si está vacía: <strong>paso N blanco</strong>, pasos 1 a N-1 tenues, el resto apagados. Libre = todo apagado (también si el clip no mide un número entero de compases).</p></div>
+      <div class="card" style="--c:var(--t4)"><h3>Loop + knob = inicio del clip</h3><p>Mantén <kbd>Loop</kbd> y gira el knob N (1 a 6): mueve el inicio (IN) de la pista N en pasos de 1/16 sin destruir el audio. Con <kbd>Shift</kbd>, 1/64 (fino). <a href="#inout">Más sobre IN/OUT</a>.</p></div>
+    </div>
+  </div>
+  <p class="note">En una pista con este módulo, los botones de paso <strong>no son del secuenciador de Movy</strong> (Shift + paso, Mute + paso y la vista Session siguen igual). Requiere Movy con el build <code>module-leds</code>.</p>
+</div></section>
+
+<section id="shift" style="--sec:var(--arm)"><div class="wrap reveal">
+  <div class="eyebrow">SHIFT</div>
+  <h2>La segunda capa de los pads</h2>
+  <p class="lede">El pad de arriba de la columna 1 (<a href="#col1">MASTER</a>) es el SHIFT del looper (gris tenue, blanco mientras se mantiene). Mientras está pulsado, los pads cambian de función. Pruébalo: activa SHIFT y toca la fila 4 (FX) o la fila 3 (SOLO).</p>
+  <div class="btnrow" style="margin-top:18px"><button class="btn" id="shift-btn" type="button" aria-pressed="false">SHIFT (mantener)</button><span class="log" id="shift-msg">SHIFT suelto. Toca el pad de la fila 3 para silenciar (MUTE).</span></div>
+  <div id="shift-device" aria-label="Demostración de SHIFT"></div>
+  <div class="tw" style="margin-top:24px"><table>
+    <thead><tr><th>SHIFT +</th><th>Efecto</th></tr></thead><tbody>
+    <tr><td>Pad fila 4 de una pista (selector)</td><td>FX on/off de esa pista (mantiene tipo y cantidad; se ve blanco si tiene FX)</td></tr>
+    <tr><td>Pad fila 1 de una pista (REC)</td><td>Reverse de esa pista (nunca graba)</td></tr>
+    <tr><td>Pad fila 3 de una pista (MUTE)</td><td><strong>SOLO</strong>: silencia las demás; otra vez = quita el solo y restaura los mutes anteriores (el pad de la pista en solo parpadea)</td></tr>
+    <tr><td>Columna 8, fila 4 (Count-in)</td><td>Cicla la cuenta entre 1 y 2 compases (<code>COUNT-IN 2 BARS</code>)</td></tr>
+    <tr><td>Columna 8, fila 3 (Rec Action)</td><td>Umbral de ARM: -54 / -48 / -42 / -36 / -30 dB (aviso <code>THR -36 DB</code>)</td></tr>
+    <tr><td>Columna 8, filas 2 y 1 (Longitud fija, Quantize)</td><td>Sin función por ahora</td></tr></tbody></table></div>
+</div></section>
+
+<section id="undo" style="--sec:var(--dub)"><div class="wrap reveal">
+  <div class="eyebrow">Undo, CLEAR y RESET</div>
+  <h2>Borrar el audio o dejar la pista a cero</h2>
+  <p class="lede">Mantén <kbd>Delete (X)</kbd> del Move y toca un pad de la columna de una pista. El pad que toques decide qué se borra:</p>
+  <div class="grid2" style="margin-top:14px">
+    <div class="card" style="--c:var(--dub)"><h3>X + pad de las filas 1 a 3 = CLEAR</h3><p>Borra <strong>solo el audio</strong>. La pista conserva sus ajustes (FX, volumen, pan, velocidad, reverse, one-shot, mute). Se puede deshacer. Aviso <code>CLEAR 2</code>.</p></div>
+    <div class="card" style="--c:var(--rec)"><h3>X + selector de la pista (fila 4) = RESET</h3><p>La pista <strong>vuelve a cero</strong>: borra el audio y devuelve a fábrica el tipo, cantidad y on/off del FX, el volumen (100), el pan (centro), la velocidad (x1), reverse, one-shot, mute y solo. Aviso <code>RESET 2</code>.</p></div>
+  </div>
+  <p>El botón <kbd>Undo</kbd> del Move lo deshace; <kbd>Shift</kbd> + <kbd>Undo</kbd> rehace. <strong>Deshacer un RESET devuelve el audio y los ajustes.</strong> Si la pista estaba vacía, su RESET se aplica pero no se puede deshacer (no había audio que recuperar). UNDO es de un solo nivel: cubre el último overdub, grabación, CLEAR, RESET o cambio de largo. En las demás pistas, Undo sigue siendo el de Movy.</p>
+  <h3>Pruébalo: CLEAR contra RESET</h3>
+  <div class="grid2" style="margin-top:12px;align-items:start">
+    <div><div id="undo-device" aria-label="Demostración de CLEAR y RESET"></div>
+      <p class="device-caption">Pista 1 (columna 2). Haz clic en X, en un pad de la columna 2 y en Undo.</p></div>
+    <div class="panel">
+      <div class="btnrow" style="margin-top:0"><button class="btn sm" data-u="dub" type="button">Overdub</button><button class="btn sm" data-u="clear" type="button">X + pad (CLEAR)</button><button class="btn sm" data-u="reset" type="button">X + selector (RESET)</button></div>
+      <div class="btnrow"><button class="btn sm" data-u="undo" type="button">Undo</button><button class="btn sm" data-u="redo" type="button">Shift + Undo</button><button class="btn sm" data-u="setup" type="button">Preparar pista</button><button class="btn sm" data-u="empty" type="button">Pista vacía</button></div>
+      <p style="color:var(--dim);font-size:.9rem;margin:.2em 0 .5em">Audio (capas) de la pista 1:</p>
+      <div class="layers" id="layers"></div>
+      <p style="color:var(--dim);font-size:.9rem;margin:.8em 0 .4em">Ajustes de la pista 1:</p>
+      <div class="chipset" id="settings"></div>
+      <div class="toast" style="margin-top:12px"><span id="undo-toast"></span></div>
+      <p class="log" id="undo-log" style="margin-top:12px;min-height:3.4em" aria-live="polite"></p>
+    </div>
+  </div>
+  <p class="note">CLEAR + UNDO devuelve también el punto de inicio. Un CLEAR borra el .wav del disco y UNDO lo vuelve a escribir. El pedal (mantener el interruptor 2) solo borra el audio, como un CLEAR.</p>
+</div></section>
+
+<section id="pedalera" style="--sec:var(--t4)"><div class="wrap reveal">
+  <div class="eyebrow">Pedalera Blackstar Live Logic</div>
+  <h2>Manos libres con 6 interruptores</h2>
+  <p class="lede">Conecta la pedalera al hub USB-A del Move, en modo <strong>CUSTOM</strong> (no PATCH). Necesita el build <code>module-leds</code> de Movy, que reenvía los 6 interruptores al looper. Siempre actúa sobre la <strong>pista seleccionada</strong> (la que siguen la pantalla y la onda); el aviso es <code>TRACK n</code>. Pulsa los interruptores del dibujo (mantén el 2 o el 3 durante 1 s para el gesto largo).</p>
+  <div class="panel" style="margin-top:22px">
+  <svg id="pedal" class="pedal-svg" viewBox="0 0 880 330" role="group" aria-label="Pedalera de 6 interruptores">
+    <rect x="6" y="6" width="868" height="318" rx="22" fill="#171717" stroke="#3d3d3d" stroke-width="3"/>
+    <text x="30" y="40" fill="#707070" font-family="JetBrains Mono,monospace" font-size="15" letter-spacing="3">LIVE LOGIC · CUSTOM</text>
+    <g class="sw" data-n="1" tabindex="0" role="button" aria-label="Interruptor 1: REC/DUB/PLAY">
+<circle class="led2" cx="80" cy="78" r="8"/><circle class="cap" cx="80" cy="175" r="44"/>
+<text x="80" y="184" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-weight="700" font-size="28" pointer-events="none">1</text>
+<text x="80" y="262" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-size="14" pointer-events="none">REC/DUB/PLAY</text>
+<text x="80" y="284" text-anchor="middle" fill="#a9a9a9" font-family="JetBrains Mono,monospace" font-size="12" pointer-events="none"></text></g><g class="sw" data-n="2" tabindex="0" role="button" aria-label="Interruptor 2: PLAY/STOP (mantener: CLEAR)">
+<circle class="led2" cx="224" cy="78" r="8"/><circle class="holdarc" cx="224" cy="175" r="56" pathLength="100" transform="rotate(-90 224 175)" style="opacity:0" stroke-dasharray="100" stroke-dashoffset="100"/><circle class="cap" cx="224" cy="175" r="44"/>
+<text x="224" y="184" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-weight="700" font-size="28" pointer-events="none">2</text>
+<text x="224" y="262" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-size="14" pointer-events="none">PLAY/STOP</text>
+<text x="224" y="284" text-anchor="middle" fill="#a9a9a9" font-family="JetBrains Mono,monospace" font-size="12" pointer-events="none">mantener: CLEAR</text></g><g class="sw" data-n="3" tabindex="0" role="button" aria-label="Interruptor 3: PISTA - (mantener: ARM)">
+<circle class="led2" cx="368" cy="78" r="8"/><circle class="holdarc" cx="368" cy="175" r="56" pathLength="100" transform="rotate(-90 368 175)" style="opacity:0" stroke-dasharray="100" stroke-dashoffset="100"/><circle class="cap" cx="368" cy="175" r="44"/>
+<text x="368" y="184" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-weight="700" font-size="28" pointer-events="none">3</text>
+<text x="368" y="262" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-size="14" pointer-events="none">PISTA -</text>
+<text x="368" y="284" text-anchor="middle" fill="#a9a9a9" font-family="JetBrains Mono,monospace" font-size="12" pointer-events="none">mantener: ARM</text></g><g class="sw" data-n="4" tabindex="0" role="button" aria-label="Interruptor 4: PISTA +">
+<circle class="led2" cx="512" cy="78" r="8"/><circle class="cap" cx="512" cy="175" r="44"/>
+<text x="512" y="184" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-weight="700" font-size="28" pointer-events="none">4</text>
+<text x="512" y="262" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-size="14" pointer-events="none">PISTA +</text>
+<text x="512" y="284" text-anchor="middle" fill="#a9a9a9" font-family="JetBrains Mono,monospace" font-size="12" pointer-events="none"></text></g><g class="sw" data-n="5" tabindex="0" role="button" aria-label="Interruptor 5: UNDO">
+<circle class="led2" cx="656" cy="78" r="8"/><circle class="cap" cx="656" cy="175" r="44"/>
+<text x="656" y="184" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-weight="700" font-size="28" pointer-events="none">5</text>
+<text x="656" y="262" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-size="14" pointer-events="none">UNDO</text>
+<text x="656" y="284" text-anchor="middle" fill="#a9a9a9" font-family="JetBrains Mono,monospace" font-size="12" pointer-events="none"></text></g><g class="sw" data-n="6" tabindex="0" role="button" aria-label="Interruptor 6: STOP ALL">
+<circle class="led2" cx="800" cy="78" r="8"/><circle class="cap" cx="800" cy="175" r="44"/>
+<text x="800" y="184" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-weight="700" font-size="28" pointer-events="none">6</text>
+<text x="800" y="262" text-anchor="middle" fill="#ededed" font-family="JetBrains Mono,monospace" font-size="14" pointer-events="none">STOP ALL</text>
+<text x="800" y="284" text-anchor="middle" fill="#a9a9a9" font-family="JetBrains Mono,monospace" font-size="12" pointer-events="none"></text></g>
+  </svg>
+  <div class="toast" id="pedal-toast"><i>Pisa un interruptor</i><div class="trackstrip" id="pedal-strip" aria-label="Estado de las pistas"></div><span id="pedal-arm"></span></div>
+  </div>
+  <div class="tw" style="margin-top:24px"><table>
+    <thead><tr><th>Interruptor</th><th>Toque</th><th>Mantener 1 s</th></tr></thead><tbody>
+    <tr><td>1</td><td>REC/DUB/PLAY de la pista seleccionada (como el pad de la fila 1)</td><td>-</td></tr>
+    <tr><td>2</td><td>PLAY/STOP de la pista seleccionada (como el pad de la fila 2)</td><td>CLEAR de la pista seleccionada (se puede deshacer)</td></tr>
+    <tr><td>3</td><td>Pista anterior (1..6, da la vuelta)</td><td>ARM auto-rec on/off (a 1 s, sin soltar)</td></tr>
+    <tr><td>4</td><td>Pista siguiente (da la vuelta)</td><td>-</td></tr>
+    <tr><td>5</td><td>UNDO (como el botón Undo del Move)</td><td>-</td></tr>
+    <tr><td>6</td><td>STOP ALL si algo suena; si no, ALL START</td><td>-</td></tr></tbody></table></div>
+  <p class="note">Los interruptores 1, 4, 5 y 6 actúan al pisar. El 2 y el 3 tienen gesto de mantener, así que su toque actúa <em>al soltar</em> (si se soltó antes de 1 s); un mantenido nunca dispara además el toque.</p>
+</div></section>
+
+<section id="persistencia" style="--sec:var(--play)"><div class="wrap reveal">
+  <div class="eyebrow">Persistencia</div>
+  <h2>Los loops sobreviven a todo</h2>
+  <p class="lede">Los loops sobreviven a cerrar o recargar Movy y a apagar la Move. Movy guarda por pista y por Set el <code>state</code> que publica el módulo; ese estado lleva un <strong>ID de loops</strong> aleatorio, y el audio vive en la partición de datos de usuario, que no se borra al actualizar Movy ni Schwung.</p>
+  <div class="flow" id="flow" style="margin-top:24px">
+    <div><b>1 · Vigilar</b>Un hilo propio mira cada 100 ms una firma barata de cada pista.</div>
+    <div><b>2 · Esperar</b>Guarda las pistas que cambiaron cuando llevan 1,5 s estables. No se escribe durante REC/DUB.</div>
+    <div><b>3 · Escribir</b>Escribe a <code>.tmp</code> y renombra: <code>tN.wav</code>.</div>
+    <div><b>4 · Cerrar</b><code>loops.json</code> se escribe el último (largos y puntos de inicio).</div>
+    <div><b>5 · Recargar</b>Al cargar un Set con ID y solo si la instancia está vacía, lee los WAV y deja las pistas en STOP.</div>
+  </div>
+  <div class="grid2" style="margin-top:24px;align-items:start">
+    <div class="panel"><div class="tree">/data/UserData/schwung/looper-loops/
+  └─ &lt;id&gt;/            (12 hex, por instancia)
+       ├─ t1.wav
+       ├─ ...
+       ├─ t6.wav
+       └─ loops.json</div></div>
+    <div class="panel"><p style="margin-top:0">Nunca se guarda en el hilo de audio. CLEAR borra el .wav (UNDO lo vuelve a escribir). Vuelven además el largo fijo, velocidad, mute, count-in, umbral y volumen de entrada. La selección, la vista y el solo no se guardan.</p></div>
+  </div>
+  <h3>Limitaciones</h3>
+  <ul style="color:var(--dim)">
+    <li>Un Set duplicado por Movy comparte ID con el original hasta que uno grabe algo nuevo.</li>
+    <li>Quitar el módulo de una pista deja su carpeta huérfana (se puede borrar a mano).</li>
+    <li>Una carpeta ilegible no se sobrescribe.</li>
+    <li>Movy duerme una pista cuyo audio lleva ~1 s en silencio: mientras haya pistas en uso el módulo suma un dither de ±8 LSB (unos -72 dBFS) para que el looper siga corriendo.</li>
+  </ul>
+</div></section>
+
+<section id="chuleta" style="--sec:var(--t2)"><div class="wrap reveal">
+  <div class="eyebrow">Chuleta</div>
+  <h2>Todos los gestos en una tabla</h2>
+  <div class="tw" style="margin-top:22px"><table>
+    <thead><tr><th>Quiero…</th><th>Gesto</th></tr></thead><tbody>
+    <tr><td>Grabar / cerrar</td><td>REC (fila 1) en la pista; segundo toque cierra</td></tr>
+    <tr><td>Sobregrabar</td><td>REC sobre una pista que suena (DUB, violeta); otra vez vuelve a PLAY</td></tr>
+    <tr><td>Reproducir / parar</td><td>PLAY/STOP (fila 2)</td></tr>
+    <tr><td>Silenciar</td><td>MUTE (fila 3)</td></tr>
+    <tr><td>SOLO</td><td>SHIFT + fila 3</td></tr>
+    <tr><td>Reverse</td><td>SHIFT + fila 1, o K8 en vista PISTA</td></tr>
+    <tr><td>FX on/off</td><td>SHIFT + fila 4</td></tr>
+    <tr><td>Seleccionar pista</td><td>Pad de la fila 4 (otra vez = MIX)</td></tr>
+    <tr><td>Auto-rec</td><td>ARM (col. 1, fila 3) y luego REC en una pista vacía</td></tr>
+    <tr><td>Activar / desactivar auto-rec</td><td>Tocar ARM (col. 1, fila 3); mantenerlo + pad de fila 1 o 2 = Reverse</td></tr>
+    <tr><td>Cambiar umbral</td><td>SHIFT + col. 8 fila 3 (-54 a -30 dB)</td></tr>
+    <tr><td>Count-in 1 / 2 compases</td><td>SHIFT + col. 8 fila 4</td></tr>
+    <tr><td>Largo del loop</td><td>Botones de paso 1 a 16 (otra vez el encendido = libre), o Longitud fija (col. 8 fila 2)</td></tr>
+    <tr><td>Qué hace al cerrar una grabación</td><td>Rec Action REC&gt;PLAY / REC&gt;DUB (col. 8 fila 3)</td></tr>
+    <tr><td>Quantize on/off</td><td>Col. 8 fila 1</td></tr>
+    <tr><td>Recortar inicio / fin</td><td>K1 / K2 en vista PISTA</td></tr>
+    <tr><td>Mover inicio sin entrar a la pista</td><td>Mantener Loop + knob N (con Shift, fino)</td></tr>
+    <tr><td>Velocidad</td><td>K7 en vista PISTA (x1/4 a x4)</td></tr>
+    <tr><td>Borrar el audio (CLEAR)</td><td>Mantener X + pad de la pista (filas 1 a 3)</td></tr>
+    <tr><td>Pista a cero (RESET)</td><td>Mantener X + selector de la pista (fila 4)</td></tr>
+    <tr><td>Deshacer / rehacer</td><td>Undo / Shift + Undo (un nivel)</td></tr>
+    <tr><td>Parar / arrancar todo</td><td>Col. 1 fila 2 (STOP ALL: solo para) / fila 1 (ALL START/STOP: interruptor)</td></tr>
+    <tr><td data-i18n="cs.play.q">Parar / arrancar con la Move</td><td data-i18n="cs.play.a">Stop de la Move = STOP ALL recordando qué sonaba; Play = reanuda esas pistas desde el inicio (a compás con Quantize)</td></tr>
+    <tr><td data-i18n="cs.mute.q">Silenciar todo el looper</td><td data-i18n-html="cs.mute.a">M + botón de pista de Movy (la pantalla muestra <code>MUTED</code>; las pistas siguen girando)</td></tr>
+    <tr><td>Pedalera</td><td>1 REC/DUB/PLAY · 2 PLAY/STOP (al soltar; mantener 1 s = CLEAR) · 3 pista anterior (al soltar; mantener 1 s = ARM) · 4 pista siguiente · 5 UNDO · 6 STOP ALL / START</td></tr></tbody></table></div>
+</div></section>
+
+<section id="creditos" style="--sec:var(--t1)"><div class="wrap reveal">
+  <div class="eyebrow">Créditos</div>
+  <h2>Quién lo ha hecho</h2>
+  <div class="grid2 whocards" style="margin-top:22px">
+    <div class="card who" style="--c:var(--t2)"><h3><a href="https://github.com/rogerbacardit" rel="noopener">rogerbacardit</a></h3><p>La idea, el diseño y las pruebas en el Move. Autor y mantenedor de Looper 606.</p><p><a href="https://github.com/rogerbacardit" rel="noopener">github.com/rogerbacardit</a></p></div>
+    <div class="card who" style="--c:var(--t4)"><h3>Claude (Anthropic)</h3><p>Hecho con Claude Code: la programación del módulo, el parche de Movy y esta web. Gran parte del trabajo es suyo.</p></div>
+  </div>
+  <h3>Y se apoya en</h3>
+  <div class="grid3" style="margin-top:12px">
+    <div class="card" style="--c:var(--t1)"><h3>Mark</h3><p>Motor de audio de Tim Cox (MIT), <a href="https://github.com/timncox/schwung-mark" rel="noopener">schwung-mark</a>. Looper 606 incluye un fork propio, modificado (ver <code>LICENSE-mark</code>).</p></div>
+    <div class="card" style="--c:var(--t3)"><h3>Movy</h3><p>El módulo para Movy es de DimaDake. Looper 606 se carga dentro de una pista de Movy.</p></div>
+    <div class="card" style="--c:var(--t6)"><h3>Schwung</h3><p>La plataforma de módulos de la que Looper 606 es un <code>sound_generator</code>.</p></div>
+  </div>
+  <p style="margin-top:22px">Las ideas de uso vienen de la Boss RC-505 y de Loopex (solo ideas, ningún código). Código y documentación: <a href="https://github.com/rogerbacardit/movy-looper" rel="noopener">github.com/rogerbacardit/movy-looper</a>.</p>
+</div></section>
+</main>
+<footer><div class="wrap"><p style="margin:0 0 .4em">Looper 606 · hecho por <a href="https://github.com/rogerbacardit" rel="noopener">rogerbacardit</a> con Claude (Anthropic) · <a href="https://github.com/rogerbacardit/movy-looper" rel="noopener">github.com/rogerbacardit/movy-looper</a></p><p style="margin:0">Motor Mark (c) Tim Cox, MIT. Esta página es documentación; no es oficial de Ableton.</p></div></footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>
