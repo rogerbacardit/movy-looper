@@ -5,6 +5,7 @@ import json, sys
 h = json.load(open(sys.argv[1]))
 L = h["levels"]
 assert h["pad_layout"] == "drums"
+assert h["step_buttons_param"] == "step" and h["step_leds_param"] == "step_leds" and h["loop_knob_param"] == "loop_knob"
 assert h["display_param"] == "display" and h["pad_leds_param"] == "pad_leds" and h["delete_pad_param"] == "delete_pad"
 root = L["root"]
 assert root["knobs"] == ["t%d_level" % i for i in range(1, 7)] + ["in_gain", "master"], root["knobs"]

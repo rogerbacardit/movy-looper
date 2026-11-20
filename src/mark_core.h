@@ -139,5 +139,20 @@ void mark_set_param(mark_t *m, const char *key, const char *val);
 int  mark_get_param(mark_t *m, const char *key, char *buf, int buf_len);
 /* Peak overview of track ti (0-based) for a screen: see mark_core.c. */
 int  mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_frames, int *pos);
+/* Clip start of track ti as a bin of the overview (-1 = empty). */
+int  mark_track_start_bin(mark_t *m, int ti, int bins);
+
+/* Persistence (L606): loop audio as <dir>/tN.wav + <dir>/loops.json, written and
+ * read by the CALLER's background thread (never the audio thread). The audio
+ * thread is never blocked: saving reads the buffers as they are (a torn write
+ * bumps the revision and is simply saved again). */
+/* Revision signature of track ti: changes whenever its loop (audio, length,
+ * start, or buffer) changes. Cheap, lock-free; safe from any thread. */
+uint64_t mark_persist_sig(mark_t *m, int ti);
+/* Write the tracks in `mask` (bit i = track i+1) and then loops.json. 0 = ok. */
+int  mark_persist_save(mark_t *m, const char *dir, unsigned mask);
+/* Restore every track from <dir>. Returns the number of tracks restored, or -1
+ * when <dir> holds no valid loops.json (nothing is touched then). */
+int  mark_persist_load(mark_t *m, const char *dir);
 
 #endif /* MARK_CORE_H */

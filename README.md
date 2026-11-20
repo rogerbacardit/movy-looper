@@ -31,7 +31,28 @@ Colores: verde = reproduciendo, rojo = grabando, violeta = overdub, naranja parp
 
 Todos los gestos actuan al note-on.
 - **Count-in**: al grabar en una pista vacia espera 4 tiempos antes de empezar.
-- **Largo fijo**: cada toque cicla libre -> 1 -> 2 -> 4 -> 8 compases; la grabacion se cierra sola.
+- **Largo fijo**: cada toque cicla libre -> 1 -> 2 -> 4 -> 8 compases (desde cualquier valor pasa al siguiente de esa lista); la grabacion se cierra sola. Los 16 botones de paso eligen cualquier largo de 1 a 16 (ver abajo).
+
+## Botones de paso = largo de grabacion (build `module-leds` v3 de Movy)
+
+Los 16 botones bajo los pads: el paso N fija un largo de N compases para las proximas grabaciones; volver a pulsar el paso elegido = largo libre. Los LEDs muestran el largo (paso N blanco, 1..N-1 tenues, resto apagado; libre = todo apagado) y el aviso es `LEN 4 BARS` / `LEN FREE`. Es el mismo ajuste que el pad de la columna 8 y que `Fixed Length` de Setup (que ahora llega a 16 compases). En una pista con este modulo los pasos NO son del secuenciador de Movy (Shift+paso, Mute+paso y la vista Session siguen igual).
+
+## Loop + knob = inicio del clip
+
+Mantener el boton **Loop** del Move y girar el knob N (1-6) mueve el punto de inicio de la pista N, sin destruir el audio: el motor reproduce desde `(pos + inicio) mod largo` y el overdub escribe en ese mismo punto, asi que las capas siguen alineadas (vale con reverse y velocidad). Cada paso del knob = 1/16 de nota al tempo actual; con **Shift** = 1/64 (fino, fuera de la rejilla; sin Shift vuelve a la rejilla). Se envuelve en ambos sentidos y hay un iman en el inicio del loop. La pantalla muestra la onda con una marca de inicio y el titular `START 1 +3/16` (o `+N MS` en fino) unos segundos; la marca queda visible mientras el inicio no sea 0. No se puede mover mientras la pista graba o hace overdub (`START 1 LOCKED`) ni si esta vacia. CLEAR + UNDO devuelve tambien el inicio. Con Loop pulsado Movy no entra en modo Loop en esta pista (es solo un modificador).
+
+## Cursor de la onda
+
+El cursor de la pantalla sigue la posicion real: con la pista en reverse va de derecha a izquierda, con velocidad 2x/0.5x va al doble/mitad y con inicio movido sigue el audio que suena.
+
+## Persistencia de los loops
+
+Los loops sobreviven a cerrar/recargar Movy y a apagar la Move.
+
+- Movy guarda por pista y por Set lo que el modulo publica en `get_param("state")` (en `chains.json` del Set) y lo devuelve con `set_param("state")` al cargar el Set, pero no dice al modulo ni el Set ni la pista. Por eso el `state` lleva un **ID de loops** aleatorio (`l6id`, 12 hex) creado con cada instancia, y los loops viven en `/data/UserData/schwung/looper-loops/<id>/` (`t1.wav`..`t6.wav` + `loops.json` con largos y puntos de inicio). Es la particion de datos de usuario: no se borra al actualizar Movy ni Schwung.
+- **Nunca en el hilo de audio**: un hilo propio mira cada 100 ms una firma barata de cada pista y guarda las que cambiaron cuando llevan 1,5 s estables (no se escribe durante REC/DUB). CLEAR borra el `.wav` (UNDO lo vuelve a escribir). Se escribe a `.tmp` y se renombra, `loops.json` el ultimo. Al cerrar la instancia (`destroy`) se vuelca lo pendiente.
+- **Al cargar** un Set cuyo `state` trae un ID, y solo si la instancia esta vacia, el mismo hilo lee los WAV y deja las pistas en STOP (nunca pisa loops vivos). Ademas del audio vuelven largo fijo, velocidad, mute, count-in, umbral y volumen de entrada.
+- Limitaciones: un Set duplicado por Movy comparte ID con el original hasta que uno grabe algo nuevo; quitar el modulo de una pista deja su carpeta huerfana (se puede borrar a mano); una carpeta ilegible no se sobrescribe. Variables de entorno solo para tests: `LOOPER606_PERSIST_DIR`, `LOOPER606_PERSIST_DELAY_MS`.
 
 ## Knobs (paginas)
 
@@ -43,7 +64,7 @@ Todos los gestos actuan al note-on.
 ## Compilar y probar
 
 ```
-make test-synth     # compila para el Mac y ejecuta los tests (132 comprobaciones)
+make test-synth     # compila para el Mac y ejecuta los tests (346 comprobaciones)
 make arm-synth      # compila para la Move -> build/looper-606-module.tar.gz
 ```
 
@@ -67,8 +88,9 @@ Nota tecnica: el motor soporta `MARK_TRACKS=6` de forma nativa (ya no hay parche
 
 ## Pad colours and status text in Movy (needs the `module-leds` Movy build)
 
-The shim publishes two read-only params and names them in the `ui_hierarchy`
-root (`pad_leds_param`, `status_text_param`, `display_param`, `delete_pad_param`):
+The shim publishes read-only/write-only params and names them in the `ui_hierarchy`
+root (`pad_leds_param`, `status_text_param`, `display_param`, `delete_pad_param`,
+and since v0.4.0 `step_buttons_param`, `step_leds_param`, `loop_knob_param`):
 
 - `pad_leds`: 64 hex digits, one byte per rack pad (pad 1 first). Bits 0-6 are a
   Move LED palette index, bit 7 = blink. Track colours: green, blue, yellow,
@@ -81,3 +103,7 @@ A Movy without the feature ignores both params; nothing else changes.
 
 - `display`: `"<seq>|<pos 0-127>|<128 peaks as 256 hex digits, or empty>|<header>"`, the selected track's waveform overview (header e.g. `PLAY 1 - 4 BARS`). Peaks are cached in the module and `seq` bumps only when they change.
 - `delete_pad` (write): Movy sends the rack pad index 0-31 when Delete + pad is pressed; the module CLEARs that pad's track.
+- `step`: write-only, step button index 0..15 (Movy sends it instead of a sequencer step).
+- `step_leds`: 32 hex digits, one palette byte per step button.
+- `loop_knob`: write-only `"N:delta[:1]"` while Loop is held (N = knob 1..8, `:1` = Shift/fine).
+- `display`: the pos field is `"<pos>"` or `"<pos>,<start marker column>"`.

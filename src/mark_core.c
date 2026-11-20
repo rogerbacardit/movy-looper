@@ -167,6 +167,11 @@ typedef struct {
     int      pan;          /* 0..100, 50 = center */
     int      rev, shot;
     int      spd;          /* L606 varispeed: 0 = 1/2x, 1 = 1x, 2 = 2x */
+    uint32_t off;          /* L606 clip start: frames into the buffer where the
+                              loop begins (0 <= off < len). Playback reads
+                              (pos + off) mod len; dub writes there too. */
+    uint32_t crev;         /* L606 audio revision: bumps while the buffer is being
+                              written (REC/DUB/undo swap); persistence watches it */
     float    g_cur;        /* smoothed level gain */
     float    pg[2];        /* balance gains L/R */
 
@@ -209,6 +214,7 @@ struct mark {
     uint32_t undo_count;         /* frames captured, capped at len */
     uint32_t undo_saved_len;     /* kind 1: length to restore on redo */
     uint32_t undo_saved_full;    /* kind 2: full_len of the parked loop */
+    uint32_t undo_saved_off;     /* kind 2: clip start of the parked loop (L606) */
     int      swap_track;         /* -1 = no swap job running */
     uint32_t swap_pos;
 
@@ -1236,6 +1242,14 @@ static inline double spd_rate(const mk_track_t *t) {
  * repeat frames, and the undo capture assumes a contiguous region. */
 static inline int no_dub(const mk_track_t *t) { return t->rev || t->spd != 1; }
 
+/* L606: buffer frame the playhead frame `ip` (0 <= ip < len) reads/writes:
+ * reverse mirrors, then the clip start rotates. */
+static inline uint32_t play_index(const mk_track_t *t, uint32_t ip) {
+    uint32_t rp = t->rev ? (t->len - 1 - ip) : ip;
+    if (t->off) { rp += t->off; if (rp >= t->len) rp -= t->len; }
+    return rp;
+}
+
 static void reset_undo(mark_t *m) {
     m->undo_track = -1;
     m->undo_capturing = 0;
@@ -1256,7 +1270,7 @@ static void begin_dub_gesture(mark_t *m, int ti) {
     m->undo_kind = 0;
     m->undo_redo = 0;
     m->undo_capturing = 1;
-    m->undo_start = (uint32_t)t->pos;
+    m->undo_start = t->len ? play_index(t, (uint32_t)t->pos % t->len) : 0;
     m->undo_count = 0;
     m->swap_track = -1;
 }
@@ -1304,6 +1318,8 @@ static void finalize_record(mark_t *m, int ti, uint32_t final_len, int end_state
         return;
     }
     t->full_len = final_len;
+    t->off = 0;
+    t->crev++;
     /* first finalized loop anchors the session grid for free-run sync.
      * Derive the MEASURE from the rounding unit actually used, so a
      * 15/16 polymetric first loop still anchors a true measure grid. */
@@ -1461,6 +1477,7 @@ static void track_trim(mark_t *m, int ti, int delta) {
     }
     if (m->undo_track == ti) reset_undo(m);   /* indexes tied to old len */
     t->len = nl;
+    t->off %= nl;
     if (t->pos >= (double)nl) t->pos = fmod(t->pos, (double)nl);
     m->edit_rev++;
 }
@@ -1485,7 +1502,24 @@ static void track_setlen16(mark_t *m, int ti, int n16) {
     }
     if (m->undo_track == ti) reset_undo(m);
     t->len = nl;
+    t->off %= nl;
     if (t->pos >= (double)nl) t->pos = fmod(t->pos, (double)nl);
+    m->edit_rev++;
+}
+
+/* L606 clip start: set the loop's start point (frames into the buffer, taken
+ * modulo the loop length). Refused while the buffer is being written (REC,
+ * DUB, an undo swap) so the dub/undo regions stay contiguous. */
+static void track_set_off(mark_t *m, int ti, long frames) {
+    mk_track_t *t = &m->t[ti];
+    if (m->io_busy || m->swap_track == ti) return;
+    if (t->len == 0 || t->st == MK_REC || t->st == MK_DUB) return;
+    long l = (long)t->len;
+    long o = frames % l;
+    if (o < 0) o += l;
+    if ((uint32_t)o == t->off) return;
+    t->off = (uint32_t)o;
+    t->crev++;
     m->edit_rev++;
 }
 
@@ -1509,9 +1543,12 @@ static void track_clear(mark_t *m, int ti) {
         m->undo_count = 0;
         m->undo_saved_len = t->len;
         m->undo_saved_full = t->full_len;
+        m->undo_saved_off = t->off;
     } else if (m->undo_track == ti) {
         reset_undo(m);
     }
+    t->off = 0;
+    t->crev++;
     t->st = MK_EMPTY;
     t->len = 0;
     t->full_len = 0;
@@ -1563,6 +1600,8 @@ static void undo_press(mark_t *m) {
         if (!m->undo_redo) {          /* undo: loop comes back, stopped */
             t->len = m->undo_saved_len;
             t->full_len = m->undo_saved_full;
+            t->off = m->undo_saved_off;
+            t->crev++;
             t->st = MK_STOP;
             t->pos = 0.0;
             t->pending = 0;
@@ -1576,6 +1615,9 @@ static void undo_press(mark_t *m) {
         } else {                      /* redo: clear again */
             m->undo_saved_len = t->len;
             m->undo_saved_full = t->full_len;
+            m->undo_saved_off = t->off;
+            t->off = 0;
+            t->crev++;
             t->len = 0;
             t->full_len = 0;
             t->st = MK_EMPTY;
@@ -1591,6 +1633,8 @@ static void undo_press(mark_t *m) {
         if (!m->undo_redo) {          /* undo the first recording: clear */
             m->undo_saved_len = t->len;
             t->len = 0;
+            t->off = 0;
+            t->crev++;
             t->st = MK_EMPTY;
             t->pos = 0.0;
             m->undo_redo = 1;
@@ -1598,6 +1642,7 @@ static void undo_press(mark_t *m) {
             if (!any_content(m)) m->grid_unit = 0.0;
         } else {                      /* redo: bring it back, stopped */
             t->len = m->undo_saved_len;
+            t->crev++;
             t->st = MK_STOP;
             t->pos = 0.0;
             m->undo_redo = 0;
@@ -1631,6 +1676,7 @@ static void swap_step(mark_t *m) {
     mk_track_t *t = &m->t[m->swap_track];
     uint32_t n = SWAP_FRAMES_PER_BLOCK;
     if (m->swap_pos + n > m->undo_count) n = m->undo_count - m->swap_pos;
+    t->crev++;
     for (uint32_t k = 0; k < n; k++) {
         uint32_t idx = (m->undo_start + m->swap_pos + k) % t->len;
         tbuf_swap(t->buf, idx, m->undo_buf, idx);
@@ -2043,6 +2089,113 @@ static void session_start(mark_t *m, int slot, int op) {
         m->io_thread_valid = 1;
     }
 }
+
+/* ---- L606 persistence: runs on the CALLER's background thread ------------ */
+
+uint64_t mark_persist_sig(mark_t *m, int ti) {
+    if (!m || ti < 0 || ti >= MARK_TRACKS) return 0;
+    const mk_track_t *t = &m->t[ti];
+    uint64_t h = 1469598103934665603ull;     /* FNV-1a over the fields */
+    uint64_t v[6] = { t->len, t->full_len, t->off, t->crev,
+                      (uint64_t)(uintptr_t)t->buf, (uint64_t)m->grid_unit };
+    for (int i = 0; i < 6; i++) { h ^= v[i]; h *= 1099511628211ull; }
+    return h ? h : 1;
+}
+
+int mark_persist_save(mark_t *m, const char *dir, unsigned mask) {
+    if (!m || !dir || !dir[0]) return -1;
+    char path[400], tmp[410];
+    mkdir(dir, 0755);
+    uint32_t len[MARK_TRACKS], full[MARK_TRACKS], off[MARK_TRACKS];
+    const int16_t *buf[MARK_TRACKS];
+    /* One snapshot of what each track is right now; the audio thread keeps
+     * running and may change a buffer under us, which only makes the
+     * signature move and the track be saved again. */
+    for (int i = 0; i < MARK_TRACKS; i++) {
+        const mk_track_t *t = &m->t[i];
+        len[i] = t->len;
+        full[i] = t->len > 0 ? (t->full_len > t->len ? t->full_len : t->len) : 0;
+        off[i] = t->off;
+        buf[i] = t->buf;
+    }
+    for (int i = 0; i < MARK_TRACKS; i++) {
+        snprintf(path, sizeof path, "%s/t%d.wav", dir, i + 1);
+        if (!(mask & (1u << i))) continue;
+        if (len[i] == 0) { unlink(path); continue; }
+        snprintf(tmp, sizeof tmp, "%s.tmp", path);
+        if (wav_write(tmp, buf[i], full[i]) != 0) { unlink(tmp); return -1; }
+        if (rename(tmp, path) != 0) { unlink(tmp); return -1; }
+    }
+    snprintf(path, sizeof path, "%s/loops.json", dir);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return -1;
+    fprintf(f, "{\"v\":1,\"gu\":%ld", (long)(m->grid_unit + 0.5));
+    for (int i = 0; i < MARK_TRACKS; i++)
+        fprintf(f, ",\"l%d\":%u,\"F%d\":%u,\"so%d\":%u",
+                i + 1, len[i], i + 1, full[i], i + 1, off[i]);
+    fprintf(f, "}");
+    if (fclose(f) != 0) { unlink(tmp); return -1; }
+    if (rename(tmp, path) != 0) { unlink(tmp); return -1; }
+    return 0;
+}
+
+int mark_persist_load(mark_t *m, const char *dir) {
+    if (!m || !dir || !dir[0] || m->io_busy) return -1;
+    char path[400], js[4096];
+    snprintf(path, sizeof path, "%s/loops.json", dir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    size_t n = fread(js, 1, sizeof js - 1, f);
+    fclose(f);
+    js[n] = 0;
+    if (!strstr(js, "\"v\":") || !strchr(js, '}')) return -1;
+    long lens[MARK_TRACKS], fulls[MARK_TRACKS], offs[MARK_TRACKS];
+    /* Validate every file first (as a session load does) so a half-written
+     * folder leaves the live loops untouched. */
+    for (int i = 0; i < MARK_TRACKS; i++) {
+        char k[8];
+        snprintf(k, sizeof k, "l%d", i + 1);   lens[i] = json_int(js, k, 0);
+        snprintf(k, sizeof k, "F%d", i + 1);   fulls[i] = lens[i] > 0 ? json_int(js, k, (int)lens[i]) : 0;
+        snprintf(k, sizeof k, "so%d", i + 1);  offs[i] = json_int(js, k, 0);
+        if (lens[i] < 0 || fulls[i] < lens[i] || fulls[i] > (long)m->track_frames) return -1;
+        if (fulls[i] == 0) continue;
+        uint32_t have = 0;
+        snprintf(path, sizeof path, "%s/t%d.wav", dir, i + 1);
+        if (wav_probe(path, &have) != 0 || have < (uint32_t)fulls[i]) return -1;
+    }
+    /* Same contract as a session load: silence and detach, fill, then publish
+     * length/state last (the render gates on them). io_busy keeps the control
+     * thread's set_param away from half-filled buffers meanwhile. */
+    m->io_busy = 2;
+    for (int i = 0; i < MARK_TRACKS; i++) {
+        mk_track_t *t = &m->t[i];
+        t->st = MK_EMPTY; t->len = 0; t->full_len = 0; t->off = 0; t->pos = 0.0;
+        t->rec_len = 0; t->rec_target = 0; t->pending = 0;
+        track_fx_reset(t);
+    }
+    reset_undo(m);
+    m->grid_unit = 0.0;
+    int restored = 0;
+    for (int i = 0; i < MARK_TRACKS; i++) {
+        mk_track_t *t = &m->t[i];
+        if (fulls[i] == 0) continue;
+        snprintf(path, sizeof path, "%s/t%d.wav", dir, i + 1);
+        long got = wav_read(path, t->buf, (uint32_t)fulls[i]);
+        if (got != fulls[i]) continue;               /* leave this track empty */
+        t->full_len = (uint32_t)got;
+        t->len = (uint32_t)(lens[i] > 0 && lens[i] <= got ? lens[i] : got);
+        t->off = offs[i] > 0 && (uint32_t)offs[i] < t->len ? (uint32_t)offs[i] : 0;
+        t->crev++;
+        t->st = MK_STOP;                              /* set last: render gates on it */
+        restored++;
+    }
+    long gu = json_int(js, "gu", 0);
+    m->grid_unit = gu > 0 ? (double)gu : 0.0;
+    m->edit_rev++;
+    m->io_busy = 0;
+    return restored;
+}
 #else
 /* No filesystem: save and load are refused, and the UI sees the error
  * flag exactly as it would after a failed disk op. */
@@ -2050,6 +2203,9 @@ static void session_start(mark_t *m, int slot, int op) {
     (void)slot; (void)op;
     if (m) atomic_store_explicit(&m->io_error, 1, memory_order_release);
 }
+uint64_t mark_persist_sig(mark_t *m, int ti) { (void)m; (void)ti; return 0; }
+int mark_persist_save(mark_t *m, const char *dir, unsigned mask) { (void)m; (void)dir; (void)mask; return -1; }
+int mark_persist_load(mark_t *m, const char *dir) { (void)m; (void)dir; return -1; }
 #endif
 
 /* Track FX: one insert per track, applied post-read / pre-fader. Filter
@@ -2244,6 +2400,7 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
                 if (t->rec_len < m->track_frames) {
                     tbuf_store(t->buf, t->rec_len, si_l, si_r);
                     t->rec_len++;
+                    t->crev++;
                 }
                 if (t->rec_target && t->rec_len >= t->rec_target) {
                     finalize_record(m, i, t->rec_target, t->rec_end);
@@ -2283,7 +2440,7 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
 
             uint32_t ip = (uint32_t)t->pos;
             if (ip >= t->len) ip = t->len - 1;
-            uint32_t rp = t->rev ? (t->len - 1 - ip) : ip;
+            uint32_t rp = play_index(t, ip);
             float l, r;
             if (t->spd == 1) {
                 tbuf_load(t->buf, rp, &l, &r);
@@ -2295,6 +2452,7 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
                 if (hp >= (double)t->len) hp = (double)t->len - 1.0;
                 double x = t->rev ? ((double)t->len - 1.0 - hp) : hp;
                 if (x < 0.0) x = 0.0;
+                if (t->off) { x += (double)t->off; if (x >= (double)t->len) x -= (double)t->len; }
                 uint32_t i0 = (uint32_t)x;
                 uint32_t i1 = i0 + 1 >= t->len ? 0 : i0 + 1;
                 float fr = (float)(x - (double)i0), l1, r1;
@@ -2307,16 +2465,19 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
             if (t->st == MK_DUB) {
                 /* capture-before-write; writes run sequentially from the
                  * gesture start, so the captured region stays contiguous */
+                /* dub runs at spd 1 / no reverse (no_dub), so rp is the buffer
+                 * frame under the playhead, clip start included. */
                 if (m->undo_capturing && m->undo_track == i &&
                     m->undo_count < t->len) {
-                    tbuf_copy(m->undo_buf, ip, t->buf, ip);
+                    tbuf_copy(m->undo_buf, rp, t->buf, rp);
                     m->undo_count++;
                 }
                 if (m->dub_mode) {   /* replace */
-                    tbuf_store(t->buf, ip, si_l, si_r);
+                    tbuf_store(t->buf, rp, si_l, si_r);
                 } else {             /* overdub: layer on top */
-                    tbuf_add(t->buf, ip, inl, inr);
+                    tbuf_add(t->buf, rp, inl, inr);
                 }
+                t->crev++;
             }
 
             if (use_ext[i]) {
@@ -2448,6 +2609,7 @@ void mark_set_param(mark_t *m, const char *key, const char *val) {
         if (!strcmp(k, "clear")) { if (trig_active(val)) track_clear(m, ti);  return; }
         if (!strcmp(k, "trim"))  { track_trim(m, ti, atoi(val)); return; }
         if (!strcmp(k, "len16")) { track_setlen16(m, ti, atoi(val)); return; }
+        if (!strcmp(k, "off"))   { track_set_off(m, ti, atol(val)); return; }
         if (!strcmp(k, "level")) { t->level = clampi(atoi(val), 0, 200); m->edit_rev++; return; }
         if (!strcmp(k, "pan"))   { t->pan = clampi(atoi(val), 0, 100); update_track_gains(t); m->edit_rev++; return; }
         if (!strcmp(k, "rev")) {
@@ -2662,8 +2824,20 @@ int mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_fr
     uint32_t span = t->st == MK_REC ? (t->rec_target ? t->rec_target : t->rec_len) : t->len;
     if (span_frames) *span_frames = span;
     if (pos) {
-        double f = t->st == MK_REC ? (span ? (double)t->rec_len / (double)span : 0.0)
-                                   : (t->len ? t->pos / (double)t->len : 0.0);
+        /* L606: the playhead is drawn over the waveform in BUFFER order, so a
+         * reversed track runs right-to-left and a clip start rotates it. The
+         * fractional head keeps varispeed smooth. */
+        double f = 0.0;
+        if (t->st == MK_REC) f = span ? (double)t->rec_len / (double)span : 0.0;
+        else if (t->len) {
+            uint32_t ip = (uint32_t)t->pos;
+            if (ip >= t->len) ip = t->len - 1;
+            double fr = t->pos - (double)ip;
+            double x = (double)play_index(t, ip) + (t->rev ? -fr : fr);
+            if (x < 0.0) x += (double)t->len;
+            else if (x >= (double)t->len) x -= (double)t->len;
+            f = x / (double)t->len;
+        }
         int p = (int)(f * bins);
         *pos = p < 0 ? 0 : p >= bins ? bins - 1 : p;
     }
@@ -2691,6 +2865,16 @@ int mark_track_wave(mark_t *m, int ti, int bins, uint8_t *out, uint32_t *span_fr
     return 1;
 }
 
+/* L606: clip start of track ti as a bin 0..bins-1 of the waveform overview, or
+ * -1 when the track is empty. */
+int mark_track_start_bin(mark_t *m, int ti, int bins) {
+    if (!m || ti < 0 || ti >= MARK_TRACKS || bins < 1) return -1;
+    const mk_track_t *t = &m->t[ti];
+    if (t->len == 0 || t->st == MK_REC) return -1;
+    int b = (int)((uint64_t)t->off * (uint64_t)bins / t->len);
+    return b < 0 ? 0 : b >= bins ? bins - 1 : b;
+}
+
 int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
     if (!m || !key || !buf || buf_len < 2) return -1;
 
@@ -2704,6 +2888,7 @@ int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
         if (!strcmp(k, "shot"))  return snprintf(buf, (size_t)buf_len, "%d", t->shot);
         if (!strcmp(k, "spd"))   return snprintf(buf, (size_t)buf_len, "%d", t->spd);
         if (!strcmp(k, "len"))   return snprintf(buf, (size_t)buf_len, "%u", t->len);
+        if (!strcmp(k, "off"))   return snprintf(buf, (size_t)buf_len, "%u", t->off);
         if (!strcmp(k, "state")) return snprintf(buf, (size_t)buf_len, "%d", t->st);
         if (!strcmp(k, "fx"))    return snprintf(buf, (size_t)buf_len, "%d", t->fx);
         if (!strcmp(k, "fx_on")) return snprintf(buf, (size_t)buf_len, "%d", t->fx_on);

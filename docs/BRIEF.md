@@ -59,3 +59,10 @@ The cause of today's "0 params" is that Movy reads params from module.json. Dupl
 - To discriminate: load the stock `linein` in a Movy track; if it is silent too, the fix belongs in `movy-host` (send the XMOS input-select SysEx at start-up), not in this module.
 - This module now logs the mechanism and the peak after 1 s, and still plays loops with no input.
 - Movy's idle gate (`chain_idle.rs`: SLEEP_AFTER 344 blocks, probe every 172) parks a silent synth and ignores a synth's `requires_continuous_processing`; the module keeps itself awake with a -74 dBFS dither while tracks are in use.
+
+## v0.4.0: step buttons, clip start, reverse playhead, persistence
+
+- **Reverse playhead:** `mark_track_wave` maps the playhead through the same buffer index the render reads (`play_index`: reverse mirror, then clip start), so the display runs right-to-left on a reversed track and follows varispeed and a moved start.
+- **Step buttons = length:** `rec_len` is now a number of bars 0..16 (0 = free). Column-8 pad cycles 1/2/4/8/free from any value; step N sets N bars (again = free); `step_leds` shows it.
+- **Clip start:** per-track `off` (frames) in the core. Reads and dub writes use `(pos + off) mod len`; undo capture indexes the buffer frame; CLEAR/UNDO parks and restores `off`; trim/len16 re-normalise it. Refused in REC/DUB/swap. The shim turns `loop_knob "N:delta[:fine]"` into a grid move (1/16, fine 1/64 note).
+- **Persistence:** see README "Persistencia de los loops". Core: `mark_persist_sig/save/load` (WAV + `loops.json`, no `io_busy` on save, never on the audio thread); shim: one worker thread, loop id in the `state` blob. Mark's `session_dir` is no longer set (its `state` getter would `fopen()` session slots on Movy's audio callback).

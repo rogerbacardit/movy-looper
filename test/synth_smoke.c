@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include "plugin_api_v1.h"
 
 static uint8_t mem[4096];
@@ -91,6 +93,31 @@ static int geti(const char *k) { char b[64] = "-1"; A->get_param(S, k, b, sizeof
 static void seti(const char *k, int v) { char b[16]; snprintf(b, sizeof b, "%d", v); A->set_param(S, k, b); }
 static int state(int t) { char k[16]; snprintf(k, sizeof k, "t%d_state", t); return geti(k); }
 enum { S_EMPTY, S_ARMED, S_REC, S_PLAY, S_DUB, S_STOP, S_MUTE };
+/* display "<seq>|<pos>[,<mark>]|<peaks>|<header>" helpers */
+static char dbuf[800];
+static void disp(void) { dbuf[0] = 0; A->get_param(S, "display", dbuf, sizeof dbuf); }
+static int disp_pos(void) { disp(); return atoi(strchr(dbuf, '|') + 1); }
+static int disp_mark(void) {
+    disp(); const char *p = strchr(dbuf, '|') + 1; size_t n = strcspn(p, "|");
+    const char *c = memchr(p, ',', n); return c ? atoi(c + 1) : -1;
+}
+static const char *disp_head(void) { disp(); return strrchr(dbuf, '|') + 1; }
+static int disp_peak(int bin) {                 /* peak byte of one overview bin, -1 when none */
+    disp(); const char *p = strchr(strchr(dbuf, '|') + 1, '|') + 1;
+    if (strcspn(p, "|") < 256) return -1;
+    char h[3] = { p[bin * 2], p[bin * 2 + 1], 0 }; return (int)strtol(h, NULL, 16);
+}
+static char sbuf[600];
+static const char *getstr(const char *k) { sbuf[0] = 0; A->get_param(S, k, sbuf, sizeof sbuf); return sbuf; }
+static const char *status_text(void) { const char *c = strchr(getstr("status_text"), ':'); return c ? c + 1 : ""; }
+static int gett(int t, const char *k) { char key[24]; snprintf(key, sizeof key, "t%d_%s", t, k); return geti(key); }
+static void sett(int t, const char *k, int v) { char key[24]; snprintf(key, sizeof key, "t%d_%s", t, k); seti(key, v); }
+static void setstr(const char *k, const char *v) { A->set_param(S, k, v); }
+static int step_led(int i) { char hx[3] = { getstr("step_leds")[i * 2], sbuf[i * 2 + 1], 0 }; return (int)strtol(hx, NULL, 16); }
+static int file_exists(const char *dir, const char *f) { char p[400]; snprintf(p, sizeof p, "%s/%s", dir, f); return access(p, F_OK) == 0; }
+static void wait_until_saved(const char *dir, const char *f, int ms) {
+    for (int w = 0; w < ms / 50 && !file_exists(dir, f); w++) usleep(50000);
+}
 /* pad shortcuts: track t = 1..6 -> col t */
 #define REC(t)  note_of(1, t)
 #define STOP(t) note_of(2, t)
@@ -105,8 +132,12 @@ enum { S_EMPTY, S_ARMED, S_REC, S_PLAY, S_DUB, S_STOP, S_MUTE };
 #define R_RECACT note_of(3, 7)
 #define R_COUNTIN note_of(4, 7)
 
+static char pdir[200];
 int main(int argc, char **argv) {
     (void)argc;
+    snprintf(pdir, sizeof pdir, "/tmp/looper606-test-%d", (int)getpid());
+    setenv("LOOPER606_PERSIST_DIR", pdir, 1);
+    setenv("LOOPER606_PERSIST_DELAY_MS", "300", 1);
     void *h = dlopen(argv[1], RTLD_NOW); CHECK(h);
     init_fn = (move_plugin_init_v2_fn)dlsym(h, "move_plugin_init_v2"); CHECK(init_fn);
     A = init_fn(&host);
@@ -452,10 +483,240 @@ int main(int argc, char **argv) {
         #undef RACKPAD
     }
 
+
+    /* --- reverse playhead (display runs right-to-left) and varispeed --- */
+    {
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+        tap(REC(1)); run(345); tap(REC(1)); run(4);                 /* ~1 s loop, 128 bins ~ 345 frames each */
+        CHECK(state(1) == S_PLAY);
+        int p1 = disp_pos(); run(5); int p2 = disp_pos();
+        int fwd = (p2 - p1 + 128) % 128;
+        CHECK(fwd >= 1 && fwd <= 5);                                /* forward: left to right */
+        int q = disp_pos(); seti("trk_rev", 1);                     /* same instant, mirrored */
+        int qr = disp_pos();
+        CHECK(abs(qr - (127 - q)) <= 1);
+        p1 = disp_pos(); run(5); p2 = disp_pos();
+        int back = (p1 - p2 + 128) % 128;
+        CHECK(back >= 1 && back <= 5);                              /* reversed: right to left */
+        seti("trk_spd", 2);
+        p1 = disp_pos(); run(5); p2 = disp_pos();
+        back = (p1 - p2 + 128) % 128;
+        CHECK(back >= 3 && back <= 9);                              /* 2x reverse: about twice as fast, still leftwards */
+        seti("trk_rev", 0);
+        p1 = disp_pos(); run(5); p2 = disp_pos();
+        fwd = (p2 - p1 + 128) % 128;
+        CHECK(fwd >= 3 && fwd <= 9);                                /* 2x forward */
+        seti("trk_spd", 0);
+        p1 = disp_pos(); run(10); p2 = disp_pos();
+        fwd = (p2 - p1 + 128) % 128;
+        CHECK(fwd >= 1 && fwd <= 5);                                /* 1/2x: 10 blocks = 5 blocks at 1x */
+        seti("trk_spd", 1);
+    }
+
+    /* --- step buttons = fixed recording length --- */
+    {
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+        CHECK(strlen(getstr("step_leds")) == 32);
+        for (int i = 0; i < 16; i++) CHECK(step_led(i) == 119);      /* free: all dark */
+        setstr("step", "3");                                          /* step 4 = 4 bars */
+        CHECK(geti("rec_len") == 4); CHECK(!strcmp(status_text(), "LEN 4 BARS"));
+        CHECK(step_led(3) == 120);                                    /* chosen = white */
+        CHECK(step_led(0) == 123 && step_led(2) == 123);              /* 1..N-1 dim */
+        CHECK(step_led(4) == 119 && step_led(15) == 119);             /* beyond: dark */
+        setstr("step", "3");                                          /* again = free */
+        CHECK(geti("rec_len") == 0); CHECK(!strcmp(status_text(), "LEN FREE"));
+        CHECK(step_led(3) == 119);
+        setstr("step", "0"); CHECK(!strcmp(status_text(), "LEN 1 BAR")); CHECK(geti("rec_len") == 1);
+        setstr("step", "15"); CHECK(geti("rec_len") == 16); CHECK(!strcmp(status_text(), "LEN 16 BARS"));
+        setstr("step", "16"); setstr("step", "-1"); CHECK(geti("rec_len") == 16);   /* out of range: ignored */
+        /* the column-8 pad cycles from wherever the steps left it, and the steps follow */
+        setstr("step", "2");                                          /* 3 bars */
+        tap(R_FIXLEN); CHECK(geti("rec_len") == 4); CHECK(step_led(3) == 120);
+        tap(R_FIXLEN); CHECK(geti("rec_len") == 8);
+        tap(R_FIXLEN); CHECK(geti("rec_len") == 0); CHECK(!strcmp(status_text(), "LEN FREE"));
+        tap(R_FIXLEN); CHECK(geti("rec_len") == 1); CHECK(step_led(0) == 120);
+        /* the pad LED and the setup enum agree with the steps */
+        setstr("step", "4");
+        { char b[100]; A->get_param(S, "pad_leds", b, sizeof b);
+          char hx[3] = { b[(note_of(2, 7) - 36) * 2], b[(note_of(2, 7) - 36) * 2 + 1], 0 };
+          CHECK(strtol(hx, NULL, 16) == 120); }                       /* 5 bars -> brightest */
+        /* a recording of N bars closes by itself: 1 bar @120 = 2 s; 3 bars = 6 s */
+        setstr("step", "0");
+        tap(REC(1)); run(600); CHECK(state(1) == S_REC); run(200); CHECK(state(1) == S_PLAY);
+        setstr("step", "2");
+        tap(REC(2)); run(2000); CHECK(state(2) == S_REC); run(100); CHECK(state(2) == S_PLAY);
+        CHECK(gett(2, "len") > 3 * gett(1, "len") * 95 / 100 && gett(2, "len") < 3 * gett(1, "len") * 105 / 100);
+        setstr("step", "2");
+        /* the setup page's enum is the same value */
+        seti("rec_len", 6); CHECK(geti("rec_len") == 6 && step_led(5) == 120);
+        seti("rec_len", 99); CHECK(geti("rec_len") == 16);
+        seti("rec_len", 0);
+    }
+
+    /* --- Loop + knob = clip start --- */
+    {
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+        setstr("step", "0");                                          /* 1 bar */
+        tap(REC(1));
+        run(344); in_mode = IN_SILENCE; run(350);                     /* first half loud, second half silent; 1 bar closes itself */
+        run(4);
+        int L = gett(1, "len");
+        CHECK(state(1) == S_PLAY && L > 88000 && L < 88800);
+        CHECK(gett(1, "off") == 0 && disp_mark() == -1);              /* no marker until it is moved */
+        int pk0 = disp_peak(10), pkq = disp_peak(100);
+        CHECK(pk0 > 100 && pkq == 0);
+        /* +8 sixteenths at 120 bpm = half a bar */
+        setstr("loop_knob", "1:8");
+        CHECK(abs(gett(1, "off") - 44100) <= 2);
+        CHECK(!strcmp(status_text(), "START 1 +8/16"));
+        CHECK(!strcmp(disp_head(), "START 1 +8/16 ") || strstr(disp_head(), "START 1 +8/16") != NULL);
+        CHECK(abs(disp_mark() - 63) <= 2);                            /* marker column */
+        CHECK(geti("cur_track") == 1);
+        /* playback starts from the clip start: stopped track restarts at pos 0 = buffer L/2 (silent half) */
+        tap(STOP(1)); tap(STOP(1)); run(20);
+        out_peak = 0; run(20); CHECK(out_peak < 100);                 /* half-bar offset: starts in the quiet half */
+        setstr("loop_knob", "1:-8");
+        CHECK(gett(1, "off") == 0 || gett(1, "off") == L - 0);        /* back to the start */
+        tap(STOP(1)); tap(STOP(1)); run(2);
+        out_peak = 0; run(20); CHECK(out_peak > 500);                 /* offset 0: starts loud */
+        setstr("loop_knob", "1:-1");                                  /* wraps below zero */
+        CHECK(abs(gett(1, "off") - (L - 5512)) <= 3);
+        CHECK(strstr(status_text(), "START 1 +") != NULL);
+        setstr("loop_knob", "1:1"); CHECK(gett(1, "off") <= 3);       /* and back to ~0 (a frame of rounding) */
+        /* fine mode: 1/64 note, free of the 1/16 grid; coarse snaps back */
+        setstr("loop_knob", "1:8");
+        setstr("loop_knob", "1:1:1");
+        CHECK(abs(gett(1, "off") - (int)(33 * 1378.125 + 0.5)) <= 3);
+        CHECK(strstr(status_text(), " MS") != NULL);
+        setstr("loop_knob", "1:1");
+        CHECK(abs(gett(1, "off") - (int)(9 * 5512.5 + 0.5)) <= 3);
+        setstr("loop_knob", "1:-9");
+        /* other tracks: empty = refused with a message; knobs 7/8 and junk = nothing */
+        setstr("loop_knob", "3:2"); CHECK(gett(3, "off") == 0); CHECK(!strcmp(status_text(), "START 3 EMPTY"));
+        setstr("loop_knob", "7:1"); setstr("loop_knob", "0:1"); setstr("loop_knob", "x"); setstr("loop_knob", "1:0");
+        CHECK(gett(1, "off") <= 3);
+        /* reverse + varispeed still play from the moved start */
+        setstr("loop_knob", "1:8"); seti("cur_track", 1); seti("trk_rev", 1);
+        tap(STOP(1)); tap(STOP(1)); run(2);
+        out_peak = 0; run(20); CHECK(out_peak > 500);                 /* reversed from buffer L/2 - 1: the loud half */
+        seti("trk_rev", 0);
+
+        /* overdub writes where it plays: with the start at L/2 a dub from the top lands at bin 64 */
+        CHECK(disp_peak(64) == 0 && disp_peak(66) == 0);
+        tap(STOP(1)); tap(REC(1));
+        run(2); CHECK(state(1) == S_DUB);
+        in_mode = IN_LOUD; run(10); in_mode = IN_SILENCE;
+        setstr("loop_knob", "1:1"); CHECK(!strcmp(status_text(), "START 1 LOCKED"));   /* not while dubbing */
+        CHECK(abs(gett(1, "off") - 44100) <= 3);
+        tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
+        tap(STOP(1)); run(1);
+        CHECK(disp_peak(64) > 0);                                     /* the dub is at buffer L/2... */
+        CHECK(disp_peak(10) > 100 && disp_peak(100) == 0);            /* ...and the rest of the loop is as recorded */
+        /* undo of the dub restores the quiet half, clear + undo restores the start */
+        tap(M_UNDO); run(200); CHECK(disp_peak(64) == 0);
+        tap(M_UNDO); run(200);
+        seti("delete_pad", REC(1) - 36); CHECK(state(1) == S_EMPTY);
+        CHECK(gett(1, "off") == 0 && disp_mark() == -1);
+        tap(M_UNDO); CHECK(state(1) == S_STOP); CHECK(abs(gett(1, "off") - 44100) <= 3);
+        seti("delete_pad", REC(1) - 36); tap(M_UNDO);
+        /* a moved start is shown on the display even after the readout fades */
+        in_mode = IN_SINE; run(1200); in_mode = IN_SILENCE;
+        CHECK(abs(disp_mark() - 63) <= 2 && strncmp(disp_head(), "START", 5) != 0);
+    }
+
+    /* --- persistence: loops survive a reload --- */
+    {
+        char dir[300], id1[32], blob[8192];
+        fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
+        snprintf(id1, sizeof id1, "%s", getstr("loop_id"));
+        CHECK(strlen(id1) == 12);
+        char first_id[32]; snprintf(first_id, sizeof first_id, "%s", id1);
+        fresh(&host); seti("quantize", 0);
+        CHECK(strcmp(getstr("loop_id"), first_id) != 0);              /* every instance has its own id */
+        snprintf(id1, sizeof id1, "%s", getstr("loop_id"));
+        snprintf(dir, sizeof dir, "%s/%s", pdir, id1);
+        setstr("step", "0");
+        seti("rec_len", 1); seti("count_in", 1); seti("count_in", 0);
+        tap(REC(1)); run(800); run(2);                                /* a 1 bar loop on track 1 (closes itself) */
+        in_mode = IN_SINE;
+        tap(REC(2)); run(200); tap(REC(2)); run(2);                   /* a short one on track 2 */
+        seti("rec_len", 3);
+        sett(2, "rev", 1); setstr("loop_knob", "1:4"); tap(MUTE(3));
+        int len1 = gett(1, "len"), len2 = gett(2, "len"), off1 = gett(1, "off");
+        CHECK(len1 > 0 && len2 > 0 && off1 > 20000);
+        CHECK(!file_exists(dir, "t1.wav"));                           /* nothing is written on the audio/control thread */
+        wait_until_saved(dir, "loops.json", 3000);
+        CHECK(file_exists(dir, "t1.wav") && file_exists(dir, "t2.wav") && file_exists(dir, "loops.json"));
+        CHECK(!file_exists(dir, "t3.wav"));
+        { /* the saved WAV is plain 16-bit stereo 44.1k */
+          char path[400]; snprintf(path, sizeof path, "%s/t2.wav", dir);
+          struct stat st; CHECK(stat(path, &st) == 0 && st.st_size == 44 + (off_t)len2 * 4); }
+        /* the state Movy stores carries the id and the shim settings */
+        A->get_param(S, "state", blob, sizeof blob);
+        CHECK(strstr(blob, id1) != NULL && strstr(blob, "\"l6rl\":3") != NULL);
+        /* close and reopen: a fresh instance given that state restores the loops, stopped */
+        fresh(&host);
+        CHECK(state(1) == S_EMPTY);
+        A->set_param(S, "state", blob);
+        for (int w = 0; w < 60 && state(1) == S_EMPTY; w++) usleep(50000);
+        CHECK(state(1) == S_STOP && state(2) == S_STOP && state(3) == S_EMPTY);
+        CHECK(gett(1, "len") == len1 && gett(2, "len") == len2);
+        CHECK(gett(1, "off") == off1);                                /* the clip start came back too */
+        CHECK(!strcmp(getstr("loop_id"), id1));
+        CHECK(geti("rec_len") == 3 && gett(2, "rev") == 1);
+        { char b[100]; A->get_param(S, "pad_leds", b, sizeof b);      /* mute 3 restored: its mute pad is grey */
+          char hx[3] = { b[(MUTE(3) - 36) * 2], b[(MUTE(3) - 36) * 2 + 1], 0 };
+          CHECK(strtol(hx, NULL, 16) == 119 && geti("t3_level") == 100); }
+        tap(STOP(1)); run(4);
+        out_peak = 0; run(30); CHECK(state(1) == S_PLAY && out_peak > 100);   /* and it plays */
+        /* nothing was re-saved just because it was restored */
+        struct stat st0; char jp[400]; snprintf(jp, sizeof jp, "%s/loops.json", dir); stat(jp, &st0);
+        usleep(700000);
+        struct stat st1; stat(jp, &st1);
+        CHECK(st0.st_mtime == st1.st_mtime);
+        /* a change is saved after it settles: clear track 2 deletes its file */
+        seti("delete_pad", REC(2) - 36);
+        for (int w = 0; w < 60 && file_exists(dir, "t2.wav"); w++) usleep(50000);
+        CHECK(!file_exists(dir, "t2.wav") && file_exists(dir, "t1.wav"));
+        /* closing flushes what is still unsaved */
+        tap(REC(4)); run(150); tap(REC(4)); run(2);
+        CHECK(!file_exists(dir, "t4.wav"));
+        fresh(&host);                                                  /* destroys the previous instance */
+        CHECK(file_exists(dir, "t4.wav"));
+        /* a state with another id on an instance that already holds loops does not clobber them */
+        tap(REC(1)); run(100); tap(REC(1)); run(2);
+        snprintf(blob, sizeof blob, "{\"q\":0,\"l6id\":\"abcdef012345\",\"l6rl\":2}");
+        A->set_param(S, "state", blob); usleep(400000);
+        CHECK(strcmp(getstr("loop_id"), "abcdef012345") != 0 && state(1) != S_EMPTY);
+        /* an id that is not hex (path tricks) is never used */
+        fresh(&host);
+        snprintf(blob, sizeof blob, "{\"q\":0,\"l6id\":\"../../etc\",\"l6rl\":2}");
+        A->set_param(S, "state", blob); usleep(300000);
+        CHECK(strchr(getstr("loop_id"), '/') == NULL && strlen(getstr("loop_id")) == 12);
+        /* a fresh Set (no folder for that id) just starts empty, and saves under that id from then on */
+        fresh(&host);
+        snprintf(blob, sizeof blob, "{\"q\":0,\"l6id\":\"0123456789ab\",\"l6rl\":0}");
+        A->set_param(S, "state", blob); usleep(400000);
+        CHECK(state(1) == S_EMPTY && !strcmp(getstr("loop_id"), "0123456789ab"));
+        tap(REC(5)); run(100); tap(REC(5)); run(2);
+        snprintf(dir, sizeof dir, "%s/0123456789ab", pdir);
+        wait_until_saved(dir, "t5.wav", 3000);
+        CHECK(file_exists(dir, "t5.wav"));
+        /* a damaged folder is never overwritten */
+        { char path[400]; snprintf(path, sizeof path, "%s/t5.wav", dir); FILE *f = fopen(path, "wb"); fputs("junk", f); fclose(f); }
+        fresh(&host);
+        A->set_param(S, "state", blob); usleep(400000);
+        CHECK(state(5) == S_EMPTY);
+        tap(REC(1)); run(100); tap(REC(1)); run(2); usleep(900000);
+        { char path[400]; snprintf(path, sizeof path, "%s/t5.wav", dir); struct stat st; CHECK(stat(path, &st) == 0 && st.st_size == 4); }
+        fresh(&host);
+    }
+
     /* --- nothing crashes on garbage --- */
     uint8_t junk[3] = {0x90, 200, 100}; A->on_midi(S, junk, 3, 0);
     A->set_param(S, "nonsense", "1");
     A->destroy_instance(S);
+    { char cmd[300]; snprintf(cmd, sizeof cmd, "rm -rf %s", pdir); if (system(cmd)) {} }
     printf("%d checks, %d failures, %d log lines\n", checks, fails, nlogs);
     puts(fails ? "FAILED" : "OK");
     return fails != 0;
