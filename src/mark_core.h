@@ -1,4 +1,6 @@
 /*
+ * Original work (c) 2026 Tim Cox, MIT (see LICENSE-mark). Modified for Looper 606.
+ *
  * Mark — RC-505-style 5-track live looper for the Ableton Move (schwung).
  *
  * Five independent stereo loop tracks, each cycling record -> play ->
@@ -28,7 +30,7 @@
 #endif
 
 #ifndef MARK_TRACKS
-#define MARK_TRACKS  5
+#define MARK_TRACKS  6
 #endif
 
 /*
@@ -88,7 +90,7 @@
  * mark_create() falls back to smaller capacities if allocation fails
  * (see mark_alloc_seconds). */
 #ifndef MARK_MAX_SECONDS
-#define MARK_MAX_SECONDS 60
+#define MARK_MAX_SECONDS 120
 #endif
 
 /* Track states, exposed via the `tstates` getter in this order. */

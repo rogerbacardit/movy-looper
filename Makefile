@@ -1,6 +1,6 @@
 CC ?= cc
-# Per-track capacity target in seconds (6 tracks x stereo int16 + undo buffer).
-MARK_SECONDS ?= 30
+# Per-track capacity target in seconds (6 tracks x stereo int16 + undo buffer); 120 s = ~21 MB/track, ~148 MB total.
+MARK_SECONDS ?= 120
 CFLAGS = -O2 -g -Wall -Wextra -Iinclude -Isrc -DMARK_TRACKS=6 -DMARK_MAX_SECONDS=$(MARK_SECONDS)
 
 ifeq ($(shell uname -s),Darwin)
@@ -11,14 +11,11 @@ endif
 
 .PHONY: test-synth arm-synth module-json clean
 
-build/mark_core6.c: src/mark_core.c scripts/patch-core.sh
-	./scripts/patch-core.sh
-
-test-synth: build/mark_core6.c
+test-synth:
 	@mkdir -p build
-	$(CC) $(CFLAGS) -fPIC $(SHARED_FLAGS) build/mark_core6.c src/looper_synth.c -o build/movy-looper-host.so -lm -lpthread -ldl
+	$(CC) $(CFLAGS) -fPIC $(SHARED_FLAGS) src/mark_core.c src/looper_synth.c -o build/looper-606-host.so -lm -lpthread -ldl
 	$(CC) $(CFLAGS) test/synth_smoke.c -o build/synth_smoke -ldl -lm
-	./build/synth_smoke build/movy-looper-host.so build/hierarchy.json
+	./build/synth_smoke build/looper-606-host.so build/hierarchy.json
 	python3 scripts/check-hierarchy.py build/hierarchy.json module.json
 
 module-json:

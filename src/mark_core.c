@@ -1,9 +1,18 @@
 /*
  * Mark core engine. See mark_core.h for the model.
  *
+ * Original work (c) 2026 Tim Cox, MIT (https://github.com/timncox/schwung-mark),
+ * see LICENSE-mark. Modified for Looper 606 (fork; changes marked "L606"):
+ *   - MARK_TRACKS=6 supported natively (per-track key router no longer
+ *     hard-codes tracks 1..5).
+ *   - CLEAR is undoable (undo kind 2: the track buffer is parked in the undo
+ *     slot by a pointer swap, O(1)).
+ *   - Per-track tape-style varispeed (1/2x, 1x, 2x; pitch follows speed).
+ *
  * v1 simplifications (documented follow-ups, not accidents):
- *   - Playback is speed 1.0 only: no tempo-sync time-stretch or varispeed.
- *     Tracks recorded at one tempo drift against a changed clock tempo.
+ *   - Playback is speed 1.0 unless varispeed is set: no tempo-sync
+ *     time-stretch. Tracks recorded at one tempo drift against a changed
+ *     clock tempo.
  *   - Record/pending actions land on a block boundary (<= 2.9 ms early/late)
  *     when driven by the clocked measure flag; base-track boundaries are
  *     frame-accurate.
@@ -43,8 +52,8 @@
 #endif
 
 /* Allocation fallback ladder: first capacity that calloc grants wins. */
-static const int alloc_seconds[] = { MARK_MAX_SECONDS, 45, 30, 20, 15 };
-#define ALLOC_STEPS 5
+static const int alloc_seconds[] = { MARK_MAX_SECONDS, 90, 60, 45, 30, 20, 15 };  /* L606 */
+#define ALLOC_STEPS 7
 
 /* Incremental undo-swap budget per 128-frame block. 32768 frames is ~0.5 MB
  * of traffic — comfortably inside the render budget, and a full 60 s swap
@@ -157,6 +166,7 @@ typedef struct {
     int      level;        /* 0..200, 100 = unity (RC play level) */
     int      pan;          /* 0..100, 50 = center */
     int      rev, shot;
+    int      spd;          /* L606 varispeed: 0 = 1/2x, 1 = 1x, 2 = 2x */
     float    g_cur;        /* smoothed level gain */
     float    pg[2];        /* balance gains L/R */
 
@@ -188,7 +198,9 @@ struct mark {
     /* Undo: single level, last record/overdub gesture wins.
      * kind 0 = overdub (undo_buf holds the pre-dub audio for the covered
      * region; undo = incremental swap, so redo is the same swap again).
-     * kind 1 = first recording (undo = clear, redo = restore length). */
+     * kind 1 = first recording (undo = clear, redo = restore length).
+     * kind 2 = CLEAR (L606): the cleared track's buffer was parked in
+     * undo_buf by a pointer swap; undo swaps it back (redo clears again). */
     int      undo_track;         /* -1 = none */
     int      undo_kind;
     int      undo_redo;          /* 0 = next undo press undoes, 1 = redoes */
@@ -196,6 +208,7 @@ struct mark {
     uint32_t undo_start;         /* loop frame where the dub began */
     uint32_t undo_count;         /* frames captured, capped at len */
     uint32_t undo_saved_len;     /* kind 1: length to restore on redo */
+    uint32_t undo_saved_full;    /* kind 2: full_len of the parked loop */
     int      swap_track;         /* -1 = no swap job running */
     uint32_t swap_pos;
 
@@ -492,7 +505,23 @@ static void track_fx_reset(mk_track_t *t);
  * remembered tempo unless the user set a bpm_override (smack lesson:
  * clock_seen is sticky and would silently eat the override forever). */
 static int clock_governs(const mark_t *m) {
-    return m->clock_seen && (m->clock_running || m->bpm_override <= 0.0f);
+    if (!m->clock_seen) return 0;
+    if (m->clock_running) return 1;
+    /* L606: a stopped clock only keeps its remembered tempo when nothing
+     * better exists; the host's live tempo wins over a stale estimate. */
+    return m->bpm_override <= 0.0f && !(m->host && m->host->get_bpm);
+}
+
+/* L606: where the tempo comes from, in priority order. 0 = built-in 120
+ * default, 1 = host get_bpm(), 2 = MIDI clock, 3 = bpm_override. */
+static int tempo_source(const mark_t *m) {
+    if (clock_governs(m)) return 2;
+    if (m->bpm_override > 0.0f) return 3;
+    if (m->host && m->host->get_bpm) {
+        float b = m->host->get_bpm();
+        if (b >= 20.0f && b <= 999.0f) return 1;
+    }
+    return 0;
 }
 
 static double frames_per_tick_now(const mark_t *m) {
@@ -542,10 +571,13 @@ static double locked_unit(const mark_t *m) {
 /* Lowest-numbered track currently playing or overdubbing — its position
  * IS the live grid every pending action aligns to. */
 static mk_track_t *base_playing(mark_t *m) {
+    mk_track_t *any = NULL;
     for (int i = 0; i < MARK_TRACKS; i++)
-        if (m->t[i].len > 0 && (m->t[i].st == MK_PLAY || m->t[i].st == MK_DUB))
-            return &m->t[i];
-    return NULL;
+        if (m->t[i].len > 0 && (m->t[i].st == MK_PLAY || m->t[i].st == MK_DUB)) {
+            if (m->t[i].spd == 1) return &m->t[i];   /* L606: grid follows a 1x track */
+            if (!any) any = &m->t[i];
+        }
+    return any;
 }
 
 static int any_content(const mark_t *m) {
@@ -941,6 +973,7 @@ mark_t *mark_create_in_dir(const host_api_v1_t *host, const char *module_dir) {
         m->t[i].level = 100;
         m->t[i].pan = 50;
         m->t[i].g_cur = 1.0f;
+        m->t[i].spd = 1;
         m->t[i].fx = TFX_LPF;      /* a sensible default once switched on */
         m->t[i].fxp = 50;
         m->t[i].fx_dirty = 1;
@@ -1194,6 +1227,15 @@ void mark_on_midi(mark_t *m, const uint8_t *msg, int len, int source) {
 /*  Track actions                                                      */
 /* ------------------------------------------------------------------ */
 
+/* L606 varispeed: playback rate in frames per output frame. */
+static inline double spd_rate(const mk_track_t *t) {
+    return t->spd == 0 ? 0.5 : t->spd == 2 ? 2.0 : 1.0;
+}
+
+/* No overdub on reversed or varispeed tracks: the write head would skip or
+ * repeat frames, and the undo capture assumes a contiguous region. */
+static inline int no_dub(const mk_track_t *t) { return t->rev || t->spd != 1; }
+
 static void reset_undo(mark_t *m) {
     m->undo_track = -1;
     m->undo_capturing = 0;
@@ -1282,7 +1324,7 @@ static void finalize_record(mark_t *m, int ti, uint32_t final_len, int end_state
     t->pos = 0.0;
     t->st = end_state;
     if (end_state == MK_DUB) {
-        if (t->rev) t->st = MK_PLAY;    /* no overdub on reversed tracks */
+        if (no_dub(t)) t->st = MK_PLAY; /* no overdub on reversed/varispeed tracks */
         else begin_dub_gesture(m, ti);
     }
     if (t->st == MK_PLAY || t->st == MK_DUB) solo_stop_others(m, ti);
@@ -1299,7 +1341,7 @@ static void finalize_record(mark_t *m, int ti, uint32_t final_len, int end_state
  * none of those the 120 BPM placeholder is not a tempo, and the first loop
  * is free-length -- the RC's rule for the stop as well as the start. */
 static int have_tempo_reference(const mark_t *m) {
-    return base_playing(m) != NULL || m->grid_unit > 0.0
+    return base_playing((mark_t *)m) != NULL || m->grid_unit > 0.0
         || (m->clock_seen && m->clock_running)
         || m->bpm_override > 0.0f
         || (m->host && m->host->get_bpm);
@@ -1359,7 +1401,7 @@ static void track_button(mark_t *m, int ti) {
         request_finish(m, ti, m->rec_action ? MK_DUB : MK_PLAY);
         break;
     case MK_PLAY:
-        if (t->rev) break;                    /* no overdub on reversed tracks */
+        if (no_dub(t)) break;                 /* no overdub on reversed/varispeed tracks */
         t->st = MK_DUB;
         begin_dub_gesture(m, ti);
         m->edit_rev++;
@@ -1450,7 +1492,26 @@ static void track_setlen16(mark_t *m, int ti, int n16) {
 static void track_clear(mark_t *m, int ti) {
     mk_track_t *t = &m->t[ti];
     if (m->io_busy) return;
+    /* L606: make CLEAR undoable. Park the loop in the undo slot by swapping
+     * buffer pointers (O(1), render path untouched). Skipped when the track
+     * holds nothing, is recording, or an undo swap on another track is in
+     * flight (that swap owns undo_buf). The cleared track's own swap is
+     * abandoned first, exactly as the plain clear does. */
     if (m->swap_track == ti) m->swap_track = -1;
+    if (t->len > 0 && t->st != MK_REC && m->swap_track < 0) {
+        int16_t *tmp = t->buf;
+        t->buf = m->undo_buf;
+        m->undo_buf = tmp;
+        m->undo_track = ti;
+        m->undo_kind = 2;
+        m->undo_redo = 0;
+        m->undo_capturing = 0;
+        m->undo_count = 0;
+        m->undo_saved_len = t->len;
+        m->undo_saved_full = t->full_len;
+    } else if (m->undo_track == ti) {
+        reset_undo(m);
+    }
     t->st = MK_EMPTY;
     t->len = 0;
     t->full_len = 0;
@@ -1459,7 +1520,6 @@ static void track_clear(mark_t *m, int ti) {
     t->pending = 0;
     t->pos = 0.0;
     track_fx_reset(t);
-    if (m->undo_track == ti) reset_undo(m);
     if (!any_content(m)) {
         m->grid_unit = 0.0;
         m->transport_paused = 0;
@@ -1497,6 +1557,36 @@ static void all_button(mark_t *m) {
 static void undo_press(mark_t *m) {
     if (m->undo_track < 0 || m->swap_track >= 0 || m->io_busy) return;
     mk_track_t *t = &m->t[m->undo_track];
+    if (m->undo_kind == 2) {          /* L606: undo / redo of a CLEAR */
+        if (t->st == MK_REC) return;
+        int16_t *tmp = t->buf; t->buf = m->undo_buf; m->undo_buf = tmp;
+        if (!m->undo_redo) {          /* undo: loop comes back, stopped */
+            t->len = m->undo_saved_len;
+            t->full_len = m->undo_saved_full;
+            t->st = MK_STOP;
+            t->pos = 0.0;
+            t->pending = 0;
+            m->undo_redo = 1;
+            if (m->grid_unit <= 0.0 && t->len) {
+                double g = frames_per_measure(m);
+                double k = floor(((double)t->len / g) + 0.5);
+                if (k < 1.0) k = 1.0;
+                m->grid_unit = (double)t->len / k;
+            }
+        } else {                      /* redo: clear again */
+            m->undo_saved_len = t->len;
+            m->undo_saved_full = t->full_len;
+            t->len = 0;
+            t->full_len = 0;
+            t->st = MK_EMPTY;
+            t->pos = 0.0;
+            t->pending = 0;
+            m->undo_redo = 0;
+            if (!any_content(m)) m->grid_unit = 0.0;
+        }
+        m->edit_rev++;
+        return;
+    }
     if (m->undo_kind == 1) {
         if (!m->undo_redo) {          /* undo the first recording: clear */
             m->undo_saved_len = t->len;
@@ -1749,11 +1839,11 @@ static void *io_worker(void *arg) {
                     ? (t->full_len > t->len ? t->full_len : t->len) : 0;
                 fprintf(f, ",\"l%d\":%u,\"F%d\":%u,\"v%d\":%d,\"p%d\":%d,"
                            "\"r%d\":%d,\"s%d\":%d,\"f%d\":%d,\"o%d\":%d,"
-                           "\"g%d\":%d,\"x%d\":\"%s\"",
+                           "\"g%d\":%d,\"w%d\":%d,\"x%d\":\"%s\"",
                         i + 1, t->len, i + 1, full, i + 1, t->level,
                         i + 1, t->pan, i + 1, t->rev, i + 1, t->shot,
                         i + 1, t->fx, i + 1, t->fx_on, i + 1, t->fxp,
-                        i + 1, job->fx_id[i]);
+                        i + 1, t->spd, i + 1, job->fx_id[i]);
             }
             for (int i = 0; i < MARK_TRACKS; i++)
                 if (job->fx_state[i][0])
@@ -1815,6 +1905,8 @@ static void *io_worker(void *arg) {
                 t->rev = json_int(js, k, 0) ? 1 : 0;
                 snprintf(k, sizeof(k), "s%d", i + 1);
                 t->shot = json_int(js, k, 0) ? 1 : 0;
+                snprintf(k, sizeof(k), "w%d", i + 1);
+                t->spd = clampi(json_int(js, k, 1), 0, 2);
                 snprintf(k, sizeof(k), "f%d", i + 1);
                 t->fx = clampi(json_int(js, k, TFX_LPF), 0, TFX_COUNT - 1);
                 snprintf(k, sizeof(k), "o%d", i + 1);
@@ -2126,7 +2218,7 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
         mk_track_t *base = base_playing(m);
         if (base && !paused) {
             double g = m->grid_unit > 0.0 ? m->grid_unit : frames_per_measure(m);
-            if (g >= 1.0 && fmod(base->pos, g) < 1.0) boundary = 1;
+            if (g >= 1.0 && fmod(base->pos, g) < spd_rate(base)) boundary = 1;
         } else if (use_measure_flag && n == 0) {
             boundary = 1;
         }
@@ -2193,7 +2285,24 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
             if (ip >= t->len) ip = t->len - 1;
             uint32_t rp = t->rev ? (t->len - 1 - ip) : ip;
             float l, r;
-            tbuf_load(t->buf, rp, &l, &r);
+            if (t->spd == 1) {
+                tbuf_load(t->buf, rp, &l, &r);
+            } else {
+                /* L606 varispeed read: linear interpolation between the two
+                 * frames around the (fractional) head, wrapping at the loop
+                 * end. Reverse mirrors the head. */
+                double hp = t->pos;
+                if (hp >= (double)t->len) hp = (double)t->len - 1.0;
+                double x = t->rev ? ((double)t->len - 1.0 - hp) : hp;
+                if (x < 0.0) x = 0.0;
+                uint32_t i0 = (uint32_t)x;
+                uint32_t i1 = i0 + 1 >= t->len ? 0 : i0 + 1;
+                float fr = (float)(x - (double)i0), l1, r1;
+                tbuf_load(t->buf, i0, &l, &r);
+                tbuf_load(t->buf, i1, &l1, &r1);
+                l += (l1 - l) * fr;
+                r += (r1 - r) * fr;
+            }
 
             if (t->st == MK_DUB) {
                 /* capture-before-write; writes run sequentially from the
@@ -2229,9 +2338,10 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
                 }
             }
 
-            t->pos += 1.0;
+            t->pos += spd_rate(t);
             if (t->pos >= (double)t->len) {
-                t->pos = 0.0;
+                t->pos -= (double)t->len;
+                if (t->pos >= (double)t->len || t->pos < 0.0) t->pos = 0.0;
                 if (t->shot) {       /* one-shot: play once, then stop */
                     if (t->st == MK_DUB) end_dub_capture(m, i);
                     t->st = MK_STOP;
@@ -2329,7 +2439,7 @@ void mark_set_param(mark_t *m, const char *key, const char *val) {
     if (m->io_busy) return;
 
     /* per-track keys: t<1-5>_... */
-    if (key[0] == 't' && key[1] >= '1' && key[1] <= '5' && key[2] == '_') {
+    if (key[0] == 't' && key[1] >= '1' && key[1] <= '0' + MARK_TRACKS && key[2] == '_') {
         int ti = key[1] - '1';
         const char *k = key + 3;
         mk_track_t *t = &m->t[ti];
@@ -2342,7 +2452,16 @@ void mark_set_param(mark_t *m, const char *key, const char *val) {
         if (!strcmp(k, "pan"))   { t->pan = clampi(atoi(val), 0, 100); update_track_gains(t); m->edit_rev++; return; }
         if (!strcmp(k, "rev")) {
             t->rev = atoi(val) ? 1 : 0;
-            if (t->rev && t->st == MK_DUB) {   /* RC rule: no dub while reversed */
+            if (no_dub(t) && t->st == MK_DUB) {   /* RC rule: no dub while reversed */
+                t->st = MK_PLAY;
+                end_dub_capture(m, ti);
+            }
+            m->edit_rev++;
+            return;
+        }
+        if (!strcmp(k, "spd")) {            /* L606: 0 = 1/2x, 1 = 1x, 2 = 2x */
+            t->spd = clampi(atoi(val), 0, 2);
+            if (no_dub(t) && t->st == MK_DUB) {
                 t->st = MK_PLAY;
                 end_dub_capture(m, ti);
             }
@@ -2534,7 +2653,7 @@ static int g_fxp(const mk_track_t *t)   { return t->fxp; }
 int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
     if (!m || !key || !buf || buf_len < 2) return -1;
 
-    if (key[0] == 't' && key[1] >= '1' && key[1] <= '5' && key[2] == '_') {
+    if (key[0] == 't' && key[1] >= '1' && key[1] <= '0' + MARK_TRACKS && key[2] == '_') {
         int ti = key[1] - '1';
         const char *k = key + 3;
         const mk_track_t *t = &m->t[ti];
@@ -2542,6 +2661,7 @@ int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
         if (!strcmp(k, "pan"))   return snprintf(buf, (size_t)buf_len, "%d", t->pan);
         if (!strcmp(k, "rev"))   return snprintf(buf, (size_t)buf_len, "%d", t->rev);
         if (!strcmp(k, "shot"))  return snprintf(buf, (size_t)buf_len, "%d", t->shot);
+        if (!strcmp(k, "spd"))   return snprintf(buf, (size_t)buf_len, "%d", t->spd);
         if (!strcmp(k, "len"))   return snprintf(buf, (size_t)buf_len, "%u", t->len);
         if (!strcmp(k, "state")) return snprintf(buf, (size_t)buf_len, "%d", t->st);
         if (!strcmp(k, "fx"))    return snprintf(buf, (size_t)buf_len, "%d", t->fx);
@@ -2584,6 +2704,13 @@ int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
         return -1;
     }
 
+    if (!strcmp(key, "tempo_src"))
+        return snprintf(buf, (size_t)buf_len, "%d", tempo_source(m));
+    if (!strcmp(key, "tempo_bpm"))
+        return snprintf(buf, (size_t)buf_len, "%.1f",
+                        (double)MARK_SR * 60.0 / (frames_per_tick_now(m) * 24.0));
+    if (!strcmp(key, "track_secs"))
+        return snprintf(buf, (size_t)buf_len, "%u", m->track_frames / MARK_SR);
     if (!strcmp(key, "tstates")) return track_csv(m, buf, buf_len, g_state);
     if (!strcmp(key, "fx_catalog")) {
         int n = 0;
