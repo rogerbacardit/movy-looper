@@ -114,6 +114,8 @@ typedef struct {
     long in_frames;                /* frames rendered so far (diagnostics) */
     int  in_peak_1s;               /* raw input peak over the first second */
     int  in_diag_done;             /* the "peak after 1 s" line was logged */
+    int  arm_diag_frames, arm_diag_peak;  /* armed: 1 s input-peak log */
+    int  pend_seen[NTRK];          /* pending was logged for this track */
     int  in_peak_now;              /* raw peak of the last block (get_param in_peak) */
     int  bpm_src_logged;           /* last tempo source logged (-1 = none yet) */
     long pend_frames[NTRK];        /* frames a track has been waiting on the grid */
@@ -500,7 +502,7 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
         int st = n->st[i];
         if (s->armed[i])        return LED_BLINK | L_ORANGE;
         if (s->countin[i] >= 0) return LED_BLINK | L_BRIGHT_YELLOW;
-        if (st == MK_EMPTY)     return n->pend[i] ? (LED_BLINK | TRK_BRIGHT[i]) : TRK_VDIM[i];
+        if (st == MK_EMPTY)     return n->pend[i] ? (LED_BLINK | L_RED) : TRK_VDIM[i];  /* waiting on the grid: red blink, armed = orange */
         switch (st) {
         case MK_REC:  return L_RED;
         case MK_DUB:  return L_PURPLE;
@@ -1015,12 +1017,33 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
     }
     /* ARM: threshold crossing starts recording; count-in expiry too */
     int thr = s->threshold * 32768 / 100;
+    {
+        int any_armed = 0;
+        for (int t = 0; t < NTRK; t++) any_armed |= s->armed[t];
+        if (any_armed) {
+            if (peak > s->arm_diag_peak) s->arm_diag_peak = peak;
+            s->arm_diag_frames += frames;
+            if (s->arm_diag_frames >= MARK_SR) {
+                hlog("looper-606: armed, input peak (after gain %d%%) = %d, threshold = %d (%d%%)",
+                     s->in_gain, s->arm_diag_peak, thr, s->threshold);
+                s->arm_diag_frames = 0; s->arm_diag_peak = 0;
+            }
+        } else { s->arm_diag_frames = 0; s->arm_diag_peak = 0; }
+    }
     for (int t = 1; t <= NTRK; t++) {
         int i = t - 1;
         if (s->armed[i] && peak >= thr) {
             s->armed[i] = 0; s->rec_fired[i] = 0;
             say_rec(s, t);
-            trig_t(s, t, "btn");
+            hlog("looper-606: armed track %d crossed threshold (peak %d >= %d), recording now", t, peak, thr);
+            /* The input IS the timing: never wait for a bar boundary (a stale
+             * or stopped clock would hold the track pending forever). */
+            {
+                int q = get_i(s, "quantize");
+                set_i(s, "quantize", 0);
+                trig_t(s, t, "btn");
+                set_i(s, "quantize", q);
+            }
         }
         if (s->countin[i] >= 0) {
             s->countin[i] -= frames;
@@ -1033,6 +1056,13 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
     }
     mark_process(s->m, buf, out, frames);
     s->clock_frames += frames;
+    for (int t = 1; t <= NTRK; t++) {
+        int pnd = core_state(s, t) == MK_EMPTY && core_pending(s, t);
+        if (pnd != s->pend_seen[t - 1]) {
+            s->pend_seen[t - 1] = pnd;
+            hlog("looper-606: track %d %s", t, pnd ? "pending (waiting for the grid)" : "pending resolved");
+        }
+    }
 
     /* Tempo source, logged once (and again only if it changes). */
     {
@@ -1099,15 +1129,18 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
      * (peak <= 4) and only renders it every ~0.5 s; its idle gate ignores a
      * synth's requires_continuous_processing. A looper must keep running
      * (loop positions, armed threshold, count-in, quantize), so while any
-     * track is in use we add a +-6 LSB Nyquist dither (about -74 dBFS). */
+     * track is in use we add a +-8 LSB Nyquist dither (about -72 dBFS; the gate measures the raw synth
+     * output, before FX/volume, and treats <= 4 as silence). */
     {
         int active = 0;
         for (int t = 1; t <= NTRK && !active; t++)
-            if (core_state(s, t) != MK_EMPTY || s->armed[t - 1] || s->countin[t - 1] >= 0)
+            if (core_state(s, t) != MK_EMPTY || s->armed[t - 1] || s->countin[t - 1] >= 0 ||
+                core_pending(s, t))
                 active = 1;
+        if (s->arm) active = 1;     /* ARM on: stay awake before the pad is even pressed */
         if (active)
             for (int n = 0; n < frames; n++) {
-                int d = (n & 1) ? -6 : 6, l = out[n * 2] + d, r = out[n * 2 + 1] + d;
+                int d = (n & 1) ? -8 : 8, l = out[n * 2] + d, r = out[n * 2 + 1] + d;
                 out[n * 2]     = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
                 out[n * 2 + 1] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r);
             }

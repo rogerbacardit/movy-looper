@@ -302,6 +302,25 @@ int main(int argc, char **argv) {
     run(1500); CHECK(got_timeout_log); CHECK(state(1) == S_REC);    /* watchdog released it */
     { uint8_t st = 0xFC; A->on_midi(S, &st, 1, 3); }
 
+    /* --- ARM + stale clock + sparse rendering (device bug: armed forever) --- */
+    fresh(&host);
+    { uint8_t st = 0xFA; A->on_midi(S, &st, 1, 3); }                /* clock started, never ticks */
+    in_mode = IN_SILENCE; run(2);
+    tap(M_ARM); run(400); tap(REC(1)); CHECK(state(1) == S_ARMED);
+    in_mode = IN_SINE; run(1);
+    CHECK(state(1) == S_REC);
+    tap(REC(1)); run(2);
+    { uint8_t st = 0xFC; A->on_midi(S, &st, 1, 3); }
+    /* sparse rendering: the host only renders every 172nd block once parked */
+    fresh(&host);
+    in_mode = IN_SILENCE; run(2);
+    tap(M_ARM); run(400); tap(REC(2)); CHECK(state(2) == S_ARMED);
+    out_peak = 0; run(20); CHECK(out_peak > 4);                     /* keep-alive above the gate's silence level */
+    in_mode = IN_SINE;
+    for (int k = 0; k < 3 && state(2) != S_REC; k++) run(1);
+    CHECK(state(2) == S_REC);
+    tap(REC(2)); run(2);
+
     /* --- CLEAR is undoable (and redoable) --- */
     fresh(&host); seti("quantize", 0);
     tap(REC(1)); run(300); tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
