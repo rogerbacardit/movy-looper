@@ -95,15 +95,19 @@ Los loops sobreviven a cerrar/recargar Movy y a apagar la Move.
 - **Al cargar** un Set cuyo `state` trae un ID, y solo si la instancia esta vacia, el mismo hilo lee los WAV y deja las pistas en STOP (nunca pisa loops vivos). Ademas del audio vuelven largo fijo, velocidad, mute, count-in, umbral y volumen de entrada.
 - Limitaciones: un Set duplicado por Movy comparte ID con el original hasta que uno grabe algo nuevo; quitar el modulo de una pista deja su carpeta huerfana (se puede borrar a mano); una carpeta ilegible no se sobrescribe. Variables de entorno solo para tests: `LOOPER606_PERSIST_DIR`, `LOOPER606_PERSIST_DELAY_MS`.
 
-## PERFORM: efectos momentaneos en los botones de paso (v0.9.0)
+## PERFORM: efectos en los botones de paso (v0.10.0)
 
-Con **SHIFT** (pad de arriba de la columna 1) mantenido, la pantalla muestra la pagina **PERFORM**: una rejilla de 2 filas x 8 con los 16 efectos en el orden de los botones de paso (fila 1 = pasos 1-8, fila 2 = pasos 9-16; los de la fila 2 son del lote 2 y aparecen como `---`). El titulo lleva el objetivo: `PISTA 3` o `MIX`. Los LEDs de paso se iluminan por familia: azul = repeticion, cian = ritmo, violeta = tono, naranja = cinta/tiempo, gris = lote 2. Sin SHIFT los pasos siguen fijando el largo del loop igual que siempre.
+Con **SHIFT** (pad de arriba de la columna 1) mantenido, la pantalla muestra la pagina **PERFORM**: una rejilla de 4 x 4 casillas (`NN XXX`: numero y nombre de 3 letras) con los 16 efectos en el orden de los botones de paso (pasos 1-4 arriba, 13-16 abajo). El titulo lleva el objetivo: `PISTA 3` o `MIX`. Las casillas de efectos activos llevan marca: un cuadradito si estan en la pila y una banderita con visto si estan **enclavados** (latch). Los LEDs de paso se iluminan por familia: azul = repeticion, naranja = cinta/tiempo, violeta = tono y filtros, cian = ritmo, verde azulado = espacio (delay/freeze), amarillo = KILL. Sin SHIFT los pasos siguen fijando el largo del loop igual que siempre.
 
 **SHIFT + mantener el paso N** = suena el efecto N mientras se mantiene; al soltar vuelve todo exactamente como estaba y en tiempo. Objetivo: la pista seleccionada en vista PISTA, o toda la salida del looper en MIX (el objetivo se fija al pulsar). Si sueltas SHIFT con el paso aun pulsado, el efecto sigue hasta soltar el paso.
 
-Los efectos se aplican **solo al lado de lectura/salida** (un anillo de ~6 s con el audio del objetivo): nunca se escribe en los buffers del loop ni se mueve un playhead, asi que al soltar la mezcla es identica bit a bit a la que habria sin efecto (los tests lo comprueban). Entrada y salida con fundido de 4 / 12 ms, sin clicks. El monitor de entrada en directo no pasa por los efectos.
+**Latch:** dos pulsaciones del mismo paso en menos de 300 ms (SHIFT + doble toque) dejan el efecto encendido sin mantener; otro toque de ese paso lo suelta. El LED del paso parpadea mientras esta enclavado (tambien sin SHIFT, sobre los LEDs de largo) y la casilla de la rejilla lleva la banderita. Un efecto enclavado se queda en su pista original aunque cambies de PISTA a MIX u otra pista.
 
-Mientras mantienes un efecto, los 8 knobs (knob capture) son sus parametros; cada efecto recuerda sus ajustes (no se guardan al apagar). La pantalla muestra una escena animada en linea fina estilo HUD/radar que reacciona a los parametros y al nivel de audio, con casillas de lectura a la derecha.
+**Combinar:** puedes tener hasta **4 efectos a la vez** (mantenidos o enclavados; el quinto se rechaza con "PERFORM: MAX 4"). Se apilan siempre en un orden de cadena fijo, sin importar el orden en que los pulses: tiempo/repeticion (BEAT REPEAT, STUTTER, RETRIGGER, REVERSE) → tono/cinta (PITCH, HALF SPEED, TAPE STOP, TAPE START, VINYL) → filtros (LP, HP) → BITCRUSH → GATE → KILL → DELAY / FREEZE. Si dos efectos del mismo grupo de tiempo o de tono van juntos, manda el ultimo de la cadena (los dos leen la misma historia). Los knobs controlan el efecto **pulsado mas recientemente** (mientras mantienes un paso, o con SHIFT mantenido si solo quedan enclavados). La escena muestra ese efecto y, a la izquierda, etiquetas pequenas con los demas.
+
+Los efectos se aplican **solo al lado de lectura/salida** (un anillo de ~6 s con el audio de cada pista y otro de la mezcla; cada objetivo tiene su propio motor): nunca se escribe en los buffers del loop ni se mueve un playhead, asi que al soltar la mezcla es identica bit a bit a la que habria sin efecto (los tests lo comprueban). Unica excepcion: la cola de DELAY THROW, que sigue sonando tras soltar y se apaga sola; el seco vuelve exacto en cuanto termina. Entrada y salida con fundido de 4 / 12 ms (KILL 3 ms), sin clicks. El monitor de entrada en directo no pasa por los efectos.
+
+Mientras mantienes un efecto, los 8 knobs (knob capture) son sus parametros; cada efecto recuerda sus ajustes (no se guardan al apagar). Los parametros de opciones (tasa, tiempo, tamano...) saltan una opcion por click. La pantalla muestra una escena animada en linea fina estilo HUD/radar que reacciona a los parametros y al nivel de audio, con casillas de lectura a la derecha.
 
 | Paso | Efecto | Knobs | Escena |
 |---|---|---|---|
@@ -112,13 +116,21 @@ Mientras mantienes un efecto, los 8 knobs (knob capture) son sus parametros; cad
 | 3 | PITCH: desplaza el tono sin cambiar el tiempo (granular, 40 ms) | K1 -12..+12 semitonos | dial de radar semicircular con aguja |
 | 4 | BITCRUSH | K1 bits 16..2 · K2 submuestreo 1..32 | anillo que se pixela + senoide cuantizada |
 | 5 | TAPE STOP: velocidad y tono bajan hasta 0, silencio mientras se mantiene | K1 tiempo 1/4..2 pulsos | dos bobinas que frenan |
-| 6 | TAPE START: **al pulsar silencio y sube de 0 a 1 mientras se mantiene** (elegida esta semantica, no la de "subir al soltar"); tono y volumen suben juntos | K1 tiempo 1/4..2 pulsos | dos bobinas que aceleran |
-| 7 | REVERSE: lee hacia atras desde el punto de pulsacion (hasta ~2.9 s y vuelve a empezar si se mantiene mas) | - | espirales con flechas girando al reves |
-| 8 | VINYL: tono cayendo despacio como un disco que frena (no llega a parar) + ruido | K1 freno (velocidad final) · K2 crujido | disco con surcos y brazo |
+| 6 | TAPE START: al pulsar silencio y sube de 0 a 1 mientras se mantiene | K1 tiempo 1/4..2 pulsos | dos bobinas que aceleran |
+| 7 | REVERSE (`BCK`): lee hacia atras desde el punto de pulsacion (hasta ~2.9 s y vuelve a empezar) | - | espirales con flechas girando al reves |
+| 8 | VINYL: tono cayendo despacio como un disco que frena (no llega a parar) + ruido | K1 freno · K2 crujido | disco con surcos y brazo |
+| 9 | FILTER LP: paso bajo resonante (SVF de 2 polos), el cutoff sigue al knob con suavizado | K1 cutoff 30 Hz..18 kHz (exponencial) · K2 resonancia | mira/diana con linea de corte horizontal que sube y baja, zona cortada rayada, pico de resonancia y arco de frecuencia |
+| 10 | FILTER HP: igual, paso alto | K1 cutoff · K2 resonancia | igual, rayado por debajo |
+| 11 | GATE: puerta ritmica sincronizada a la rejilla del loop (abierta la primera mitad de cada celda) | K1 tasa (1/4 1/8 1/16 1/32 1/8T 1/16T) · K2 profundidad · K3 swing (retrasa las celdas impares) | rejilla de celdas que parpadean con el patron y cursor de fase |
+| 12 | DELAY THROW: la entrada llega al delay solo mientras se mantiene; los ecos siguen sonando al soltar (cola) | K1 tiempo (1/8 1/8. 1/4 1/4. 1/2) · K2 feedback (0..88 %, repeticiones cada vez mas oscuras) | anillos concentricos que se expanden, mas tenues con cada eco |
+| 13 | ECHO FREEZE: congela una rodaja en un bucle infinito con crossfade (sigue sonando sin entrada) | K1 tamano (1/16 1/8 1/4 1/2 1 pulso) | cristal/copo de nieve que crece, mas ramas con tamano mayor |
+| 14 | RETRIGGER: cada unidad de rejilla se repite su primer cuarto saltando atras al inicio de la unidad (retrigger de DJ, en tiempo) | K1 cada 1/4, 1/2, 1 compas | flechas de rebobinado en un anillo y cabezas de lectura/directo |
+| 15 | HALF SPEED: lectura a ½ o ¼ de velocidad (cae el tono) que vuelve a tiempo cada ciclo (2 o 4 pulsos) | K1 ½ / ¼ | orbita lenta con estela y orbita fantasma a velocidad normal |
+| 16 | KILL: silencio inmediato (fundido de 3 ms) mientras se mantiene | K1 parte: ALL (todo) / LOW (se van los graves, corte 400 Hz) / HIGH (se van los agudos, corte 2 kHz), 24 dB/oct | X grande con rayas de aviso; en LOW/HIGH, espectro con la zona muerta tachada |
 
-Pantalla propia: el modulo declara `screen_param` (framebuffer 128x64 de 1 bit, `"<seq>|<2048 hex>"`) y Movy lo dibuja en lugar de la onda o la pagina de knobs mientras no sea `""`. Se genera en `get_param` (nunca en `process()`), a 25 fps como maximo y solo si cambia (`src/gfx1.c`, `src/perform_ui.c`). Tambien usa `step_up_param` para saber cuando se suelta un paso. Hace falta la build `module-leds` v10 de Movy o posterior.
+Pantalla propia: el modulo declara `screen_param` (framebuffer 128x64 de 1 bit, `"<seq>|<2048 hex>"`) y Movy lo dibuja en lugar de la onda o la pagina de knobs mientras no sea `""`. Se genera en `get_param` (nunca en `process()`), a 25 fps como maximo y solo si cambia (`src/gfx1.c`, `src/perform_ui.c`). Tambien usa `step_up_param` para saber cuando se suelta un paso. Hace falta la build `module-leds` v10 de Movy o posterior (la v0.10.0 no pide cambios en Movy).
 
-Volcar fotogramas para verlos: `make perform-frames` (PBM + PNG ampliado en `build/perform-frames/`).
+Volcar fotogramas para verlos: `make perform-frames` (PBM + PNG ampliado en `build/perform-frames/`, o `FRAMES_DIR=...`).
 
 ## Knobs (paginas)
 

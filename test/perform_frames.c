@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
     note(note_of(4, 0), 1);                                   /* SHIFT held */
     run(8); dump(argv[2], "page");
     char nm[64], st[8];
-    for (int fx = 0; fx < 8; fx++) {
+    for (int fx = 0; fx < 16; fx++) {
         snprintf(st, sizeof st, "%d", fx);
         A->set_param(S, "step", st);
         for (int f = 0; f < 4; f++) {
@@ -68,6 +68,17 @@ int main(int argc, char **argv) {
         A->set_param(S, "step_up", st);
         run(20);
     }
+    /* latch two effects (double tap), then the grid shows their cells; a held third shows stacked tags */
+    static const int LAT[2] = { 8, 10 };
+    for (int i = 0; i < 2; i++) {
+        snprintf(st, sizeof st, "%d", LAT[i]);
+        A->set_param(S, "step", st); run(3); A->set_param(S, "step_up", st); run(3); A->set_param(S, "step", st); A->set_param(S, "step_up", st);
+        run(4);
+    }
+    dump(argv[2], "grid_latched");
+    A->set_param(S, "step", "12"); run(40); dump(argv[2], "combo_a"); run(60); dump(argv[2], "combo_b");
+    A->set_param(S, "step", "15"); run(30); dump(argv[2], "combo_c");
+    A->set_param(S, "step_up", "15"); A->set_param(S, "step_up", "12"); run(5);
     note(note_of(4, 0), 0);
     return 0;
 }

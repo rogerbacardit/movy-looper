@@ -126,8 +126,6 @@ typedef struct {
     int  shift_held;               /* looper SHIFT pad is down */
     perf_t *perf;                  /* PERFORM effects (perform.c), attached to the core */
     perf_ui_t pui;                 /* PERFORM graphics state (get_param path only) */
-    int  perf_step;                /* step button holding an effect, -1 = none */
-    int  perf_tgt;                 /* target frozen at the press: 0 = MIX, else the track */
     int  knob_acc[9];              /* detent accumulators of the enum knobs */
     int  last_knob;                /* last PISTA knob touched (display view) */
     char pista_lab[24];            /* readout of the last PISTA knob ("IN +8/16") */
@@ -521,21 +519,23 @@ static void pista_select(synth_t *s, int t) {
 }
 
 /* ---- PERFORM (perform.c): SHIFT + a held step = a momentary effect --------
- * Steps 1..8 are batch 1; 9..16 are reserved for batch 2 and do nothing yet.
- * The target is frozen at the press: the selected track in PISTA, the whole mix
- * in MIX. Releasing SHIFT while the step is still down keeps the effect. */
-#define PERF_STEPS PF_NFX
+ * Steps 1..16 are the 16 effects. The target is frozen at the press: the selected
+ * track in PISTA, the whole mix in MIX (a latched effect keeps its own target when
+ * the selection changes). Two presses within 300 ms latch it; another tap releases.
+ * Up to 4 effects at once, run in a fixed chain order. Releasing SHIFT while the
+ * step is still down keeps the effect. */
 static void perf_step_down(synth_t *s, int button) {
-    if (button < 0 || button >= PERF_STEPS || !s->perf) return;
-    mark_set_perf_target(s->m, s->sel);
-    s->perf_step = button;
-    s->perf_tgt = s->sel;
-    perf_set_want(s->perf, button);
+    if (button < 0 || button >= PF_NFX || !s->perf) return;
+    int r = perf_press(s->perf, button, s->sel, s->clock_frames);
+    if (r == PF_P_REFUSED) say(s, "PERFORM: MAX %d", PF_MAXSTACK);
+    else if (r == PF_P_LATCHED) say(s, "%s LATCHED", perf_name(button));
+    else if (r == PF_P_UNLATCHED) say(s, "%s OFF", perf_name(button));
 }
-static void perf_step_up(synth_t *s, int button) {
-    if (s->perf_step != button) return;          /* an older step let go: the newer one still holds */
-    s->perf_step = -1;
-    perf_set_want(s->perf, -1);
+static void perf_step_up(synth_t *s, int button) { perf_release(s->perf, button); }
+/* the knobs belong to the most recent effect while a step is down, or while SHIFT is held over a latched one */
+static int perf_knob_fx(const synth_t *s) {
+    int top = perf_top_fx(s->perf);
+    return top >= 0 && (perf_held_count(s->perf) > 0 || s->shift_held) ? top : -1;
 }
 
 /* Movy's knob capture (knob_capture = 1 while PISTA is active): "N:delta[:fine]".
@@ -545,8 +545,9 @@ static void perf_step_up(synth_t *s, int button) {
 static void knob_delta(synth_t *s, const char *val) {
     int n = 0, d = 0, fine = 0;
     if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
-    if (s->perf_step >= 0) {                      /* a PERFORM effect is held: the knobs are its parameters */
-        if (n >= 1 && n <= PF_NKNOB && d != 0 && n <= perf_nparams(s->perf_step)) perf_knob(s->perf, s->perf_step, n - 1, d);
+    int pfx = perf_knob_fx(s);
+    if (pfx >= 0) {                               /* a PERFORM effect is held: the knobs are its parameters */
+        if (n >= 1 && n <= PF_NKNOB && d != 0 && n <= perf_nparams(pfx)) perf_knob(s->perf, pfx, n - 1, d);
         return;
     }
     if (n < 1 || n > 8 || d == 0 || s->sel == 0) return;
@@ -1028,10 +1029,14 @@ static void build_pad_leds(synth_t *s, char *out) {
 /* step_leds: the 16 step buttons show the fixed recording length. Free = all
  * dark; N bars = steps 1..N-1 dim, step N white, the rest dark. 32 hex digits. */
 static void build_step_leds(synth_t *s, char *out) {
-    if (s->shift_held || s->perf_step >= 0) {      /* PERFORM page: family colours, the held one white */
-        static const uint8_t FAM[4] = { L_ROYAL_BLUE, L_ORANGE, L_PURPLE, L_CYAN };
+    /* family colours: repeat blue, tape orange, tone/filter violet, rhythm cyan, space teal, kill yellow */
+    static const uint8_t FAM[6] = { L_ROYAL_BLUE, L_ORANGE, L_PURPLE, L_CYAN, L_DIM_CYAN, L_YELLOW };
+    unsigned latched = perf_latch_mask(s->perf), on = perf_on_mask(s->perf);
+    if (s->shift_held || perf_held_count(s->perf) > 0) {      /* PERFORM page: family colours, a held one white, a latched one blinking */
         for (int i = 0; i < 16; i++) {
-            int c = i >= PF_NFX ? L_DARK_GREY : i == s->perf_step ? L_WHITE : FAM[perf_family(i)];
+            int c = FAM[perf_family(i)];
+            if ((latched >> i) & 1u) c |= LED_BLINK;
+            if (((on >> i) & 1u) && !((latched >> i) & 1u)) c = L_WHITE;
             snprintf(out + i * 2, 3, "%02X", c);
         }
         return;
@@ -1044,6 +1049,7 @@ static void build_step_leds(synth_t *s, char *out) {
             if (i + 1 == bars) c = L_WHITE;
             else if (i + 1 < bars) c = L_GREY_40;
         }
+        if ((latched >> i) & 1u) c = FAM[perf_family(i)] | LED_BLINK;     /* a latched effect stays visible without SHIFT */
         snprintf(out + i * 2, 3, "%02X", c);
     }
 }
@@ -1619,7 +1625,6 @@ static void *gen_create(const char *module_dir, const char *json_defaults) {
     s->m = mark_create_in_dir(g_host, module_dir);
     if (!s->m) { free(s); return NULL; }
     s->cur_track = 1;
-    s->perf_step = -1;
     s->perf = perf_create();
     mark_set_perf(s->m, s->perf);
     s->bpm_src_logged = -1;
@@ -1982,14 +1987,18 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
         build_step_leds(s, hx);
         RET("%s", hx);
     }
-    if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0 || s->perf_step >= 0);
+    if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0 || perf_knob_fx(s) >= 0);
     if (!strcmp(key, "screen")) {
         static char sc[GFX_HEX_LEN + 24];       /* get_param runs on one thread */
-        perf_ui_param(&s->pui, s->perf, s->shift_held, s->perf_step >= 0 ? s->perf_tgt : s->sel, s->clock_frames, sc, sizeof sc);
+        perf_ui_param(&s->pui, s->perf, s->shift_held, s->sel, s->clock_frames, sc, sizeof sc);
         RET("%s", sc);
     }
     if (!strcmp(key, "sel"))          RET("%d", s->sel);
-    if (!strcmp(key, "perf_fx"))      RET("%d", s->perf_step);
+    if (!strcmp(key, "perf_fx"))      RET("%d", perf_top_fx(s->perf));
+    if (!strcmp(key, "perf_n"))       RET("%d", perf_count(s->perf));
+    if (!strcmp(key, "perf_target")) { int tg = -1; if (perf_count(s->perf)) perf_entry(s->perf, perf_count(s->perf) - 1, NULL, &tg, NULL, NULL); RET("%d", tg); }
+    if (!strcmp(key, "perf_on"))      RET("%u", perf_on_mask(s->perf));
+    if (!strcmp(key, "perf_latch"))   RET("%u", perf_latch_mask(s->perf));
     if (!strncmp(key, "perf_p", 6)) {              /* perf_p<fx>_<knob>: stored 0..100 of a PERFORM knob */
         int fx, kb;
         if (sscanf(key + 6, "%d_%d", &fx, &kb) == 2) RET("%d", perf_pct(s->perf, fx, kb));

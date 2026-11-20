@@ -219,6 +219,192 @@ static void scene_vinyl(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) 
     gfx_arc(g, CX, CY, 25, 270.0f - sw, 270.0f + sw, GFX_ON);
 }
 
+/* ---- batch 2 scenes ---- */
+static void scene_filter(gfx_t *g, perf_t *p, const perf_vis_t *v, int hp, float tsec) {
+    float c = clampf(v->aux, 0.0f, 1.0f), q = perf_pval(p, v->fx, 1);
+    int y = CY + 19 - (int)lroundf(c * 38.0f);
+    int cy = CY;
+    gfx_circle(g, CX, cy, 17, GFX_ON); gfx_dcircle(g, CX, cy, 10, 20, GFX_ON); gfx_circle(g, CX, cy, 2, GFX_ON);
+    gfx_dline(g, CX, 12, CX, 61, 1, 3, GFX_ON);                  /* crosshair */
+    gfx_dline(g, 6, cy, 82, cy, 1, 3, GFX_ON);
+    int y0 = hp ? y + 3 : 12, y1 = hp ? 60 : y - 3;              /* the side that is being cut is hatched */
+    for (int yy = y0; yy <= y1; yy += 3) gfx_dline(g, 9 + ((yy / 3) & 1) * 2, yy, 80, yy, 1, 3, GFX_ON);
+    gfx_line(g, 6, y, 82, y, GFX_ON);                            /* the cut line */
+    gfx_line(g, 6, y - 1, 82, y - 1, GFX_ON);
+    int bump = 2 + (int)lroundf(q * 9.0f * (0.85f + 0.15f * sinf(tsec * 9.0f)));   /* resonance peak on the line */
+    int dir = hp ? 1 : -1;
+    gfx_line(g, CX - 12, y, CX, y + dir * bump, GFX_ON); gfx_line(g, CX, y + dir * bump, CX + 12, y, GFX_ON);
+    gfx_cross(g, CX, y, 3, GFX_OFF); gfx_cross(g, CX, y, 2, GFX_ON);
+    gfx_arc(g, CX, cy, 26, 215.0f, 325.0f, GFX_ON);              /* frequency arc */
+    for (int i = 0; i <= 8; i++) {
+        int x0, y0b, x1, y1b; float a = (215.0f + (float)i * 13.75f) * PI_F / 180.0f;
+        polar(CX, cy, 26.0f, a, &x0, &y0b); polar(CX, cy, 29.0f, a, &x1, &y1b); gfx_line(g, x0, y0b, x1, y1b, GFX_ON);
+    }
+    float a = (215.0f + c * 110.0f) * PI_F / 180.0f; int mx, my;
+    polar(CX, cy, 26.0f, a, &mx, &my); gfx_frect(g, mx - 1, my - 1, 3, 3, GFX_ON); gfx_circle(g, mx, my, 3, GFX_ON);
+    gfx_text(g, 7, 56, hp ? "HP" : "LP", GFX_ON);
+    float sw = clampf(v->level * 2.5f, 0, 1) * 8.0f;             /* level: ticks on the right edge */
+    gfx_dline(g, 83, 60, 83, 60 - (int)sw * 3, 1, 1, GFX_ON);
+}
+
+static int gate_cells(int idx) { static const int N[6] = { 4, 8, 16, 32, 12, 24 }; return N[idx]; }
+static void scene_gate(gfx_t *g, perf_t *p, const perf_vis_t *v) {
+    int idx = (int)perf_pval(p, PF_GATE, 0), n = gate_cells(idx);
+    float depth = perf_pval(p, PF_GATE, 1), swing = perf_pval(p, PF_GATE, 2);
+    int cols = n <= 8 ? 4 : n == 12 ? 6 : 8, rows = (n + cols - 1) / cols;
+    if (n == 4) cols = 4;
+    int aw = 76, ah = 42, cw = aw / cols, ch = ah / rows;
+    int cur = v->rep % n;
+    for (int i = 0; i < n; i++) {
+        int cx = 6 + (i % cols) * cw, cy = 13 + (i / cols) * ch, w = cw - 1, h = ch - 1;
+        gfx_rect(g, cx, cy, w, h, GFX_ON);
+        float o = (i & 1) ? swing * 0.4f : 0.0f;                  /* the open half of this cell */
+        int ox = cx + 1 + (int)lroundf(o * (float)(w - 2)), ow = (int)lroundf(0.5f * (float)(w - 2));
+        if (ox + ow > cx + w - 1) ow = cx + w - 1 - ox;
+        int on = i == cur;
+        gfx_frect(g, ox, cy + 1, ow, h - 2, GFX_ON);
+        if (depth < 0.95f && w > 5) gfx_dline(g, ox + ow, cy + h / 2, cx + w - 2, cy + h / 2, 1, depth < 0.5f ? 1 : 3, GFX_ON);   /* what leaks through the closed half */
+        if (on) {                                                   /* playhead cell: bracketed and its phase tick */
+            gfx_rect(g, cx - 1, cy - 1, w + 2, h + 2, GFX_ON);
+            int tx = cx + 1 + (int)lroundf(v->phase * (float)(w - 3));
+            gfx_line(g, tx, cy - 2, tx, cy + h + 1, GFX_XOR);
+        }
+    }
+    gfx_dline(g, 6, 57, 6 + (int)lroundf(clampf(v->speed, 0, 1) * 70.0f), 57, 1, 1, GFX_ON);   /* gate gain */
+    gfx_dline(g, 6, 59, 6 + (int)lroundf(clampf(v->level * 2.5f, 0, 1) * 70.0f), 59, 1, 1, GFX_ON);
+}
+
+static void scene_delay(gfx_t *g, perf_t *p, const perf_vis_t *v) {
+    float fb = perf_pval(p, PF_DELAY, 1);
+    double Td = (double)v->phase * 131072.0; if (Td < 2000.0) Td = 2000.0;
+    float u = (float)fmod(v->k, Td) / (float)Td;
+    for (int j = 0; j < 6; j++) {
+        float gain = powf(0.3f + 0.7f * fb / 0.88f, (float)j);
+        int r = 3 + (int)lroundf(((float)j + u) * 5.0f);
+        if (r > 25 || gain < 0.1f) continue;
+        if (gain > 0.5f) { gfx_circle(g, CX, CY, r, GFX_ON); if (j == 0) gfx_circle(g, CX, CY, r + 1, GFX_ON); }
+        else if (gain > 0.25f) gfx_dcircle(g, CX, CY, r, 18, GFX_ON);
+        else gfx_dcircle(g, CX, CY, r, 7, GFX_ON);
+    }
+    int core = 2 + (int)lroundf(clampf(v->level * 3.0f, 0, 1) * 3.0f);          /* the thrown sound at the centre */
+    for (int r = 0; r <= core; r++) gfx_circle(g, CX, CY, r, GFX_ON);
+    gfx_cross(g, CX, CY, 28, GFX_OFF);
+    gfx_dline(g, 8, CY, 14, CY, 1, 1, GFX_ON); gfx_dline(g, 74, CY, 81, CY, 1, 1, GFX_ON);
+    gfx_dline(g, CX, 12, CX, 16, 1, 1, GFX_ON); gfx_dline(g, CX, 56, CX, 60, 1, 1, GFX_ON);
+    gfx_text(g, 12, 56, v->held ? "THROW" : "", GFX_ON);
+}
+
+static void scene_freeze(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {
+    int idx = (int)perf_pval(p, PF_FREEZE, 0);
+    float grow = clampf((float)(v->k / (0.9 * (double)MARK_SR)), 0.0f, 1.0f);
+    grow = 1.0f - (1.0f - grow) * (1.0f - grow);
+    float R = 4.0f + 17.0f * grow, rot = u->rot[0] * 0.15f;
+    int nb = 1 + (idx + 1) / 2;                                   /* branches per arm: more for a bigger slice */
+    for (int a = 0; a < 6; a++) {
+        float ang = rot + (float)a * PI_F / 3.0f;
+        int x0, y0, x1, y1;
+        polar(CX, CY, 2.0f, ang, &x0, &y0); polar(CX, CY, R, ang, &x1, &y1);
+        gfx_line(g, x0, y0, x1, y1, GFX_ON);
+        for (int b = 1; b <= nb; b++) {
+            float rb = R * (float)b / (float)(nb + 1) + 2.0f, tw = (R - rb) * 0.55f + 1.0f;
+            int bx, by, tx, ty;
+            polar(CX, CY, rb, ang, &bx, &by);
+            polar(bx, by, tw, ang + 0.9f, &tx, &ty); gfx_line(g, bx, by, tx, ty, GFX_ON);
+            polar(bx, by, tw, ang - 0.9f, &tx, &ty); gfx_line(g, bx, by, tx, ty, GFX_ON);
+        }
+        int dx, dy; polar(CX, CY, R + 2.0f, ang, &dx, &dy); gfx_cross(g, dx, dy, 1, GFX_ON);
+    }
+    float h = 5.0f + 3.0f * grow;                                  /* the hexagon core */
+    for (int a = 0; a < 6; a++) {
+        int x0, y0, x1, y1;
+        polar(CX, CY, h, rot + (float)a * PI_F / 3.0f + PI_F / 6.0f, &x0, &y0); polar(CX, CY, h, rot + (float)(a + 1) * PI_F / 3.0f + PI_F / 6.0f, &x1, &y1);
+        gfx_line(g, x0, y0, x1, y1, GFX_ON);
+    }
+    gfx_dcircle(g, CX, CY, 23, 12, GFX_ON);
+    float sw = clampf(v->level * 2.5f, 0, 1) * 40.0f;
+    gfx_arc(g, CX, CY, 25, 270.0f - sw, 270.0f + sw, GFX_ON);
+}
+
+static void scene_retrig(gfx_t *g, perf_t *p, const perf_vis_t *v) {
+    int idx = (int)perf_pval(p, PF_RETRIG, 0), jj = v->rep & 3;
+    (void)idx;
+    gfx_circle(g, CX, CY, 22, GFX_ON); gfx_circle(g, CX, CY, 17, GFX_ON);
+    for (int i = 0; i < 16; i++) {                                  /* 16 ticks, a heavier one every quarter */
+        int x0, y0, x1, y1; float a = ((float)i * 22.5f - 90.0f) * PI_F / 180.0f;
+        polar(CX, CY, 22.0f, a, &x0, &y0); polar(CX, CY, i % 4 == 0 ? 27.0f : 25.0f, a, &x1, &y1); gfx_line(g, x0, y0, x1, y1, GFX_ON);
+    }
+    float live = ((float)jj + v->phase) * 90.0f - 90.0f, rd = v->phase * 90.0f - 90.0f;   /* live head, and where we are reading */
+    gfx_darc(g, CX, CY, 19, -90.0f, rd, 0.0f, GFX_ON);
+    int lx, ly, rx, ry; polar(CX, CY, 19.5f, live * PI_F / 180.0f, &lx, &ly); polar(CX, CY, 19.5f, rd * PI_F / 180.0f, &rx, &ry);
+    gfx_dline(g, lx, ly, rx, ry, 1, 2, GFX_ON);
+    for (int r = 0; r <= 2; r++) gfx_circle(g, rx, ry, r, GFX_ON);   /* read head */
+    gfx_circle(g, lx, ly, 3, GFX_ON);                                /* live head */
+    for (int k = 0; k < 4; k++) {                                    /* rewind chevrons <<, they run backwards round the ring */
+        float a = (-(float)k * 90.0f - (float)jj * 22.5f - v->phase * 22.5f - 45.0f) * PI_F / 180.0f;
+        int x, y; polar(CX, CY, 11.0f, a, &x, &y);
+        float tx = sinf(a), ty = -cosf(a), nx = cosf(a), ny = sinf(a);   /* counter-clockwise tangent and the outward normal */
+        int ax = x + (int)lroundf(tx * 4.0f), ay = y + (int)lroundf(ty * 4.0f);
+        for (int sgn = -1; sgn <= 1; sgn += 2)
+            gfx_line(g, ax, ay, x - (int)lroundf(tx * 3.0f) + (int)lroundf(nx * 3.0f * (float)sgn), y - (int)lroundf(ty * 3.0f) + (int)lroundf(ny * 3.0f * (float)sgn), GFX_ON);
+    }
+    gfx_frect(g, CX - 1, CY - 1, 3, 3, GFX_ON);
+    for (int i = 0; i < 4; i++) { if (i <= jj) gfx_frect(g, 30 + i * 6, 58, 4, 3, GFX_ON); else gfx_rect(g, 30 + i * 6, 58, 4, 3, GFX_ON); }
+}
+
+static void scene_half(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {
+    int q = (int)perf_pval(p, PF_HALF, 0);
+    (void)v;
+    gfx_dcircle(g, CX, CY, 22, 16, GFX_ON);                         /* slow orbit and the fast ghost orbit */
+    gfx_dcircle(g, CX, CY, 11, 40, GFX_ON);
+    gfx_circle(g, CX, CY, 3, GFX_ON); gfx_circle(g, CX, CY, 1, GFX_ON);
+    float a = u->rot[0];
+    for (int t = 0; t < 7; t++) {                                    /* the body with a fading trail */
+        int x, y; polar(CX, CY, 22.0f, a - (float)t * 0.11f, &x, &y);
+        if (t == 0) { for (int r = 0; r <= 3; r++) gfx_circle(g, x, y, r, GFX_ON); }
+        else if (t < 4 || (t & 1)) gfx_px(g, x, y, GFX_ON);
+    }
+    int gx, gy; polar(CX, CY, 11.0f, u->rot[1], &gx, &gy); gfx_circle(g, gx, gy, 1, GFX_ON);   /* normal-speed reference */
+    for (int i = 0; i < 12; i++) {                                   /* clock ticks */
+        int x0, y0, x1, y1; float t = (float)i * PI_F / 6.0f;
+        polar(CX, CY, 26.0f, t, &x0, &y0); polar(CX, CY, i % 3 == 0 ? 29.0f : 27.0f, t, &x1, &y1); gfx_line(g, x0, y0, x1, y1, GFX_ON);
+    }
+    gfx_text(g, 9, 56, q ? "X1/4" : "X1/2", GFX_ON);
+    float sw = clampf(v->level * 2.5f, 0, 1) * 50.0f;
+    gfx_arc(g, CX, CY, 16, 270.0f - sw, 270.0f + sw, GFX_ON);
+}
+
+static void scene_kill(gfx_t *g, perf_t *p, const perf_vis_t *v, float tsec) {
+    int m = (int)perf_pval(p, PF_KILL, 0), blink = ((int)(tsec * 5.0f)) & 1;
+    for (int i = 0; i < 16; i += 2) {                               /* hazard stripes */
+        gfx_line(g, 6 + i * 5, 12, 16 + i * 5, 16, GFX_ON); gfx_line(g, 6 + i * 5, 59, 16 + i * 5, 55, GFX_ON);
+    }
+    if (m == 0) {
+        gfx_rect(g, 13, 18, 62, 34, GFX_ON);
+        for (int d = -1; d <= 1; d++) { gfx_line(g, 18 + d, 21, 70 + d, 49, GFX_ON); gfx_line(g, 70 + d, 21, 18 + d, 49, GFX_ON); }
+        if (blink) gfx_rect(g, 11, 16, 66, 38, GFX_ON);
+    } else {                                                         /* the spectrum, with the killed side crossed out */
+        for (int i = 0; i < 12; i++) {
+            int h = 6 + (int)((i * 7 + (int)(tsec * 6.0f) * 5 + (i & 1) * 9) % 20) + (int)lroundf(v->level * 8.0f);
+            int x = 14 + i * 5, killed = m == 1 ? i < 4 : i >= 8;
+            if (!killed) gfx_frect(g, x, 52 - h, 4, h, GFX_ON);
+            else { gfx_dline(g, x, 52, x, 52 - h, 1, 3, GFX_ON); gfx_dline(g, x + 3, 52, x + 3, 52 - h, 1, 3, GFX_ON); }
+        }
+        int x0 = m == 1 ? 12 : 54, x1 = x0 + 21;
+        gfx_rect(g, x0, 18, 22, 35, GFX_ON);
+        gfx_line(g, x0, 18, x1, 52, GFX_ON); gfx_line(g, x1, 18, x0, 52, GFX_ON);
+        if (blink) gfx_rect(g, x0 - 2, 16, 26, 39, GFX_ON);
+    }
+}
+
+/* small tags for the other stacked effects */
+static void others(gfx_t *g, const perf_vis_t *v) {
+    for (int i = 0; i < v->nother; i++) {
+        int y = 17 + i * 10;
+        gfx_frect(g, 2, y, 16, 9, GFX_ON);
+        gfx_text_c(g, 10, y + 2, perf_short(v->other[i]), GFX_OFF);
+    }
+}
+
 static void panel(gfx_t *g, perf_t *p, const perf_vis_t *v) {
     int fx = v->fx, n = perf_nparams(fx), y = 12, shown = 0;
     char t[16];
@@ -230,60 +416,61 @@ static void panel(gfx_t *g, perf_t *p, const perf_vis_t *v) {
         else if (fx == PF_STUTTER) { snprintf(t, sizeof t, "X%.1f", (double)v->speed); box(g, y, "SPEED", t); }
         else if (fx == PF_TSTOP || fx == PF_TSTART || fx == PF_VINYL) { snprintf(t, sizeof t, "%d%%", (int)lroundf(v->speed * 100.0f)); box(g, y, "SPEED", t); }
         else if (fx == PF_CRUSH) { snprintf(t, sizeof t, "%d", 1 << ((int)perf_pval(p, fx, 0) > 5 ? 5 : (int)perf_pval(p, fx, 0))); box(g, y, "STEPS", t); }
+        else if (fx == PF_DELAY) { snprintf(t, sizeof t, "%d%%", (int)lroundf(v->aux * 100.0f)); box(g, y, "ECHO", t); }
+        else if (fx == PF_RETRIG) { snprintf(t, sizeof t, "%d/4", (v->rep & 3) + 1); box(g, y, "STEP", t); }
+        else if (fx == PF_HALF) { snprintf(t, sizeof t, "%d%%", (int)lroundf(v->speed * 100.0f)); box(g, y, "RATIO", t); }
+        else if (fx == PF_GATE && n < 3) { }
+        else if (fx == PF_FREEZE) { snprintf(t, sizeof t, "%d%%", (int)lroundf(clampf((float)(v->k / (0.9 * (double)MARK_SR)), 0, 1) * 100.0f)); box(g, y, "GROW", t); }
+        else if (fx == PF_LP || fx == PF_HP) { snprintf(t, sizeof t, "%d", 12); box(g, y, "SLOPE", "12DB"); }
+        else if (fx == PF_KILL) { box(g, y, "MODE", v->held ? "ON" : "OFF"); }
     }
+    if (v->latched) gfx_text_c(g, 108, 50, "LATCH", GFX_ON);
     level_bar(g, v->level);
 }
 
-/* ---- the PERFORM grid page ---- */
+/* ---- the PERFORM grid page: 4 x 4 cells, "NN XXX" each, so every name has room ---- */
 static void page_grid(gfx_t *g, perf_t *p, int held, const char *tgt) {
+    static const struct { int on, off; } STRIPE[6] = { { 1, 1 }, { 1, 0 }, { 3, 1 }, { 2, 2 }, { 1, 3 }, { 4, 2 } };
     title(g, "PERFORM", tgt);
-    (void)p;
-    for (int i = 0; i < 16; i++) {
-        int col = i & 7, row = i >> 3, x = col * 16, y = row ? 35 : 11, w = 16, h = 22;
+    unsigned latched = perf_latch_mask(p), on = perf_on_mask(p);
+    for (int i = 0; i < PF_NFX; i++) {
+        int col = i & 3, row = i >> 2, x = col * 32, y = 10 + row * 13, w = col == 3 ? 32 : 33, h = 13;   /* boxes share their borders */
         char num[4]; snprintf(num, sizeof num, "%d", i + 1);
-        if (i < PF_NFX) {
-            int on = i == held;
-            if (on) gfx_frect(g, x, y, w, h, GFX_ON);
-            else {                                                /* top and bottom rules, a dotted post between cells */
-                gfx_line(g, x, y, x + w - 1, y, GFX_ON); gfx_line(g, x, y + h - 1, x + w - 1, y + h - 1, GFX_ON);
-                if (col) gfx_dline(g, x, y + 1, x, y + h - 2, 1, 1, GFX_ON);
-            }
-            int c = on ? GFX_OFF : GFX_ON, fam = perf_family(i);
-            gfx_text_c(g, x + 8, y + 3, num, c);
-            gfx_text_c(g, x + 8, y + 10, perf_short(i), c);
-            if (fam == 0) gfx_dline(g, x + 2, y + 18, x + w - 3, y + 18, 1, 1, c);
-            else if (fam == 1) gfx_line(g, x + 2, y + 18, x + w - 3, y + 18, c);
-            else if (fam == 2) gfx_dline(g, x + 2, y + 18, x + w - 3, y + 18, 3, 1, c);
-            else { gfx_dline(g, x + 2, y + 17, x + w - 3, y + 17, 2, 2, c); gfx_dline(g, x + 3, y + 19, x + w - 2, y + 19, 2, 2, c); }
-        } else {                                                  /* batch 2: not there yet */
-            for (int c = 0; c < 4; c++) {                         /* corner brackets only */
-                int cx0 = c & 1 ? x + w - 1 : x, cy0 = c & 2 ? y + h - 1 : y, dx = c & 1 ? -1 : 1, dy = c & 2 ? -1 : 1;
-                gfx_line(g, cx0, cy0, cx0 + 3 * dx, cy0, GFX_ON); gfx_line(g, cx0, cy0, cx0, cy0 + 3 * dy, GFX_ON);
-            }
-            gfx_text_c(g, x + 8, y + 3, num, GFX_ON);
-            gfx_text_c(g, x + 8, y + 10, "---", GFX_ON);
-        }
+        int hot = i == held;
+        if (hot) gfx_frect(g, x, y, w, h, GFX_ON); else gfx_rect(g, x, y, w, h, GFX_ON);
+        int c = hot ? GFX_OFF : GFX_ON, fam = perf_family(i);
+        gfx_text(g, x + 3 + (i < 9 ? 5 : 0), y + 3, num, c);
+        gfx_text(g, x + 14, y + 3, perf_short(i), c);
+        gfx_dline(g, x + 3, y + 9, x + w - 4, y + 9, STRIPE[fam].on, STRIPE[fam].off, c);
+        if ((latched >> i) & 1u) { gfx_frect(g, x + w - 7, y + 2, 5, 5, c); gfx_px(g, x + w - 6, y + 4, !c); gfx_px(g, x + w - 5, y + 5, !c); gfx_px(g, x + w - 4, y + 3, !c); }   /* latched: a flag with a check */
+        else if ((on >> i) & 1u) gfx_frect(g, x + w - 5, y + 3, 2, 2, c);
     }
-    gfx_text_c(g, 64, 58, "HOLD A STEP", GFX_ON);
 }
+
+static int ui_engaged(perf_t *p, const perf_vis_t *v) { return v->fx >= 0 && perf_held_count(p) > 0; }
 
 int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long clock_frames) {
     perf_vis_t v;
     perf_vis(p, &v);
     char tgt[12];
-    if (target) snprintf(tgt, sizeof tgt, "PISTA %d", target); else snprintf(tgt, sizeof tgt, "MIX");
     float dt = u->last_frames ? (float)(clock_frames - u->last_frames) / (float)MARK_SR : 0.0f;
     if (dt < 0.0f || dt > 0.5f) dt = 0.0f;
     float tsec = (float)clock_frames / (float)MARK_SR;
-    int engaged = v.fx >= 0 && (v.held || v.gate > 0.0f);
+    int engaged = ui_engaged(p, &v);
     if (!engaged && !shift) return 0;
     gfx_clear(g, GFX_OFF);
-    if (!engaged) { page_grid(g, p, -1, tgt); return 1; }
+    if (!engaged) {
+        if (target) snprintf(tgt, sizeof tgt, "PISTA %d", target); else snprintf(tgt, sizeof tgt, "MIX");
+        page_grid(g, p, -1, tgt); return 1;
+    }
+    if (v.target) snprintf(tgt, sizeof tgt, "PISTA %d", v.target); else snprintf(tgt, sizeof tgt, "MIX");
     if (shift && v.held && v.k < 0.15 * (double)MARK_SR) { page_grid(g, p, v.fx, tgt); return 1; }   /* the pressed cell flashes inverted */
     float spd = v.speed;
     if (v.fx == PF_TSTOP || v.fx == PF_TSTART) u->rot[0] += dt * clampf(spd, 0, 1) * 7.0f;
     else if (v.fx == PF_VINYL) u->rot[0] += dt * spd * 3.5f;
     else if (v.fx == PF_REVERSE) u->rot[0] -= dt * 2.4f;
+    else if (v.fx == PF_FREEZE) u->rot[0] += dt * 1.0f;
+    else if (v.fx == PF_HALF) { u->rot[0] += dt * spd * 3.0f; u->rot[1] += dt * 3.0f; }
     frame(g);
     title(g, perf_name(v.fx), tgt);
     switch (v.fx) {
@@ -294,8 +481,16 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     case PF_TSTOP: case PF_TSTART: scene_tape(g, u, &v); break;
     case PF_REVERSE: scene_reverse(g, u, &v); break;
     case PF_VINYL:   scene_vinyl(g, u, p, &v); break;
+    case PF_LP: case PF_HP: scene_filter(g, p, &v, v.fx == PF_HP, tsec); break;
+    case PF_GATE:    scene_gate(g, p, &v); break;
+    case PF_DELAY:   scene_delay(g, p, &v); break;
+    case PF_FREEZE:  scene_freeze(g, u, p, &v); break;
+    case PF_RETRIG:  scene_retrig(g, p, &v); break;
+    case PF_HALF:    scene_half(g, u, p, &v); break;
+    case PF_KILL:    scene_kill(g, p, &v, tsec); break;
     default: break;
     }
+    others(g, &v);
     panel(g, p, &v);
     return 1;
 }
@@ -305,7 +500,7 @@ int perf_ui_param(perf_ui_t *u, perf_t *p, int shift, int target, long clock_fra
     if (u->shown && u->have && clock_frames - u->last_frames < (long)(MARK_SR / PUI_FPS) && clock_frames >= u->last_frames) {
         /* inside the frame period: repeat the last answer unless the state flipped to "nothing" */
         perf_vis_t v; perf_vis(p, &v);
-        if ((v.fx >= 0 && (v.held || v.gate > 0.0f)) || shift) {
+        if (ui_engaged(p, &v) || shift) {
             gfx_hex(&u->prev, hex);
             return snprintf(out, (size_t)n, "%u|%s", u->seq, hex);
         }

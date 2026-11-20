@@ -131,11 +131,10 @@ void mark_process(mark_t *m, const int16_t *in, int16_t *out, int frames);
  * Level, master gain, one-shot, reverse, undo and both FX paths behave
  * exactly as in mark_process.
  */
-/* L606 PERFORM: attach the effects engine (perform.h) and pick its target: 0 = the whole
- * mix, 1..MARK_TRACKS = that track's output. */
+/* L606 PERFORM: attach the effects engine (perform.h) ; targets are lanes inside it (0 = the whole
+ * mix, 1..MARK_TRACKS = that track's output). */
 struct perf;
 void mark_set_perf(mark_t *m, struct perf *p);
-void mark_set_perf_target(mark_t *m, int target);
 
 void mark_process_multi(mark_t *m, const int16_t *const *in_ch,
                         int16_t *const *out_ch, int frames);
