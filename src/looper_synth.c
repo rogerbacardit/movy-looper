@@ -107,6 +107,8 @@ typedef struct {
     int  bpm_src_logged;           /* last tempo source logged (-1 = none yet) */
     long pend_frames[NTRK];        /* frames a track has been waiting on the grid */
     int  pend_logged;
+    unsigned status_seq;           /* bumps on every status_text change */
+    char status_text[40];          /* last action, for Movy's toast */
     char hierarchy[32768];
 } synth_t;
 
@@ -118,6 +120,16 @@ static void hlog(const char *fmt, ...) {
     vsnprintf(b, sizeof b, fmt, ap);
     va_end(ap);
     g_host->log(b);
+}
+
+/* Status line for Movy: get_param status_text = "<seq>:<text>". Movy toasts
+ * the text whenever seq changes. */
+static void say(synth_t *s, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(s->status_text, sizeof s->status_text, fmt, ap);
+    va_end(ap);
+    s->status_seq = (s->status_seq + 1) % 100000u;
 }
 
 /* ---- core access helpers ----------------------------------------- */
@@ -142,6 +154,8 @@ static void set_t(synth_t *s, int t, const char *k, int v) {
     char key[24]; snprintf(key, sizeof key, "t%d_%s", t, k); set_i(s, key, v);
 }
 static void toggle_t(synth_t *s, int t, const char *k) { set_t(s, t, k, !get_t(s, t, k)); }
+
+static int clampi_(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 static int core_state(synth_t *s, int t) { return get_t(s, t, "state"); }
 
@@ -210,18 +224,30 @@ static const pad_def_t *pad_for_note(int note) {
     return &PAD_GRID[3 - row_b][col];
 }
 
+/* What the next REC/PLAY/DUB press on track t will do, as a status line. */
+static void say_rec(synth_t *s, int t) {
+    switch (core_state(s, t)) {
+    case MK_EMPTY: say(s, "REC %d", t); break;
+    case MK_REC:   say(s, get_i(s, "rec_action") ? "DUB %d" : "PLAY %d", t); break;
+    case MK_PLAY:  say(s, "DUB %d", t); break;
+    default:       say(s, "PLAY %d", t); break;   /* DUB -> PLAY, STOP -> PLAY */
+    }
+}
+
 static void rec_pad(synth_t *s, int t) {
     int i = t - 1;
-    if (s->armed[i])        { s->armed[i] = 0; return; }       /* cancel arm */
-    if (s->countin[i] >= 0) { s->countin[i] = -1; return; }    /* cancel count-in */
+    if (s->armed[i])        { s->armed[i] = 0; say(s, "CANCEL %d", t); return; }
+    if (s->countin[i] >= 0) { s->countin[i] = -1; say(s, "CANCEL %d", t); return; }
     if (core_state(s, t) == MK_EMPTY && !core_pending(s, t)) {
-        if (s->arm) { s->armed[i] = 1; return; }
+        if (s->arm) { s->armed[i] = 1; say(s, "ARMED %d", t); return; }
         if (s->count_in) {
             s->countin[i] = (long)((double)MARK_SR * 60.0 / cur_bpm(s) * 4.0);
+            say(s, "COUNT-IN %d", t);
             return;
         }
     }
     s->rec_fired[i] = 0;
+    say_rec(s, t);
     trig_t(s, t, "btn");
 }
 
@@ -235,37 +261,69 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
             s->arm = s->arm_prev;          /* the ARM tap was only the modifier */
             if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
             toggle_t(s, t, "rev");
+            say(s, get_t(s, t, "rev") ? "REV %d ON" : "REV %d OFF", t);
         } else rec_pad(s, t);
         break;
     case A_STOP:                           /* note-on only: tap = stop, tap on a stopped track = CLEAR */
         if (core_state(s, t) == MK_STOP) {
             clear_flags(s, t);
+            say(s, "CLEAR %d", t);
             trig_t(s, t, "clear");
         } else {
             clear_flags(s, t);
+            say(s, "STOP %d", t);
             trig_t(s, t, "stop");
         }
         break;
-    case A_MUTE:    set_mute(s, t, !s->muted[t - 1]); break;
+    case A_MUTE:
+        set_mute(s, t, !s->muted[t - 1]);
+        say(s, s->muted[t - 1] ? "MUTE %d" : "UNMUTE %d", t);
+        break;
     case A_FX:
         if (!get_t(s, t, "fx_on") && get_t(s, t, "fx") == 0) set_t(s, t, "fx", 1);
         toggle_t(s, t, "fx_on");
+        say(s, get_t(s, t, "fx_on") ? "FX %d ON" : "FX %d OFF", t);
         break;
-    case A_ALL:     trig(s, "all_btn"); break;
+    case A_ALL: {
+        int any = 0;
+        for (int k = 1; k <= NTRK; k++) {
+            int st = core_state(s, k);
+            if (st == MK_REC || st == MK_PLAY || st == MK_DUB) any = 1;
+        }
+        say(s, any ? "ALL STOP" : "ALL PLAY");
+        trig(s, "all_btn");
+        break;
+    }
     case A_STOPALL:
+        say(s, "STOP ALL");
         for (int k = 1; k <= NTRK; k++) { clear_flags(s, k); trig_t(s, k, "stop"); }
         break;
-    case A_UNDO:    trig(s, "undo"); break;
+    case A_UNDO:    say(s, "UNDO/REDO"); trig(s, "undo"); break;
     case A_ARM:
         s->arm_prev = s->arm;
         s->arm = !s->arm;
         if (!s->arm) for (int k = 1; k <= NTRK; k++) s->armed[k - 1] = 0;
         s->arm_window = (long)MARK_SR;
+        say(s, s->arm ? "ARM ON" : "ARM OFF");
         break;
-    case A_COUNTIN: s->count_in = !s->count_in; break;
-    case A_RECACT:  set_i(s, "rec_action", !get_i(s, "rec_action")); break;
-    case A_FIXLEN:  s->rec_len = (s->rec_len + 1) % 5; break;
-    case A_QUANT:   set_i(s, "quantize", !get_i(s, "quantize")); break;
+    case A_COUNTIN:
+        s->count_in = !s->count_in;
+        say(s, s->count_in ? "COUNT-IN ON" : "COUNT-IN OFF");
+        break;
+    case A_RECACT:
+        set_i(s, "rec_action", !get_i(s, "rec_action"));
+        say(s, get_i(s, "rec_action") ? "REC>DUB" : "REC>PLAY");
+        break;
+    case A_FIXLEN:
+        s->rec_len = (s->rec_len + 1) % 5;
+        if (s->rec_len == 0) say(s, "LEN FREE");
+        else if (REC_LEN_BARS[s->rec_len] == 1) say(s, "LEN 1 BAR");
+        else say(s, "LEN %d BARS", REC_LEN_BARS[s->rec_len]);
+        break;
+    case A_QUANT:
+        set_i(s, "quantize", !get_i(s, "quantize"));
+        say(s, get_i(s, "quantize") ? "QUANT ON" : "QUANT OFF");
+        break;
     default: break;
     }
 }
@@ -273,6 +331,94 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
 /* Gestures are note-on only: Movy may not deliver (or may delay) note-offs
  * for drum pads, so nothing here depends on a release. */
 static void pad_up(synth_t *s, const pad_def_t *p) { (void)s; (void)p; }
+
+/* ------------------------------------------------------------------ */
+/*  pad_leds: colours for Movy's drum grid (read-only get_param)        */
+/* ------------------------------------------------------------------ */
+/*
+ * 64 hex digits = one byte per rack pad (pad 1 first, the order of the
+ * v01..v32 voices). Bits 0-6 = Move LED palette index, bit 7 = blink.
+ * Movy polls this only while this track is the visible one.
+ */
+#define LED_BLINK 0x80
+enum {
+    L_OFF = 0, L_RED = 127, L_ORANGE_RED = 2, L_ORANGE = 3, L_YELLOW = 7,
+    L_BRIGHT_YELLOW = 8, L_GREEN = 11, L_CYAN = 14, L_PURPLE = 20,
+    L_DEEP_RED = 65, L_DIM_YELLOW = 74, L_DIM_GREEN = 85, L_DIM_CYAN = 92,
+    L_LIGHT_GREY = 118, L_DARK_GREY = 119, L_WHITE = 120, L_OFF_WHITE = 122,
+    L_GREY_40 = 123
+};
+/* One colour per loop track: green, blue, yellow, pink, cyan, orange.
+ * (REC = red, DUB = violet are reserved for state.) */
+static const uint8_t TRK_BRIGHT[NTRK] = { 126, 125, 7, 23, 14, 3 };
+static const uint8_t TRK_DIM[NTRK]    = {  85,  99, 77, 109, 91, 69 };
+static const uint8_t FIXLEN_LEVEL[5]  = { L_DARK_GREY, L_GREY_40, L_LIGHT_GREY,
+                                          L_OFF_WHITE, L_WHITE };
+
+/* One read of the core state per poll, shared by all 32 pads (each core
+ * read is a string round trip, so it must not be repeated per pad). */
+typedef struct {
+    int st[NTRK], pend[NTRK], fx_on[NTRK];
+    int any_run, quant, rec_action;
+} snap_t;
+
+static void take_snap(synth_t *s, snap_t *n) {
+    n->any_run = 0;
+    for (int t = 1; t <= NTRK; t++) {
+        int st = core_state(s, t);
+        n->st[t - 1]   = st;
+        n->pend[t - 1] = core_pending(s, t);
+        n->fx_on[t - 1] = get_t(s, t, "fx_on");
+        if (st == MK_REC || st == MK_PLAY || st == MK_DUB) n->any_run = 1;
+    }
+    n->quant = get_i(s, "quantize");
+    n->rec_action = get_i(s, "rec_action");
+}
+
+static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
+    int t = d->arg, i = t - 1;
+    switch (d->act) {
+    case A_REC: {
+        int st = n->st[i];
+        if (s->armed[i])        return LED_BLINK | L_RED;
+        if (s->countin[i] >= 0) return LED_BLINK | L_BRIGHT_YELLOW;
+        if (st == MK_EMPTY)     return n->pend[i] ? (LED_BLINK | TRK_BRIGHT[i]) : TRK_DIM[i];
+        if (s->muted[i])        return L_DARK_GREY;
+        switch (st) {
+        case MK_REC:  return L_RED;
+        case MK_PLAY: return TRK_BRIGHT[i];
+        case MK_DUB:  return L_PURPLE;
+        case MK_STOP: return L_LIGHT_GREY;
+        default:      return L_OFF;
+        }
+    }
+    case A_STOP:
+        if (n->st[i] == MK_EMPTY) return L_OFF;
+        return n->st[i] == MK_STOP ? L_DEEP_RED : L_WHITE;   /* stopped: next tap clears */
+    case A_MUTE:
+        if (s->muted[i]) return L_DARK_GREY;
+        return n->st[i] == MK_EMPTY ? TRK_DIM[i] : TRK_BRIGHT[i];
+    case A_FX:      return n->fx_on[i] ? L_WHITE : L_GREY_40;
+    case A_ALL:     return n->any_run ? L_GREEN : L_DIM_GREEN;
+    case A_STOPALL: return n->any_run ? L_ORANGE_RED : L_DARK_GREY;
+    case A_UNDO:    return L_LIGHT_GREY;
+    case A_ARM:     return s->arm ? (LED_BLINK | L_RED) : L_DARK_GREY;
+    case A_COUNTIN: return s->count_in ? L_YELLOW : L_DIM_YELLOW;
+    case A_RECACT:  return n->rec_action ? L_PURPLE : 126;
+    case A_FIXLEN:  return FIXLEN_LEVEL[clampi_(s->rec_len, 0, 4)];
+    case A_QUANT:   return n->quant ? L_CYAN : L_DIM_CYAN;
+    default:        return L_OFF;
+    }
+}
+
+static void build_pad_leds(synth_t *s, char *out) {
+    snap_t n;
+    take_snap(s, &n);
+    for (int v = 0; v < 32; v++) {
+        int row_b = (v % 16) / 4, col = (v % 4) + 4 * (v / 16);
+        snprintf(out + v * 2, 3, "%02X", pad_color(s, &n, &PAD_GRID[3 - row_b][col]));
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /*  ui_hierarchy                                                       */
@@ -290,7 +436,8 @@ static void build_hierarchy(synth_t *s) {
         "[\"Empty\",\"Armed\",\"Rec\",\"Play\",\"Dub\",\"Stop\",\"Mute\"]";
     static const char *onoff = "[\"Off\",\"On\"]";
 
-    APP("{\"pad_layout\":\"drums\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
+    APP("{\"pad_layout\":\"drums\",\"pad_leds_param\":\"pad_leds\","
+        "\"status_text_param\":\"status_text\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
         APP("{\"key\":\"t%d_level\",\"name\":\"Track %d Vol\",\"short_name\":\"T%d\","
             "\"type\":\"int\",\"min\":0,\"max\":200,\"default\":100,\"step\":5},", t, t, t);
@@ -434,12 +581,14 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
         int i = t - 1;
         if (s->armed[i] && peak >= thr) {
             s->armed[i] = 0; s->rec_fired[i] = 0;
+            say_rec(s, t);
             trig_t(s, t, "btn");
         }
         if (s->countin[i] >= 0) {
             s->countin[i] -= frames;
             if (s->countin[i] < 0) {
                 s->countin[i] = -1; s->rec_fired[i] = 0;
+                say_rec(s, t);
                 trig_t(s, t, "btn");
             }
         }
@@ -494,6 +643,7 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
             if (bars > 0 && !s->rec_fired[i] &&
                 s->rec_frames[i] >= (long)((double)MARK_SR * 60.0 / cur_bpm(s) * 4.0 * bars)) {
                 s->rec_fired[i] = 1;
+                say_rec(s, t);
                 trig_t(s, t, "btn");
             }
         }
@@ -625,6 +775,12 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "trk_shot")) RET("%d", get_t(s, s->cur_track, "shot"));
     if (!strcmp(key, "trk_spd"))  RET("%d", get_t(s, s->cur_track, "spd"));
     if (!strcmp(key, "in_peak"))      RET("%d", s->in_peak_now);
+    if (!strcmp(key, "status_text"))  RET("%u:%s", s->status_seq, s->status_text);
+    if (!strcmp(key, "pad_leds")) {
+        char hx[65];
+        build_pad_leds(s, hx);
+        RET("%s", hx);
+    }
     if (is_trk_key(key, &t, &k)) {
         if (!strcmp(k, "state")) RET("%d", shim_state(s, t));
         if (!strcmp(k, "level") && s->muted[t - 1]) RET("%d", s->saved_level[t - 1]);

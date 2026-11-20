@@ -319,6 +319,53 @@ int main(int argc, char **argv) {
     int c1 = crossings(300);   CHECK(c1 > base_c * 9 / 10 && c1 < base_c * 11 / 10);
     tap(REC(1)); CHECK(state(1) == S_DUB); tap(REC(1));             /* overdub back at 1x */
 
+    /* --- Movy feedback: pad_leds colours + status_text --- */
+    {
+        char b[200]; int seq0, seq1; char txt[64];
+        #define STATUS() do { b[0] = 0; A->get_param(S, "status_text", b, sizeof b); \
+                              txt[0] = 0; sscanf(b, "%d:%63[^\n]", &seq1, txt); } while (0)
+        #define LEDOF(pad) ({ char hx[3] = {0}; A->get_param(S, "pad_leds", b, sizeof b); \
+                              hx[0] = b[(pad) * 2]; hx[1] = b[(pad) * 2 + 1]; (int)strtol(hx, NULL, 16); })
+        /* rack pad index (0-based) of a physical (row from bottom 1..4, col 0..7) */
+        #define RACKPAD(row, col) (note_of(row, col) - 36)
+        fresh(&host); seti("quantize", 0);
+        A->get_param(S, "pad_leds", b, sizeof b);
+        CHECK(strlen(b) == 64);
+        STATUS(); seq0 = seq1; CHECK(seq0 == 0);
+        CHECK(LEDOF(RACKPAD(1, 1)) == 85);                       /* empty = dim track 1 colour (green) */
+        CHECK(LEDOF(RACKPAD(1, 2)) == 99);                       /* track 2 dim blue */
+        CHECK(LEDOF(RACKPAD(1, 1)) != LEDOF(RACKPAD(1, 2)));
+        tap(REC(1)); STATUS(); CHECK(seq1 == seq0 + 1 && !strcmp(txt, "REC 1"));
+        CHECK(LEDOF(RACKPAD(1, 1)) == 127);                      /* rec = red */
+        run(200); tap(REC(1)); run(2); STATUS(); CHECK(!strcmp(txt, "PLAY 1"));
+        CHECK(LEDOF(RACKPAD(1, 1)) == 126);                      /* play = bright track colour */
+        CHECK(LEDOF(RACKPAD(3, 1)) == 126);                      /* mute pad: live track */
+        tap(MUTE(1)); STATUS(); CHECK(!strcmp(txt, "MUTE 1"));
+        CHECK(LEDOF(RACKPAD(3, 1)) == 119 && LEDOF(RACKPAD(1, 1)) == 119);   /* mute = grey */
+        tap(MUTE(1)); STATUS(); CHECK(!strcmp(txt, "UNMUTE 1"));
+        tap(REC(1)); STATUS(); CHECK(!strcmp(txt, "DUB 1")); CHECK(LEDOF(RACKPAD(1, 1)) == 20);
+        tap(REC(1));
+        tap(STOP(1)); STATUS(); CHECK(!strcmp(txt, "STOP 1"));
+        CHECK(LEDOF(RACKPAD(1, 1)) == 118);                      /* stopped = dim white */
+        tap(STOP(1)); STATUS(); CHECK(!strcmp(txt, "CLEAR 1"));
+        CHECK(LEDOF(RACKPAD(1, 1)) == 85);
+        /* settings + master pads */
+        CHECK(LEDOF(RACKPAD(1, 7)) == 92);                       /* quantize off */
+        tap(R_QUANT); STATUS(); CHECK(!strcmp(txt, "QUANT ON")); CHECK(LEDOF(RACKPAD(1, 7)) == 14);
+        tap(R_COUNTIN); STATUS(); CHECK(!strcmp(txt, "COUNT-IN ON")); CHECK(LEDOF(RACKPAD(4, 7)) == 7);
+        tap(R_RECACT); STATUS(); CHECK(!strcmp(txt, "REC>DUB")); CHECK(LEDOF(RACKPAD(3, 7)) == 20);
+        tap(R_FIXLEN); STATUS(); CHECK(!strcmp(txt, "LEN 1 BAR")); CHECK(LEDOF(RACKPAD(2, 7)) == 123);
+        tap(R_FIXLEN); STATUS(); CHECK(!strcmp(txt, "LEN 2 BARS"));
+        tap(M_ARM); STATUS(); CHECK(!strcmp(txt, "ARM ON")); CHECK(LEDOF(RACKPAD(3, 0)) == (0x80 | 127));
+        tap(M_ARM); STATUS(); CHECK(!strcmp(txt, "ARM OFF"));
+        fresh(&host); seti("quantize", 0); tap(M_ARM); run(400);
+        tap(REC(2)); STATUS(); CHECK(!strcmp(txt, "ARMED 2")); CHECK(LEDOF(RACKPAD(1, 2)) == (0x80 | 127));
+        tap(M_UNDO); STATUS(); CHECK(!strcmp(txt, "UNDO/REDO"));
+        #undef STATUS
+        #undef LEDOF
+        #undef RACKPAD
+    }
+
     /* --- nothing crashes on garbage --- */
     uint8_t junk[3] = {0x90, 200, 100}; A->on_midi(S, junk, 3, 0);
     A->set_param(S, "nonsense", "1");

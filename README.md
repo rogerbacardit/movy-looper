@@ -62,3 +62,17 @@ Nota tecnica: el motor soporta `MARK_TRACKS=6` de forma nativa (ya no hay parche
 - Entrada de audio: el log dice `input source = ...` al crear e `input peak after 1 s = N`. Si pone SILENT, el host no entrega audio en el buzon: el modulo no puede arreglarlo (ver docs/BRIEF.md, "Entrada de audio en Movy standalone").
 - Keep-alive: Movy duerme una pista cuya salida lleva ~1 s en silencio; mientras haya pistas en uso el modulo suma un dither de +-6 LSB (-74 dBFS) para que el looper siga corriendo.
 - Que el orden de notas de los pads coincida (el log guarda las primeras 8 notas pulsadas; pad 1 = nota 36).
+
+## Pad colours and status text in Movy (needs the `module-leds` Movy build)
+
+The shim publishes two read-only params and names them in the `ui_hierarchy`
+root (`pad_leds_param`, `status_text_param`):
+
+- `pad_leds`: 64 hex digits, one byte per rack pad (pad 1 first). Bits 0-6 are a
+  Move LED palette index, bit 7 = blink. Track colours: green, blue, yellow,
+  pink, cyan, orange (dim = empty, bright = playing); red = rec, violet = dub,
+  dim white = stopped, grey = muted, red blink = armed.
+- `status_text`: `"<seq>:<text>"` (`MUTE 2`, `REC 1`, `QUANT ON`, ...). Movy shows a
+  toast when `seq` changes.
+
+A Movy without the feature ignores both params; nothing else changes.
