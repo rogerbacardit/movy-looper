@@ -39,6 +39,7 @@
  * Raw Move pad notes 68..99 are also accepted, in case pads reach the DSP
  * un-remapped.
  */
+#define SHIFT_TAP_FRAMES ((long)MARK_SR * 3 / 10)   /* SHIFT tap = press+release under 300 ms */
 #define NOTE_BASE      36
 #define RAW_PAD_FIRST  68
 
@@ -124,6 +125,9 @@ typedef struct {
     int  rec_len;                  /* fixed recording length in bars, 0 = free */
     int  sel;                      /* PISTA view: selected track 1..NTRK, 0 = MIX */
     int  shift_held;               /* looper SHIFT pad is down */
+    int  shift_used;               /* a combo was used while SHIFT was held: its release does not toggle PERFORM */
+    long shift_at;                 /* clock_frames at the SHIFT press (a tap is < 300 ms) */
+    int  perf_mode;                /* PERFORM mode (SHIFT tap toggles; not persisted) */
     perf_t *perf;                  /* PERFORM effects (perform.c), attached to the core */
     perf_ui_t pui;                 /* PERFORM graphics state (get_param path only) */
     int  knob_acc[9];              /* detent accumulators of the enum knobs */
@@ -535,8 +539,10 @@ static void perf_step_up(synth_t *s, int button) { perf_release(s->perf, button)
 /* the knobs belong to the most recent effect while a step is down, or while SHIFT is held over a latched one */
 static int perf_knob_fx(const synth_t *s) {
     int top = perf_top_fx(s->perf);
-    return top >= 0 && (perf_held_count(s->perf) > 0 || s->shift_held) ? top : -1;
+    return top >= 0 && (perf_held_count(s->perf) > 0 || s->shift_held || s->perf_mode) ? top : -1;
 }
+/* the PERFORM grid page / step buttons as effects: SHIFT held, or PERFORM mode on */
+static int perf_page(const synth_t *s) { return s->shift_held || s->perf_mode; }
 
 /* Movy's knob capture (knob_capture = 1 while PISTA is active): "N:delta[:fine]".
  * Knobs act on the selected track. No fine mode here (SHIFT is reserved for a
@@ -725,7 +731,7 @@ static void solo_toggle(synth_t *s, int t) {
     say(s, "SOLO %d", t);
 }
 
-/* SHIFT + column 8: secondary settings. Rows 2 and 1 are free for now. */
+/* SHIFT + column 8: secondary settings (row 1 = MONITOR). Row 2 is free for now. */
 static void shift_setting(synth_t *s, int act) {
     if (act == A_COUNTIN) {
         s->count_bars = s->count_bars == 1 ? 2 : 1;
@@ -735,6 +741,10 @@ static void shift_setting(synth_t *s, int act) {
         for (int i = 0; i < 5; i++) if (THR_CYCLE[i] > s->threshold) { next = THR_CYCLE[i]; break; }
         s->threshold = next;
         say(s, "THR %d DB", next);
+    } else if (act == A_QUANT) {
+        int on = !get_i(s, "monitor");
+        set_i(s, "monitor", on);
+        say(s, on ? "MONITOR ON" : "MONITOR OFF");
     }
 }
 
@@ -742,6 +752,7 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
     int t = p->arg;
     int sh = s->shift_held;
     s->wave_dirty = 1;
+    if (sh && p->act != A_SHIFT) s->shift_used = 1;            /* SHIFT was a modifier, not a tap */
     if (t >= 1 && t <= NTRK && !s->sel) s->cur_track = t;     /* PISTA keeps the waveform on its track */
     if (sh && (p->act == A_COUNTIN || p->act == A_RECACT || p->act == A_FIXLEN || p->act == A_QUANT)) {
         shift_setting(s, p->act);
@@ -795,7 +806,7 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         say(s, "STOP ALL");
         for (int k = 1; k <= NTRK; k++) { clear_flags(s, k); trig_t(s, k, "stop"); }
         break;
-    case A_SHIFT:   s->shift_held = 1; break;
+    case A_SHIFT:   s->shift_held = 1; s->shift_used = 0; s->shift_at = s->clock_frames; break;
     case A_ARM:
         s->arm_held = 1; s->arm_used = 0;      /* toggles on release unless used as modifier */
         break;
@@ -865,7 +876,15 @@ static void arm_toggle(synth_t *s) {
 }
 
 static void pad_up(synth_t *s, const pad_def_t *p) {
-    if (p->act == A_SHIFT) { s->shift_held = 0; return; }
+    if (p->act == A_SHIFT) {
+        int tap = s->shift_held && !s->shift_used && s->clock_frames - s->shift_at < SHIFT_TAP_FRAMES;
+        s->shift_held = 0; s->shift_used = 0;
+        if (tap) {                                  /* a short tap toggles PERFORM mode */
+            s->perf_mode = !s->perf_mode;
+            say(s, s->perf_mode ? "PERFORM ON" : "PERFORM OFF");
+        }
+        return;
+    }
     if (p->act != A_ARM || !s->arm_held) return;
     s->arm_held = 0;
     if (s->arm_used) { s->arm_used = 0; return; }   /* was only the modifier */
@@ -1007,7 +1026,7 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
         return s->sel == t ? TRK_BRIGHT[i] : TRK_VDIM[i];
     case A_ALL:     return n->any_run ? L_WHITE : L_GREY_40;
     case A_STOPALL: return n->any_run ? L_BRIGHT_YELLOW : L_DARK_GREY;
-    case A_SHIFT:   return s->shift_held ? L_WHITE : L_GREY_40;
+    case A_SHIFT:   return s->shift_held ? L_WHITE : s->perf_mode ? (LED_BLINK | L_WHITE) : L_GREY_40;
     case A_ARM:     return s->arm ? (LED_BLINK | L_ORANGE) : L_DARK_GREY;
     case A_COUNTIN: return s->count_in ? L_YELLOW : L_DIM_YELLOW;
     case A_RECACT:  return n->rec_action ? L_PURPLE : L_DARK_ROYAL_BLUE;
@@ -1032,7 +1051,7 @@ static void build_step_leds(synth_t *s, char *out) {
     /* family colours: repeat blue, tape orange, tone/filter violet, rhythm cyan, space teal, kill yellow */
     static const uint8_t FAM[6] = { L_ROYAL_BLUE, L_ORANGE, L_PURPLE, L_CYAN, L_DIM_CYAN, L_YELLOW };
     unsigned latched = perf_latch_mask(s->perf), on = perf_on_mask(s->perf);
-    if (s->shift_held || perf_held_count(s->perf) > 0) {      /* PERFORM page: family colours, a held one white, a latched one blinking */
+    if (perf_page(s) || perf_held_count(s->perf) > 0) {      /* PERFORM page: family colours, a held one white, a latched one blinking */
         for (int i = 0; i < 16; i++) {
             int c = FAM[perf_family(i)];
             if ((latched >> i) & 1u) c |= LED_BLINK;
@@ -1914,10 +1933,13 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     if (!strcmp(key, "threshold")) { s->threshold = clampi(v, -70, -6); return; }
     if (!strcmp(key, "count_in"))  { s->count_in = v ? 1 : 0; return; }
     if (!strcmp(key, "rec_len"))   { s->rec_len = clampi(v, 0, MAX_BARS); return; }
-    if (!strcmp(key, "step"))      { if (s->shift_held) perf_step_down(s, v); else step_press(s, v); return; }
+    if (!strcmp(key, "step"))      {
+        if (perf_page(s)) { if (s->shift_held) s->shift_used = 1; perf_step_down(s, v); } else step_press(s, v);
+        return;
+    }
     if (!strcmp(key, "step_up"))   { perf_step_up(s, v); return; }
     if (!strcmp(key, "loop_knob")) { loop_knob(s, val); return; }
-    if (!strcmp(key, "knob_delta")) { knob_delta(s, val); return; }
+    if (!strcmp(key, "knob_delta")) { if (s->shift_held) s->shift_used = 1; knob_delta(s, val); return; }
     if (!strcmp(key, "undo_cmd"))  { undo_cmd(s, val); return; }
     if (!strcmp(key, "pedal"))     { pedal_set(s, val); return; }
     if (!strcmp(key, "track_mute")) { s->host_mute = v ? 1 : 0; return; }
@@ -1990,7 +2012,7 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0 || perf_knob_fx(s) >= 0);
     if (!strcmp(key, "screen")) {
         static char sc[GFX_HEX_LEN + 24];       /* get_param runs on one thread */
-        perf_ui_param(&s->pui, s->perf, s->shift_held, s->sel, s->clock_frames, sc, sizeof sc);
+        perf_ui_param(&s->pui, s->perf, perf_page(s), s->sel, s->clock_frames, sc, sizeof sc);
         RET("%s", sc);
     }
     if (!strcmp(key, "sel"))          RET("%d", s->sel);

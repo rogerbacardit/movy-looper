@@ -1085,7 +1085,7 @@ int main(int argc, char **argv) {
         CHECK(geti("knob_capture") == 0 && geti("sel") == 0);
         for (int t = 1; t <= 6; t++) CHECK(pad_led(FX(t)) == vdim[t - 1]);       /* identity colours, dim */
         CHECK(pad_led(M_SHIFT) == 123);
-        down(M_SHIFT); CHECK(pad_led(M_SHIFT) == 120); up(M_SHIFT); CHECK(pad_led(M_SHIFT) == 123);
+        down(M_SHIFT); CHECK(pad_led(M_SHIFT) == 120); run(110); up(M_SHIFT); CHECK(pad_led(M_SHIFT) == 123);
         tap(FX(3));
         CHECK(!strcmp(status_text(), "PISTA 3") && geti("knob_capture") == 1 && geti("sel") == 3 && geti("cur_track") == 3);
         CHECK(!strcmp(disp_head(), "PISTA 3 EMPTY"));
@@ -1620,6 +1620,43 @@ int main(int argc, char **argv) {
         { int c = geti("perf_p8_2"); setstr("knob_delta", "3:1"); CHECK(geti("perf_p8_2") == c); }
         down(M_SHIFT); setstr("step", "8"); setstr("step_up", "8"); up(M_SHIFT);
         CHECK(geti("perf_n") == 0);
+
+        /* ---- PERFORM MODE: a SHIFT tap toggles it; SHIFT held / combos stay momentary ---- */
+        fresh(&host); seti("quantize", 0);
+        CHECK(pad_led(M_SHIFT) == 123);
+        tap(M_SHIFT); CHECK(!strcmp(status_text(), "PERFORM ON") && pad_led(M_SHIFT) == (0x80 | 120));
+        CHECK(step_led(2) != 119 && geti("knob_capture") == 0);             /* family colours, no effect: knobs normal */
+        setstr("step", "3"); CHECK(geti("perf_fx") == 3 && geti("rec_len") == 0 && geti("knob_capture") == 1);   /* step = effect, not length */
+        setstr("step_up", "3"); CHECK(geti("perf_fx") == -1 && geti("knob_capture") == 0);
+        /* double tap latches, knobs go to it, no SHIFT needed */
+        setstr("step", "8"); run(3); setstr("step_up", "8"); run(3); setstr("step", "8"); setstr("step_up", "8");
+        CHECK(geti("perf_latch") == 1 << 8 && geti("knob_capture") == 1 && strstr(status_text(), "LATCHED") != NULL);
+        { int c = geti("perf_p8_2"); setstr("knob_delta", "3:1"); CHECK(geti("perf_p8_2") != c); }
+        tap(FX(2)); CHECK(geti("sel") == 2 && geti("knob_capture") == 1);   /* PISTA keeps the mode */
+        tap(FX(2)); CHECK(geti("sel") == 0 && geti("knob_capture") == 1);   /* MIX too */
+        tap(M_SHIFT); CHECK(!strcmp(status_text(), "PERFORM OFF") && pad_led(M_SHIFT) == 123);
+        CHECK(geti("perf_latch") == 1 << 8 && geti("knob_capture") == 0 && (step_led(8) & 0x80));   /* latched stays, blinks, knobs normal */
+        setstr("step", "3"); CHECK(geti("rec_len") == 4 && geti("perf_fx") == 8);              /* out of mode: length again */
+        setstr("step", "3");
+        /* latched effect still released by tapping it in mode, or by SHIFT + step */
+        down(M_SHIFT); setstr("step", "8"); setstr("step_up", "8"); up(M_SHIFT);
+        CHECK(geti("perf_n") == 0);
+        /* holding SHIFT (> 300 ms) does not toggle; neither does a combo */
+        down(M_SHIFT); run(150); up(M_SHIFT); CHECK(pad_led(M_SHIFT) == 123);
+        down(M_SHIFT); tap(FX(2)); up(M_SHIFT); CHECK(pad_led(M_SHIFT) == 123 && gett(2, "fx_on") == 1);
+        down(M_SHIFT); tap(MUTE(1)); up(M_SHIFT); CHECK(pad_led(M_SHIFT) == 123);
+        down(M_SHIFT); tap(R_COUNTIN); up(M_SHIFT); CHECK(pad_led(M_SHIFT) == 123);
+        down(M_SHIFT); tap(REC(1)); up(M_SHIFT); CHECK(pad_led(M_SHIFT) == 123);
+        /* SHIFT + step with the mode off is still momentary, and no toggle on release */
+        down(M_SHIFT); setstr("step", "4"); CHECK(geti("perf_fx") == 4); up(M_SHIFT); setstr("step_up", "4");
+        CHECK(pad_led(M_SHIFT) == 123 && geti("perf_n") == 0);
+        /* mode on, SHIFT held + combo does not turn it off */
+        tap(M_SHIFT); down(M_SHIFT); tap(FX(3)); up(M_SHIFT); CHECK(pad_led(M_SHIFT) == (0x80 | 120));
+        tap(M_SHIFT); CHECK(pad_led(M_SHIFT) == 123);
+        /* SHIFT + column 8 row 1 = MONITOR */
+        { int m = geti("monitor");
+          down(M_SHIFT); tap(R_QUANT); CHECK(geti("monitor") == !m && !strcmp(status_text(), m ? "MONITOR OFF" : "MONITOR ON"));
+          tap(R_QUANT); CHECK(geti("monitor") == m); up(M_SHIFT); CHECK(pad_led(M_SHIFT) == 123); }
 
         /* beat repeat: the captured slice repeats at the rate grid (the first loop is the grid: 300 blocks = 4 beats, so 1/8 = 4800 frames) */
         scen(eff, PF_BEATREP, 1, IN_RICH, 200, 20, "2:-20", 1);

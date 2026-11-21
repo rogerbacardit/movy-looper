@@ -44,7 +44,7 @@ fila 1  TODO     REC/   REC/   REC/   REC/   REC/   REC/   Quantize
 
 En MIX (nada seleccionado): K1-K6 volumenes de las pistas, K7 entrada, K8 master. Ya no existe el pad MODO (START/END/PAN/FX global desaparecen: sus funciones estan en los knobs de la vista PISTA).
 
-**SHIFT** (pad de arriba de la columna 1, mantener):
+**SHIFT** (pad de arriba de la columna 1). Toque corto (< 300 ms, sin usar ningun combo) = activa/desactiva el **modo PERFORM**; mantenido = modificador momentaneo:
 
 | SHIFT + | Efecto |
 |---|---|
@@ -56,7 +56,9 @@ En MIX (nada seleccionado): K1-K6 volumenes de las pistas, K7 entrada, K8 master
 | columna 8 fila 3 | Umbral de ARM: -54 / -48 / -42 / -36 / -30 dB (aviso `THR -36 DB`) |
 | columna 8 filas 2 y 1 | sin funcion por ahora |
 
-El pad SHIFT es gris tenue y blanco mientras se mantiene.
+| pad fila 1 de la columna 8 | MONITOR on/off (aviso `MONITOR ON/OFF`) |
+
+El pad SHIFT es gris tenue, blanco mientras se mantiene y blanco parpadeante con el modo PERFORM activo. Mantener SHIFT o usar cualquier combo (incl. girar un knob) NO cambia el modo PERFORM al soltar.
 
 Colores: verde = reproduciendo, rojo = grabando, violeta = overdub, naranja parpadeante = ARM/armada. Las filas MUTE/selector (y STOP, parada) usan el color de cada pista (azul, cian, amarillo, magenta, blanco, naranja); mute = gris. La columna 1 y la 8 no usan ni verde ni rojo.
 
@@ -97,7 +99,9 @@ Los loops sobreviven a cerrar/recargar Movy y a apagar la Move.
 
 ## PERFORM: efectos en los botones de paso (v0.10.2)
 
-Con **SHIFT** (pad de arriba de la columna 1) mantenido, la pantalla muestra la pagina **PERFORM**: una rejilla de 4 x 4 casillas (`NN XXX`: numero y nombre de 3 letras) con los 16 efectos en el orden de los botones de paso (pasos 1-4 arriba, 13-16 abajo). El titulo lleva el objetivo: `PISTA 3` o `MIX`. Las casillas de efectos activos llevan marca: un cuadradito si estan en la pila y una banderita con visto si estan **enclavados** (latch). Los LEDs de paso se iluminan por familia: azul = repeticion, naranja = cinta/tiempo, violeta = tono y filtros, cian = ritmo, verde azulado = espacio (delay/freeze), amarillo = KILL. Sin SHIFT los pasos siguen fijando el largo del loop igual que siempre.
+Con **SHIFT** (pad de arriba de la columna 1) mantenido, la pantalla muestra la pagina **PERFORM**: una rejilla de 4 x 4 casillas (`NN XXX`: numero y nombre de 3 letras) con los 16 efectos en el orden de los botones de paso (pasos 1-4 arriba, 13-16 abajo). El titulo lleva el objetivo: `PISTA 3` o `MIX`. Las casillas de efectos activos llevan marca: un cuadradito si estan en la pila y una banderita con visto si estan **enclavados** (latch). Los LEDs de paso se iluminan por familia: azul = repeticion, naranja = cinta/tiempo, violeta = tono y filtros, cian = ritmo, verde azulado = espacio (delay/freeze), amarillo = KILL. Sin SHIFT ni modo PERFORM los pasos siguen fijando el largo del loop igual que siempre.
+
+**Modo PERFORM (v0.10.3):** un toque corto de SHIFT lo activa (aviso `PERFORM ON`, SHIFT parpadea en blanco) y otro lo desactiva (`PERFORM OFF`). Con el modo activo se ve la pagina PERFORM y los pasos disparan efectos como SHIFT + paso (mantener = momentaneo, doble toque = latch, otro toque = soltar, hasta 4 apilados), sin tener que mantener SHIFT. Al salir los pasos vuelven a fijar el largo; los efectos enclavados siguen activos y parpadean en los LEDs de paso, igual que sin SHIFT. Entrar en PISTA o MIX no sale del modo. No se guarda. SHIFT mantenido + paso sigue funcionando aunque el modo este apagado. `knob_capture` = 1 con el modo activo mientras haya un efecto pulsado o enclavado; sin efectos los knobs conservan su funcion (MIX / PISTA).
 
 **SHIFT + mantener el paso N** = suena el efecto N mientras se mantiene; al soltar vuelve todo exactamente como estaba y en tiempo. Objetivo: la pista seleccionada en vista PISTA, o toda la salida del looper en MIX (el objetivo se fija al pulsar). Si sueltas SHIFT con el paso aun pulsado, el efecto sigue hasta soltar el paso.
 
