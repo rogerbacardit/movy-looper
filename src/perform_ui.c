@@ -20,10 +20,6 @@ static void title(gfx_t *g, const char *l, const char *r) {
 }
 static void frame(gfx_t *g) {
     gfx_rect(g, 0, 0, 128, 64, GFX_ON);
-    for (int i = 0; i < 4; i++) {                              /* corner "+" marks */
-        int x = i & 1 ? 85 : 4, y = i & 2 ? 58 : 14;
-        gfx_cross(g, x, y, 2, GFX_ON);
-    }
 }
 static void panel_sep(gfx_t *g) { gfx_dline(g, 89, 11, 89, 62, 1, 2, GFX_ON); }
 static int s_boxes;                                            /* boxes drawn in the last frame (tests) */
@@ -241,6 +237,125 @@ static void scene_duck(gfx_t *g, perf_t *p, const perf_vis_t *v) {      /* the p
     gfx_dline(g, x0, y0 + h + 3, x0 + (int)lroundf(clampf(v->level * 2.5f, 0, 1) * 70.0f), y0 + h + 3, 1, 1, GFX_ON);
 }
 
+/* ---- bank 2: modulation / tone scenes ---- */
+static void ribbon(w3_t *w, float A, float ph, float zc, int style, float (*shape)(float, float), float arg) {
+    enum { N = 24 };
+    v3 pa[N + 1];
+    for (int i = 0; i <= N; i++) {
+        float x = -2.4f + 4.8f * (float)i / (float)N;
+        pa[i] = (v3){ x, A * shape(2.0f * PI_F * (ph + 0.2f * x), arg), zc };
+    }
+    for (int i = 0; i < N; i++) w3_line(w, NULL, pa[i], pa[i + 1], style);
+}
+static float shp_sine(float a, float arg) { (void)arg; return sinf(a); }
+static float shp_clip(float a, float g) { return tanhf(g * sinf(a)) / tanhf(g); }
+
+static void scene_drive(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {      /* a sine ribbon squared off by the drive */
+    float gain = perf_pval(p, PF_DRIVE, 0), mix = perf_pval(p, PF_DRIVE, 2);
+    w3_t w; vp(&w, g, 15.0f, 6.0f);
+    w3_view(&w, 0.45f, 0.5f + 0.2f * sinf(u->rot[0] * 0.5f), 0.0f);
+    ribbon(&w, 1.0f, u->rot[0] * 0.15f, 0.8f, W3_AUTO, shp_sine, 0.0f);                 /* the dry sine, behind */
+    ribbon(&w, 1.0f, u->rot[0] * 0.15f, -0.8f, W3_SOLID, shp_clip, 1.0f + gain * 0.6f * (0.4f + mix));   /* the driven wave */
+    w3_line(&w, NULL, (v3){ -2.4f, 1.0f, -0.8f }, (v3){ 2.4f, 1.0f, -0.8f }, W3_FAINT);   /* the rails it hits */
+    w3_line(&w, NULL, (v3){ -2.4f, -1.0f, -0.8f }, (v3){ 2.4f, -1.0f, -0.8f }, W3_FAINT);
+    gfx_dline(g, 30, 59, 30 + (int)lroundf(clampf(v->level * 2.0f, 0, 1) * 38.0f), 59, 1, 1, GFX_ON);
+}
+
+static void scene_ringmod(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {    /* two interlocked rings, the carrier spins with its rate */
+    float mix = perf_pval(p, PF_RINGMOD, 2);
+    w3_t w; vp(&w, g, 16.0f, 6.0f);
+    w3_view(&w, 0.5f, 0.4f, 0.0f);
+    w3_xf a = W3_XF(-0.45f, 0, 0, 0, u->rot[0], 0, 1.0f), b = W3_XF(0.45f, 0, 0, 1.5707963f, 0, u->rot[1], 1.0f);
+    w3_disc(&w, &a, 1.25f, 20, W3_SOLID);
+    w3_disc(&w, &b, 1.25f, 20, W3_AUTO);
+    w3_xf c = W3_XF(0, 0, 0, 0, u->rot[0] * 1.5f, 0, 0.6f + 0.5f * mix);
+    w3_octa(&w, &c, 0.7f, W3_AUTO);
+    gfx_text(g, 11, 56, perf_pval(p, PF_RINGMOD, 1) > 0.5f ? "NOTE" : "FREE", GFX_ON);
+    gfx_frect(g, 30 + (int)lroundf(fabsf(v->speed) * 36.0f), 57, 3, 3, GFX_ON);
+}
+
+static void scene_flanger(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {   /* two ribbons whose offset sweeps: the comb */
+    float dep = perf_pval(p, PF_FLANGER, 1) / 5.0f, fb = perf_pval(p, PF_FLANGER, 2) / 0.9f;
+    float sweep = 0.5f + 0.5f * v->speed;
+    w3_t w; vp(&w, g, 15.0f, 6.0f);
+    w3_view(&w, 0.45f, 0.5f + 0.2f * sinf(u->rot[0]), 0.0f);
+    ribbon(&w, 0.9f, u->rot[0] * 0.2f, 0.8f, W3_SOLID, shp_sine, 0.0f);
+    ribbon(&w, 0.9f, u->rot[0] * 0.2f + 0.05f + 0.35f * dep * sweep, -0.8f, W3_AUTO, shp_sine, 0.0f);
+    for (int i = 0; i < 7; i++) {                                                         /* the notches between the two */
+        float x = -2.0f + 4.0f * (float)i / 6.0f;
+        w3_line(&w, NULL, (v3){ x, -0.9f * (0.4f + fb * 0.6f), 0.8f }, (v3){ x, 0.9f * (0.4f + fb * 0.6f), -0.8f }, W3_DOT);
+    }
+    gfx_dline(g, 30, 59, 68, 59, 1, 2, GFX_ON); gfx_frect(g, 30 + (int)lroundf(v->phase * 36.0f), 57, 3, 3, GFX_ON);
+}
+
+static void scene_phaser(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {    /* four stages: rings that breathe with the sweep */
+    float dep = perf_pval(p, PF_PHASER, 1), sweep = 0.5f + 0.5f * v->speed;
+    w3_t w; vp(&w, g, 14.0f, 6.0f);
+    w3_view(&w, 0.9f, 0.35f + 0.3f * sinf(u->rot[0]), 0.0f);
+    for (int i = 0; i < 4; i++) {
+        float r = 0.5f + 0.32f * (float)i + dep * sweep * 0.5f * (float)(i + 1) * 0.35f;
+        w3_xf x = W3_XF(0, ((float)i - 1.5f) * 0.45f, 0, 0, 0, 0, 1.0f);
+        w3_disc(&w, &x, r, 22, i & 1 ? W3_AUTO : W3_SOLID);
+    }
+    w3_line(&w, NULL, (v3){ 0, -1.0f, 0 }, (v3){ 0, 1.0f, 0 }, W3_FAINT);
+    gfx_dline(g, 30, 59, 68, 59, 1, 2, GFX_ON); gfx_frect(g, 30 + (int)lroundf(v->phase * 36.0f), 57, 3, 3, GFX_ON);
+}
+
+static void scene_chorus(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {    /* three detuned voices stacked in depth */
+    float dep = perf_pval(p, PF_CHORUS, 1) / 8.0f, mix = perf_pval(p, PF_CHORUS, 2);
+    w3_t w; vp(&w, g, 15.0f, 6.0f);
+    w3_view(&w, 0.5f, 0.55f + 0.2f * sinf(u->rot[0]), 0.0f);
+    ribbon(&w, 0.8f, u->rot[0] * 0.2f, 1.0f, W3_SOLID, shp_sine, 0.0f);
+    for (int i = 0; i < 2; i++) {
+        float d = (i ? -1.0f : 1.0f) * dep * 0.25f * (0.4f + 0.6f * v->speed * (i ? -1.0f : 1.0f));
+        ribbon(&w, 0.8f * (0.3f + 0.7f * mix), u->rot[0] * 0.2f + d, i ? -0.1f : -1.2f, W3_AUTO, shp_sine, 0.0f);
+    }
+    gfx_dline(g, 30, 59, 68, 59, 1, 2, GFX_ON); gfx_frect(g, 30 + (int)lroundf(v->phase * 36.0f), 57, 3, 3, GFX_ON);
+}
+
+static void scene_autopan(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {   /* a ball sliding left / right on a rail */
+    (void)u;
+    float dep = v->aux, m = clampf(v->speed, -1.0f, 1.0f);
+    w3_t w; vp(&w, g, 16.0f, 6.0f);
+    w3_view(&w, 0.5f, 0.35f, 0.0f);
+    w3_line(&w, NULL, (v3){ -2.2f, -0.6f, 0 }, (v3){ 2.2f, -0.6f, 0 }, W3_SOLID);
+    w3_line(&w, NULL, (v3){ -2.2f, -0.6f, 0.8f }, (v3){ 2.2f, -0.6f, 0.8f }, W3_DOT);
+    float bx = m * dep * 2.0f;
+    w3_xf x = W3_XF(bx, 0, 0, 0, bx * 1.5f, 0, 1.0f);
+    w3_sphere(&w, &x, 0.55f, 3, 4, 14, W3_SOLID);
+    w3_line(&w, NULL, (v3){ bx, -0.6f, 0 }, (v3){ bx, -0.05f, 0 }, W3_DOT);
+    gfx_text(g, 8, 56, "L", GFX_ON); gfx_text(g, 78, 56, "R", GFX_ON);
+    (void)p;
+}
+
+static void scene_tremolo(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {   /* a block that breathes in height */
+    (void)u;
+    float dep = v->aux, gn = 1.0f - dep * 0.5f * (1.0f - clampf(v->speed, -1.0f, 1.0f));
+    w3_t w; vp(&w, g, 15.0f, 6.0f);
+    w3_view(&w, 0.4f, 0.6f, 0.0f);
+    float h = 0.15f + 1.1f * gn;
+    w3_xf x = W3_XF(0, -1.2f + h, 0, 0, 0, 0, 1.0f);
+    w3_box(&w, &x, 1.3f, h, 0.9f, W3_SOLID);
+    w3_xf top = W3_XF(0, 0, 0, 0, 0, 0, 1.0f);
+    w3_box(&w, &top, 1.5f, 1.2f, 1.1f, W3_FAINT);                                         /* the full-gain envelope */
+    gfx_dline(g, 30, 59, 68, 59, 1, 2, GFX_ON); gfx_frect(g, 30 + (int)lroundf(v->phase * 36.0f), 57, 3, 3, GFX_ON);
+    (void)p;
+}
+
+static void scene_comb(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {      /* teeth: spacing = the pitch, height = the feedback */
+    float fb = perf_pval(p, PF_COMB, 1), sp = 0.25f + clampf(v->phase * 14.0f, 0.0f, 1.2f);
+    w3_t w; vp(&w, g, 16.0f, 6.0f);
+    w3_view(&w, 0.4f, 0.6f, 0.0f);
+    for (int i = 0; i < 12; i++) {
+        float x = -2.2f + (float)i * sp, h = (1.2f * powf(fb, (float)i * 0.5f) + 0.05f) * (1.0f + 0.07f * sinf(u->rot[0] - (float)i * 0.6f));   /* the ring runs down the teeth */
+        if (x > 2.3f) break;
+        w3_line(&w, NULL, (v3){ x, 0, 0 }, (v3){ x, h, 0 }, W3_SOLID);
+        w3_line(&w, NULL, (v3){ x, 0, 0 }, (v3){ x, h * 0.8f, -0.9f }, W3_DOT);
+    }
+    w3_line(&w, NULL, (v3){ -2.3f, 0, 0 }, (v3){ 2.3f, 0, 0 }, W3_SOLID);
+    gfx_dline(g, 30, 59, 30 + (int)lroundf(clampf(v->level * 2.0f, 0, 1) * 38.0f), 59, 1, 1, GFX_ON);
+}
+
 static void scene_delay(gfx_t *g, perf_t *p, const perf_vis_t *v) {
     float fb = perf_pval(p, PF_DELAY, 1);
     double Td = (double)v->phase * 131072.0; if (Td < 2000.0) Td = 2000.0;
@@ -329,10 +444,10 @@ static void scene_kill(gfx_t *g, perf_t *p, const perf_vis_t *v, float tsec) {
 
 /* small tags for the other stacked effects */
 static void others(gfx_t *g, const perf_vis_t *v) {
-    for (int i = 0; i < v->nother; i++) {
-        int y = 17 + i * 10;
-        gfx_frect(g, 2, y, 16, 9, GFX_ON);
-        gfx_text_c(g, 10, y + 2, perf_short(v->other[i]), GFX_OFF);
+    for (int i = 0; i < v->nother; i++) {                       /* up to PF_MAXSTACK - 1 tags, 9 px pitch */
+        int y = 12 + i * 9;
+        gfx_frect(g, 2, y, 16, 8, GFX_ON);
+        gfx_text_c(g, 10, y + 1, perf_short(v->other[i]), GFX_OFF);
     }
 }
 
@@ -351,10 +466,11 @@ static void panel(gfx_t *g, perf_t *p, const perf_vis_t *v) {
 }
 
 /* ---- the PERFORM grid page: 4 x 4 cells, "NN XXX" each, so every name has room ---- */
-static int s_bank = 0;
+static int s_bank = 0, s_grid = 0;
+void perf_ui_set_grid(int on) { s_grid = on ? 1 : 0; }
 void perf_ui_set_bank(int bank) { s_bank = bank < 0 ? 0 : bank >= PF_NBANK ? PF_NBANK - 1 : bank; }
 static void page_grid(gfx_t *g, perf_t *p, int held, const char *tgt) {
-    static const struct { int on, off; } STRIPE[6] = { { 1, 1 }, { 1, 0 }, { 3, 1 }, { 2, 2 }, { 1, 3 }, { 4, 2 } };
+    static const struct { int on, off; } STRIPE[7] = { { 1, 1 }, { 1, 0 }, { 3, 1 }, { 2, 2 }, { 1, 3 }, { 4, 2 }, { 2, 1 } };
     char ttl[16];
     if (PF_NBANK > 1) snprintf(ttl, sizeof ttl, "PERFORM %d/%d", s_bank + 1, PF_NBANK); else snprintf(ttl, sizeof ttl, "PERFORM");
     title(g, ttl, tgt);
@@ -370,8 +486,12 @@ static void page_grid(gfx_t *g, perf_t *p, int held, const char *tgt) {
         gfx_text(g, x + 3 + (i < 9 ? 5 : 0), y + 3, num, c);
         gfx_text(g, x + 14, y + 3, perf_short(i), c);
         gfx_dline(g, x + 3, y + 9, x + w - 4, y + 9, STRIPE[fam].on, STRIPE[fam].off, c);
-        if ((latched >> i) & 1u) { gfx_frect(g, x + w - 7, y + 2, 5, 5, c); gfx_px(g, x + w - 6, y + 4, !c); gfx_px(g, x + w - 5, y + 5, !c); gfx_px(g, x + w - 4, y + 3, !c); }   /* latched: a flag with a check */
-        else if ((on >> i) & 1u) gfx_frect(g, x + w - 5, y + 3, 2, 2, c);
+        /* one marker slot, top right, for every cell: latched = solid 4x4 square, held (momentary) = hollow 4x4 square;
+         * an effect that is on also gets a solid 2 px underline instead of the dashed family stripe */
+        if ((on >> i) & 1u) {
+            gfx_frect(g, x + 3, y + 9, w - 6, 2, c);
+            if ((latched >> i) & 1u) gfx_frect(g, x + w - 7, y + 2, 4, 4, c); else gfx_rect(g, x + w - 7, y + 2, 4, 4, c);
+        }
     }
 }
 
@@ -389,6 +509,11 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     int engaged = ui_engaged(p, &v, mode);
     if (!engaged && !shift) return 0;
     gfx_clear(g, GFX_OFF);
+    if (engaged && s_grid && shift) {                       /* grid view: the overview stays up while effects are on */
+        if (v.target) snprintf(tgt, sizeof tgt, "PISTA %d", v.target); else snprintf(tgt, sizeof tgt, "MIX");
+        page_grid(g, p, v.held && v.k < 0.15 * (double)MARK_SR ? v.fx : -1, tgt);
+        return 1;
+    }
     if (!engaged) {
         if (target) snprintf(tgt, sizeof tgt, "PISTA %d", target); else snprintf(tgt, sizeof tgt, "MIX");
         page_grid(g, p, -1, tgt); return 1;
@@ -404,6 +529,10 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     else if (v.fx == PF_STUTTER) u->rot[1] += dt * (1.2f + 5.0f * clampf((float)(v.k / (perf_pval(p, PF_STUTTER, 0) * v.beat)), 0.0f, 1.0f));
     else if (v.fx == PF_FREEZE) u->rot[0] += dt * 1.0f;
     else if (v.fx == PF_HALF) { u->rot[0] += dt * spd * 1.6f; u->rot[1] += dt * 1.6f; }
+    else if (v.fx == PF_DRIVE) u->rot[0] += dt * 1.4f;
+    else if (v.fx == PF_RINGMOD) { u->rot[0] += dt * (1.0f + 5.0f * clampf(perf_pval(p, PF_RINGMOD, 0) / 4000.0f, 0.0f, 1.0f)); u->rot[1] += dt * 0.7f; }
+    else if (v.fx == PF_PHASER || v.fx == PF_FLANGER || v.fx == PF_CHORUS) u->rot[0] += dt * 0.5f;
+    else if (v.fx == PF_COMB) u->rot[0] += dt * 3.0f;
     frame(g);
     title(g, perf_name(v.fx), tgt);
     switch (v.fx) {
@@ -423,6 +552,14 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     case PF_HALF:    scene_half(g, u, p, &v); break;
     case PF_KILL:    scene_kill(g, p, &v, tsec); break;
     case PF_DUCK:    scene_duck(g, p, &v); break;
+    case PF_DRIVE:   scene_drive(g, u, p, &v); break;
+    case PF_RINGMOD: scene_ringmod(g, u, p, &v); break;
+    case PF_FLANGER: scene_flanger(g, u, p, &v); break;
+    case PF_PHASER:  scene_phaser(g, u, p, &v); break;
+    case PF_CHORUS:  scene_chorus(g, u, p, &v); break;
+    case PF_AUTOPAN: scene_autopan(g, u, p, &v); break;
+    case PF_TREMOLO: scene_tremolo(g, u, p, &v); break;
+    case PF_COMB:    scene_comb(g, u, p, &v); break;
     default: break;
     }
     others(g, &v);

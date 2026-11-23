@@ -29,6 +29,8 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
 int perf_ui_param(perf_ui_t *u, perf_t *p, int shift, int target, long clock_frames, int mode, char *out, int n);
 /* step-button page (bank) shown by the PERFORM grid, 0..PF_NBANK-1 */
 void perf_ui_set_bank(int bank);
+/* force the grid page even though an effect is on (grid view / SHIFT peek) */
+void perf_ui_set_grid(int on);
 /* knob boxes drawn in the last frame (always == perf_nparams of the shown effect; 0 on the grid page) */
 int perf_ui_boxes(void);
 #endif

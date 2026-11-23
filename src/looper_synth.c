@@ -131,6 +131,7 @@ typedef struct {
     int  auto_hold;                /* track whose REC pad is held for knob automation (PERFORM), 0 = none */
     long auto_hold_at;
     int  auto_turned;              /* a knob was turned during this hold */
+    int  grid_view;                /* PERFORM: show the effect grid even though an effect is on (arrow tap; a knob turn goes back to the scene) */
     int  perf_bank;                /* PERFORM step-button page (< / > flip it): 0 = steps 1-16, 1 = effects 17+ */
     int  down_fx[PF_BANK];         /* effect bound to each step button while it is down (a page flip must not orphan the release) */
     perf_t *perf;                  /* PERFORM effects (perform.c), attached to the core */
@@ -554,8 +555,13 @@ static void perf_step_up(synth_t *s, int button) {
 /* < / > (Movy forwards them as step_bank "+1" / "-1"): flip the PERFORM step-button page. */
 static void perf_bank_step(synth_t *s, int dir) {
     int nb = s->perf_bank + (dir > 0 ? 1 : -1);
-    if (nb < 0 || nb >= PF_NBANK) { say(s, "FX PAGE %d/%d", s->perf_bank + 1, PF_NBANK); return; }
+    if (nb < 0 || nb >= PF_NBANK) {                       /* no page that way: the arrow toggles the grid view */
+        s->grid_view = !s->grid_view;
+        say(s, s->grid_view ? "FX GRID %d/%d" : "FX SCENE", s->perf_bank + 1, PF_NBANK);
+        return;
+    }
     s->perf_bank = nb;
+    s->grid_view = 1;                                     /* a flip always shows the grid of the new page */
     say(s, "FX PAGE %d/%d", nb + 1, PF_NBANK);
 }
 /* the knobs belong to the most recent effect while a step is down, or while SHIFT is held over a latched one */
@@ -582,7 +588,8 @@ static void knob_delta(synth_t *s, const char *val) {
                 else say(s, "NO AUTO %s %s", perf_short(pfx), perf_plabel(pfx, n - 1));
                 return;
             }
-            perf_knob(s->perf, pfx, n - 1, d);
+            s->grid_view = 0;                          /* turning a knob goes back to the scene of the effect */
+            perf_knob_ex(s->perf, pfx, n - 1, d, s->auto_hold != 0);   /* 0.5 % clicks while the REC pad is held */
             if (s->auto_hold) { s->auto_turned = 1; say(s, "AUTO %d %s %s", s->auto_hold, perf_short(pfx), perf_plabel(pfx, n - 1)); }
         }
         return;
@@ -847,10 +854,8 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         say(s, s->muted[t - 1] ? "MUTE %d" : "UNMUTE %d", t);
         break;
     case A_SEL:
-        if (sh) {                          /* SHIFT + select: FX on/off, keeps type and amount */
-            if (!get_t(s, t, "fx_on") && get_t(s, t, "fx") == 0) set_t(s, t, "fx", 1);
-            toggle_t(s, t, "fx_on");
-            say(s, get_t(s, t, "fx_on") ? "FX %d ON" : "FX %d OFF", t);
+        if (sh) {                          /* looper SHIFT + select = FX CLR (v0.14; the module-only twin of Move's Shift + selector) */
+            fx_clear_track(s, t);
         } else if (s->sel == t) {
             pista_select(s, 0);
             say(s, "MIX");
@@ -950,7 +955,12 @@ static void delete_pad(synth_t *s, int idx) {
     if (!p || p->arg < 1 || p->arg > NTRK) return;
     /* v0.12: Delete + selector clears ONLY that track's audio (like Delete + any other pad of its column).
      * The full RESET (audio + level/pan/FX/mute + its PERFORM effects) moved to SHIFT + Delete + selector. */
+    /* v0.14: Delete + selector now only wipes the track's knob automation. */
     if (p->act == A_SEL && s->shift_held) { s->shift_used = 1; reset_track(s, p->arg); }
+    else if (p->act == A_SEL) {                                  /* v0.14: Delete + selector = wipe that track's knob automation (audio stays) */
+        if (s->perf) perf_auto_clear(s->perf, p->arg, -1, -1);
+        say(s, "AUTO CLR %d", p->arg);
+    }
     else if (p->act == A_REC) erase_last(s, p->arg);
     else clear_track(s, p->arg);
 }
@@ -1047,11 +1057,11 @@ enum {
 };
 /* Colour rules (RC-505 style): GREEN = playing and RED = recording are
  * reserved for state, so no track identity colour is green or red.
- * Track identity: blue, cyan, yellow, violet, light magenta/pink (track 5, palette 26), orange.
+ * Track identity: blue, cyan, yellow, lime (track 4, palette 9), light magenta/pink (track 5, palette 26), orange.
  * ARM / armed = orange blinking; DUB = red like REC (v0.12); mute = grey. Column 8 = white. */
-static const uint8_t TRK_BRIGHT[NTRK] = { 125,  14,   7,  23,  26,   3 };
-static const uint8_t TRK_DIM[NTRK]    = {  99,  91,  77, 109, 115,  72 };
-static const uint8_t TRK_VDIM[NTRK]   = {  98,  92,  74, 110, 116,  69 };
+static const uint8_t TRK_BRIGHT[NTRK] = { 125,  14,   7,   9,  26,   3 };
+static const uint8_t TRK_DIM[NTRK]    = {  99,  91,  77,  81, 115,  72 };
+static const uint8_t TRK_VDIM[NTRK]   = {  98,  92,  74,  82, 116,  69 };
 /* One read of the core state per poll, shared by all 32 pads (each core
  * read is a string round trip, so it must not be repeated per pad). */
 typedef struct {
@@ -1131,7 +1141,7 @@ static void build_pad_leds(synth_t *s, char *out) {
  * dark; N bars = steps 1..N-1 dim, step N white, the rest dark. 32 hex digits. */
 static void build_step_leds(synth_t *s, char *out) {
     /* family colours: repeat blue, tape orange, tone/filter violet, rhythm cyan, space teal, kill yellow */
-    static const uint8_t FAM[6] = { L_ROYAL_BLUE, L_ORANGE, L_PURPLE, L_CYAN, L_DIM_CYAN, L_YELLOW };
+    static const uint8_t FAM[7] = { L_ROYAL_BLUE, L_ORANGE, L_PURPLE, L_CYAN, L_DIM_CYAN, L_YELLOW, 9 /* modulation: bright lime */ };
     unsigned latched = perf_latch_mask(s->perf), on = perf_on_mask(s->perf);
     if (perf_page(s) || perf_held_count(s->perf) > 0) {      /* PERFORM page: family colours, a held one white, a latched one blinking */
         for (int j = 0; j < PF_BANK; j++) {
@@ -1665,7 +1675,20 @@ static int jcsv(const char *js, const char *key, int idx, int def) {
     return atoi(p);
 }
 
-/* knob automation in the state blob: "T.FX.K=<64 x 2 hex>;..." (FF = empty step), whole entries only */
+/* knob automation in the state blob: "T.FX.K=<base64 of PF_AU_N bytes>;..." (byte 255 = empty step, no padding),
+ * whole entries only, bounded by the room left in the buffer. 256 steps = 342 characters per curve. */
+static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static int b64_enc(const uint8_t *in, int n, char *out) {
+    int w = 0;
+    for (int i = 0; i < n; i += 3) {
+        unsigned v = (unsigned)in[i] << 16 | (i + 1 < n ? (unsigned)in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
+        out[w++] = B64[v >> 18 & 63]; out[w++] = B64[v >> 12 & 63];
+        if (i + 1 < n) out[w++] = B64[v >> 6 & 63];
+        if (i + 2 < n) out[w++] = B64[v & 63];
+    }
+    return w;
+}
+static int b64_val(char c) { const char *q = c ? strchr(B64, c) : NULL; return q ? (int)(q - B64) : -1; }
 static int au_encode(synth_t *s, char *out, int n) {
     int w = 0; uint8_t b[PF_AU_N];
     out[0] = 0;
@@ -1673,9 +1696,10 @@ static int au_encode(synth_t *s, char *out, int n) {
         for (int fx = 0; fx < PF_NFX; fx++)
             for (int k = 0; k < 3; k++) {
                 if (perf_auto_get(s->perf, t, fx, k, b) <= 0) continue;
-                if (w + 16 + 2 * PF_AU_N >= n) return w;
+                if (w + 16 + (PF_AU_N * 4 + 2) / 3 + 2 >= n) return w;
                 w += snprintf(out + w, (size_t)(n - w), "%s%d.%d.%d=", w ? ";" : "", t, fx, k);
-                for (int i = 0; i < PF_AU_N; i++) w += snprintf(out + w, (size_t)(n - w), "%02X", b[i]);
+                w += b64_enc(b, PF_AU_N, out + w);
+                out[w] = 0;
             }
     return w;
 }
@@ -1689,15 +1713,14 @@ static void au_decode(synth_t *s, const char *val) {
         int t, fx, k, n = 0;
         if (sscanf(p, "%d.%d.%d=%n", &t, &fx, &k, &n) < 3 || n <= 0) break;
         p += n;
-        uint8_t b[PF_AU_N]; int ok = 1;
-        for (int i = 0; i < PF_AU_N; i++) {
-            unsigned v;
-            char h[3] = { p[0], p[0] ? p[1] : 0, 0 };
-            if (!h[0] || !h[1] || sscanf(h, "%2x", &v) != 1) { ok = 0; break; }
-            b[i] = (uint8_t)v; p += 2;
+        uint8_t b[PF_AU_N]; int nb = 0, acc = 0, bits = 0;
+        while (b64_val(*p) >= 0 && nb < PF_AU_N) {
+            acc = acc << 6 | b64_val(*p++); bits += 6;
+            if (bits >= 8) { bits -= 8; b[nb++] = (uint8_t)(acc >> bits & 255); acc &= (1 << bits) - 1; }
         }
-        if (!ok) break;
+        if (nb != PF_AU_N) break;
         perf_auto_put(s->perf, t, fx, k, b);
+        while (b64_val(*p) >= 0) p++;
         if (*p == ';') p++;
     }
 }
@@ -1718,7 +1741,7 @@ static int state_get(synth_t *s, char *buf, int buf_len) {
         snprintf(c, sizeof c, "%s%d", t > 1 ? "," : "", s->muted[t - 1] ? s->saved_level[t - 1] : get_t(s, t, "level"));
         strncat(lv, c, sizeof lv - strlen(lv) - 1);
     }
-    static char au[3600];                           /* get_param runs on one thread */
+    static char au[6000];                           /* get_param runs on one thread */
     { int room = buf_len - n - 400; au_encode(s, au, room < 1 ? 1 : room < (int)sizeof au ? room : (int)sizeof au); }
     int w = snprintf(buf + n, (size_t)(buf_len - n),
         ",\"l6id\":\"%s\",\"l6rl\":%d,\"l6ci\":%d,\"l6thdb\":%d,\"l6ig\":%d,"
@@ -2143,6 +2166,7 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "screen")) {
         static char sc[GFX_HEX_LEN + 24];       /* get_param runs on one thread */
         perf_ui_set_bank(s->perf_bank);
+        perf_ui_set_grid(s->grid_view || (s->shift_held && perf_held_count(s->perf) == 0));          /* SHIFT held = peek at the grid */
         perf_ui_param(&s->pui, s->perf, perf_page(s), s->sel, s->clock_frames, s->perf_mode, sc, sizeof sc);
         RET("%s", sc);
     }

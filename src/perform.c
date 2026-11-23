@@ -15,6 +15,8 @@
 #define FADE_OUT  (1.0f / (0.012f * (float)MARK_SR))
 #define FADE_KILL (1.0f / (0.003f * (float)MARK_SR))
 #define EDGE      32.0f                     /* repeat edge fade, frames */
+#define MODN      4096                      /* modulated delay line frames (<= 93 ms) */
+#define MODMASK   (MODN - 1)
 #define XFADE     96                        /* jump crossfade (retrigger / half speed), frames */
 
 enum { SB_REP, SB_STU, SB_FRZ, SB_DLY, SB_N };
@@ -47,6 +49,8 @@ typedef struct {
     float gg;
     /* delay */
     double dly; int wi; float env, fl, fr_; int rel; double tail;
+    /* modulation effects */
+    float apz[2][4], fbo[2];
     /* retrigger / half speed */
     double dprev; int xf; double tau_prev;
 } slot_t;
@@ -54,6 +58,7 @@ typedef struct {
 typedef struct {
     float *ring, *ring1, *ring2;            /* RING_N frames, stereo interleaved */
     float *sb[SB_N];                        /* SL_N frames each */
+    float *md[3];                           /* MODN frames each: short modulated delay lines of FLANGER / CHORUS / COMB */
     int    dly_dirty;
     slot_t s[PF_NFX];
     uint32_t act;                           /* bit per active slot (audio thread) */
@@ -70,6 +75,7 @@ typedef struct { int fx, target, latched, held, tog; long t0; } entry_t;
 struct perf {
     lane_t ln[PF_NLANE];
     uint8_t pct[PF_NFX][PF_NKNOB];
+    float   fine[PF_NFX][PF_NKNOB];         /* the precise 0..100 value behind pct (continuous knobs read this) */
     entry_t st[PF_MAXSTACK];
     int    nst;
     /* knob automation (see perform.h) */
@@ -79,35 +85,52 @@ struct perf {
     _Atomic int touch[PF_NFX][3];               /* a knob was turned (set by the control thread, consumed per block) */
     uint8_t armed[PF_NFX][3];                   /* audio thread: being written until the hold ends */
     int     last_step[PF_NFX][3];               /* audio thread: last step written, -1 none */
+    float   last_val[PF_NFX][3];                /* ... and the value written there */
 };
 
 /* defaults; stepped parameters (DISC) hold idx * 100 / (n - 1) */
 static const uint8_t DEF[PF_NFX][3] = {
     { 20, 20, 0 },   { 33, 50, 100 }, { 75, 50, 100 }, { 60, 20, 100 },
-    { 40, 0, 0 },    { 78, 0, 70 },   { 100, 100, 0 }, { 40, 40, 0 },
+    { 40, 0, 0 },    { 42, 0, 70 },   { 100, 100, 0 }, { 40, 40, 0 },
     { 75, 25, 0 },   { 30, 25, 0 },   { 40, 85, 0 },   { 50, 40, 85 },
     { 50, 100, 0 },  { 50, 0, 0 },    { 0, 100, 0 },   { 0, 7, 53 },
     { 40, 70, 50 },
+    { 40, 60, 100 }, { 35, 0, 60 }, { 25, 60, 50 }, { 25, 70, 40 }, { 25, 50, 60 }, { 43, 80, 0 }, { 29, 70, 0 }, { 40, 70, 50 },
 };
 static const uint8_t DISC[PF_NFX][3] = {          /* option count of a stepped knob, 0 = continuous */
-    { 0 }, { 0, 3, 0 }, { 0 }, { 0 }, { 0 }, { 10, 4, 0 }, { 4, 0, 0 }, { 0 },
+    { 0 }, { 0, 3, 0 }, { 0 }, { 0 }, { 0 }, { 25, 4, 0 }, { 4, 0, 0 }, { 0 },
     { 0, 0, 2 }, { 0, 0, 2 }, { 6, 0, 0 }, { 5, 0, 0 }, { 5, 0, 0 }, { 3, 0, 0 }, { 2, 0, 0 }, { 3, 0, 0 },
     { 6, 0, 0 },
+    { 0 }, { 0, 2, 0 }, { 0 }, { 0 }, { 0 }, { 8, 0, 3 }, { 8, 0, 3 }, { 0 },
 };
 static const char *const NAME[PF_NFX] = { "BEAT REPEAT", "STUTTER", "PITCH", "BITCRUSH", "TAPE", "LFO", "REVERSE", "VINYL",
-    "FILTER LP", "FILTER HP", "GATE", "DELAY THROW", "ECHO FREEZE", "RETRIGGER", "HALF SPEED", "KILL", "SIDECHAIN" };
+    "FILTER LP", "FILTER HP", "GATE", "DELAY THROW", "ECHO FREEZE", "RETRIGGER", "HALF SPEED", "KILL", "SIDECHAIN",
+    "DRIVE", "RING MOD", "FLANGER", "PHASER", "CHORUS", "AUTOPAN", "TREMOLO", "COMB" };
 static const char *const SHORT[PF_NFX] = { "RPT", "STU", "PCH", "BIT", "TAP", "LFO", "BCK", "VIN",
-    "LPF", "HPF", "GAT", "DLY", "FRZ", "RTG", "HLF", "KIL", "DUK" };
-static const int NP[PF_NFX] = { 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3 };
+    "LPF", "HPF", "GAT", "DLY", "FRZ", "RTG", "HLF", "KIL", "DUK",
+    "DRV", "RNG", "FLG", "PHS", "CHO", "APN", "TRM", "CMB" };
+static const int NP[PF_NFX] = { 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3,
+    3, 3, 3, 3, 3, 3, 3, 3 };
 static const char *const PL[PF_NFX][3] = {          /* <= 4 letters: they must fit beside the knob number tab */
     { "RATE", "DCAY", "DROP" }, { "TIME", "END", "CURV" }, { "SEMI", "FINE", "MIX" }, { "BITS", "DOWN", "MIX" },
     { "TIME", "CURV", "WOW" }, { "RATE", "DEST", "DEPT" }, { "WIND", "MIX", "" }, { "BRAK", "CRKL", "WOW" },
     { "CUT", "RESO", "SLOP" }, { "CUT", "RESO", "SLOP" }, { "RATE", "DEPT", "SWNG" }, { "TIME", "FDBK", "LEVL" },
     { "SIZE", "MIX", "DCAY" }, { "EVRY", "DCAY", "PTCH" }, { "SPED", "MIX", "" }, { "PART", "FADE", "SPLT" },
     { "RATE", "DEPT", "CURV" },
+    { "DRVE", "TONE", "MIX" }, { "FREQ", "MODE", "MIX" }, { "RATE", "DEPT", "FDBK" }, { "RATE", "DEPT", "FDBK" },
+    { "RATE", "DEPT", "MIX" }, { "RATE", "DEPT", "SHPE" }, { "RATE", "DEPT", "SHPE" }, { "PTCH", "FDBK", "MIX" },
 };
-static const char *const LFO_TXT[10] = { "1/16", "1/8T", "1/8", "1/8.", "1/4", "1/4.", "1/2", "1BAR", "2BAR", "4BAR" };
-static const double LFO_BEATS[10] = { 0.25, 1.0 / 3.0, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0, 8.0, 16.0 };
+/* LFO rate: one stepped knob, SYNC divisions of the loop tempo first, then FREE rates in Hz */
+#define LFO_NSYNC 14
+#define LFO_N 25
+static const char *const LFO_TXT[LFO_N] = { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/8.", "1/4T", "1/4", "1/4.", "1/2", "1BAR", "2BAR", "4BAR", "8BAR",
+    "0.05HZ", "0.1HZ", "0.2HZ", "0.5HZ", "1HZ", "2HZ", "4HZ", "8HZ", "12HZ", "20HZ", "32HZ" };
+static const double LFO_BEATS[LFO_NSYNC] = { 0.125, 1.0 / 6.0, 0.25, 1.0 / 3.0, 0.5, 0.75, 2.0 / 3.0, 1.0, 1.5, 2.0, 4.0, 8.0, 16.0, 32.0 };
+static const double LFO_HZ[LFO_N - LFO_NSYNC] = { 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0, 12.0, 20.0, 32.0 };
+static const char *const AP_TXT[8] = { "1/16", "1/8T", "1/8", "1/4", "1/2", "1BAR", "2BAR", "4BAR" };
+static const double AP_BEATS[8] = { 0.25, 1.0 / 3.0, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0 };
+static const char *const SHP_TXT[3] = { "SIN", "TRI", "SQR" };
+static const char *const RM_TXT[2] = { "FREE", "NOTE" };
 static const char *const LFO_DST[4] = { "FILT", "VOL", "PAN", "PTCH" };
 static const char *const RATE_TXT[6] = { "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" };
 static const double RATE_MUL[6] = { 1.0, 0.5, 0.25, 0.125, 1.0 / 3.0, 1.0 / 6.0 };
@@ -126,14 +149,16 @@ static const double REV_BEATS[3] = { 1.0, 2.0, 4.0 };
 
 /* fixed chain order; ring1 is written after index 3, ring2 after index 13 */
 static const uint8_t CHAIN[PF_NFX] = { PF_BEATREP, PF_STUTTER, PF_RETRIG, PF_REVERSE,
-    PF_PITCH, PF_HALF, PF_TSTOP, PF_LFO, PF_VINYL,
-    PF_LP, PF_HP, PF_CRUSH, PF_GATE, PF_DUCK, PF_KILL, PF_DELAY, PF_FREEZE };
+    PF_PITCH, PF_HALF, PF_TSTOP, PF_LFO, PF_VINYL, PF_RINGMOD,
+    PF_LP, PF_HP, PF_COMB, PF_CHORUS, PF_FLANGER, PF_PHASER, PF_DRIVE, PF_CRUSH,
+    PF_GATE, PF_DUCK, PF_AUTOPAN, PF_TREMOLO, PF_KILL, PF_DELAY, PF_FREEZE };
 #define CH_A_END 4
-#define CH_B_END 15
+#define CH_B_END 23
 
 static void lane_free(lane_t *L) {
     free(L->ring); free(L->ring1); free(L->ring2);
     for (int i = 0; i < SB_N; i++) free(L->sb[i]);
+    for (int i = 0; i < 3; i++) free(L->md[i]);
 }
 
 perf_t *perf_create(void) {
@@ -146,13 +171,14 @@ perf_t *perf_create(void) {
         L->ring1 = (float *)calloc((size_t)RING_N * 2, sizeof(float));
         L->ring2 = (float *)calloc((size_t)RING_N * 2, sizeof(float));
         for (int b = 0; b < SB_N; b++) { L->sb[b] = (float *)calloc((size_t)SL_N * 2, sizeof(float)); if (!L->sb[b]) ok = 0; }
+        for (int b = 0; b < 3; b++) { L->md[b] = (float *)calloc((size_t)MODN * 2, sizeof(float)); if (!L->md[b]) ok = 0; }
         if (!L->ring || !L->ring1 || !L->ring2) ok = 0;
         atomic_init(&L->want, 0);
         L->beat = SR * 0.5; L->rng = 0x9E3779B9u + (uint32_t)i * 7919u;
         for (int f = 0; f < PF_NFX; f++) L->s[f].speed = 1.0f;
     }
     if (!ok) { perf_destroy(p); return NULL; }
-    for (int f = 0; f < PF_NFX; f++) for (int k = 0; k < 3; k++) p->pct[f][k] = DEF[f][k];
+    for (int f = 0; f < PF_NFX; f++) for (int k = 0; k < 3; k++) p->pct[f][k] = DEF[f][k], p->fine[f][k] = (float)DEF[f][k];
     memset(p->au, 255, sizeof p->au);
     memset(p->last_step, 0xff, sizeof p->last_step);
     return p;
@@ -223,14 +249,20 @@ unsigned perf_latch_mask(const perf_t *p) { unsigned m = 0; if (p) for (int i = 
 
 /* ---- knobs ---- */
 int  perf_pct(const perf_t *p, int fx, int k) { return fx >= 0 && fx < PF_NFX && k >= 0 && k < PF_NKNOB ? p->pct[fx][k] : 0; }
+static void setf(perf_t *p, int fx, int k, float v) {
+    if (v < 0.0f) v = 0.0f;
+    if (v > 100.0f) v = 100.0f;
+    p->fine[fx][k] = v; p->pct[fx][k] = (uint8_t)lroundf(v);
+}
 void perf_pct_set(perf_t *p, int fx, int k, int v) {
-    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < PF_NKNOB) p->pct[fx][k] = (uint8_t)(v < 0 ? 0 : v > 100 ? 100 : v);
+    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < PF_NKNOB) setf(p, fx, k, (float)v);
 }
 static int didx(const perf_t *p, int fx, int k) {
     int n = DISC[fx][k], i = (perf_pct(p, fx, k) * (n - 1) + 50) / 100;
     return i < 0 ? 0 : i > n - 1 ? n - 1 : i;
 }
-void perf_knob(perf_t *p, int fx, int k, int delta) {
+void perf_knob(perf_t *p, int fx, int k, int delta) { perf_knob_ex(p, fx, k, delta, 0); }
+void perf_knob_ex(perf_t *p, int fx, int k, int delta, int fine) {
     if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3) atomic_store(&p->touch[fx][k], 1);
     if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3 && DISC[fx][k]) {
         int n = DISC[fx][k], i = didx(p, fx, k) + (delta > 0 ? 1 : -1);
@@ -238,7 +270,7 @@ void perf_knob(perf_t *p, int fx, int k, int delta) {
         perf_pct_set(p, fx, k, (i * 100 + (n - 1) / 2) / (n - 1));
         return;
     }
-    perf_pct_set(p, fx, k, perf_pct(p, fx, k) + delta * 2);
+    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < PF_NKNOB) setf(p, fx, k, p->fine[fx][k] + (float)delta * (fine ? 0.5f : 2.0f));
 }
 
 /* ---- automation ---- */
@@ -287,21 +319,32 @@ int perf_auto_get(const perf_t *p, int track, int fx, int knob, uint8_t *out) {
 }
 void perf_auto_put(perf_t *p, int track, int fx, int knob, const uint8_t *in) {
     if (!p || track < 1 || track >= PF_NLANE || fx < 0 || fx >= PF_NFX || knob < 0 || knob > 2) return;
-    for (int i = 0; i < PF_AU_N; i++) au_put(p, track, fx, knob, i, in[i] == 255 || in[i] <= 100 ? in[i] : 255);
+    for (int i = 0; i < PF_AU_N; i++) au_put(p, track, fx, knob, i, in[i] <= 200 ? in[i] : 255);
 }
 
-static int au_step(const double *tpos, const double *tlen, int t) {
-    if (t < 1 || t >= PF_NLANE || tlen[t] < 64.0) return -1;
+static double au_pos(const double *tpos, const double *tlen, int t) {
+    if (t < 1 || t >= PF_NLANE || tlen[t] < 64.0) return -1.0;
     double ph = tpos[t] / tlen[t]; ph -= floor(ph);
-    int st = (int)(ph * PF_AU_N);
-    return st < 0 ? 0 : st >= PF_AU_N ? PF_AU_N - 1 : st;
+    return ph * PF_AU_N;
+}
+/* a stored step is 0..200 (half percent), 255 = empty */
+static void au_ramp(perf_t *p, int t, int fx, int k, int from_step, float from_v, int to_step, float to_v) {
+    int dist = (to_step - from_step + PF_AU_N) % PF_AU_N;
+    if (dist == 0) { au_put(p, t, fx, k, to_step, (uint8_t)lroundf(to_v * 2.0f)); return; }
+    for (int d = 1; d <= dist; d++) {                           /* linear ramp from the last value to the new one */
+        float v = from_v + (to_v - from_v) * (float)d / (float)dist;
+        au_put(p, t, fx, k, (from_step + d) % PF_AU_N, (uint8_t)lroundf(v * 2.0f));
+    }
 }
 /* audio thread, once per block. WRITE: a knob turned while a REC pad is held (hold = that track) is written every
- * block at the step under that track's playhead (gaps since the last block filled) until the hold ends. PLAY: every
- * other knob of an effect that is on copies its stored step into the live value, from the track the effect is bound to. */
+ * block at the step under that track's playhead, ramping linearly from the last written value, until the hold ends.
+ * PLAY: every other knob of an effect that is on follows its stored curve, interpolated between steps, from the
+ * track the effect is bound to. */
 static void auto_block(perf_t *p, const double *tpos, const double *tlen) {
     int hold = atomic_load(&p->hold);
-    int hs = hold ? au_step(tpos, tlen, hold) : -1;
+    double hx = hold ? au_pos(tpos, tlen, hold) : -1.0;
+    int hs = hx < 0.0 ? -1 : (int)hx;
+    if (hs >= PF_AU_N) hs = PF_AU_N - 1;
     int lane_of[PF_NFX];
     for (int f = 0; f < PF_NFX; f++) lane_of[f] = -1;
     for (int l = 0; l < PF_NLANE; l++) {
@@ -315,20 +358,25 @@ static void auto_block(perf_t *p, const double *tpos, const double *tlen) {
             if (hs < 0) { p->armed[fx][k] = 0; p->last_step[fx][k] = -1; }
             else if (touched) p->armed[fx][k] = 1;
             if (p->armed[fx][k]) {
-                uint8_t v = p->pct[fx][k] > 100 ? 100 : p->pct[fx][k];
+                float v = p->fine[fx][k];
                 int ls = p->last_step[fx][k];
-                au_put(p, hold, fx, k, hs, v);
-                if (ls >= 0) for (int s = ls; s != hs; s = (s + 1) % PF_AU_N) au_put(p, hold, fx, k, s, v);
-                p->last_step[fx][k] = hs;
+                if (ls < 0) au_put(p, hold, fx, k, hs, (uint8_t)lroundf(v * 2.0f));
+                else au_ramp(p, hold, fx, k, ls, p->last_val[fx][k], hs, v);
+                p->last_step[fx][k] = hs; p->last_val[fx][k] = v;
                 continue;
             }
             int owner = lane_of[fx];
             if (owner == 0) { for (int t = 1; t < PF_NLANE; t++) if (p->aucnt[t][fx][k]) { owner = t; break; } }
             if (owner < 1 || !p->aucnt[owner][fx][k]) continue;
-            int st = au_step(tpos, tlen, owner);
-            if (st < 0) continue;
-            uint8_t v = p->au[owner][fx][k][st];
-            if (v != 255) p->pct[fx][k] = v;
+            double x = au_pos(tpos, tlen, owner);
+            if (x < 0.0) continue;
+            int i0 = (int)x; if (i0 >= PF_AU_N) i0 = PF_AU_N - 1;
+            int i1 = (i0 + 1) % PF_AU_N;
+            float fr = (float)(x - (double)i0);
+            uint8_t a = p->au[owner][fx][k][i0], b = p->au[owner][fx][k][i1];
+            if (a == 255 && b == 255) continue;
+            float v = a == 255 ? (float)b : b == 255 ? (float)a : (float)a + ((float)b - (float)a) * fr;   /* interpolated between steps */
+            setf(p, fx, k, v * 0.5f);
         }
     }
 }
@@ -342,7 +390,9 @@ int perf_family(int fx) {
     case PF_BEATREP: return 0;
     case PF_TSTOP: case PF_REVERSE: case PF_VINYL: case PF_HALF: return 1;
     case PF_PITCH: case PF_CRUSH: case PF_LP: case PF_HP: return 2;
-    case PF_STUTTER: case PF_GATE: case PF_RETRIG: case PF_LFO: case PF_DUCK: return 3;
+    case PF_STUTTER: case PF_GATE: case PF_RETRIG: case PF_LFO: case PF_DUCK: case PF_AUTOPAN: case PF_TREMOLO: return 3;
+    case PF_DRIVE: case PF_RINGMOD: case PF_COMB: return 2;
+    case PF_FLANGER: case PF_PHASER: case PF_CHORUS: return 6;
     case PF_DELAY: case PF_FREEZE: return 4;
     default: return 5;
     }
@@ -365,7 +415,7 @@ int perf_family(int fx) {
  *  HALF 0 index 0..1, 1 mix 0..1
  *  KILL 0 index 0..2 (ALL, LOW, HIGH), 1 fade ms 2..500 (exp), 2 split Hz 60..12k (exp) */
 float perf_pval(const perf_t *p, int fx, int k) {
-    float v = (float)perf_pct(p, fx, k) / 100.0f;
+    float v = fx >= 0 && fx < PF_NFX && k >= 0 && k < PF_NKNOB ? p->fine[fx][k] / 100.0f : 0.0f;
     switch (fx) {
     case PF_BEATREP: return k == 0 ? (float)(int)(v * 5.999f) : k == 1 ? 1.0f - v * 0.65f : v * 12.0f;
     case PF_STUTTER: return k == 0 ? 1.0f + v * 3.0f : k == 1 ? (float)didx(p, fx, 1) : v;
@@ -378,6 +428,13 @@ float perf_pval(const perf_t *p, int fx, int k) {
     case PF_LP: case PF_HP: return k == 0 ? 30.0f * powf(600.0f, v) : k == 1 ? v : (float)didx(p, fx, 2);
     case PF_GATE: case PF_DUCK: return k == 0 ? (float)didx(p, fx, 0) : v;
     case PF_DELAY:   return k == 0 ? (float)didx(p, fx, 0) : k == 1 ? v * 0.88f : v;
+    case PF_DRIVE:   return k == 0 ? 1.0f + v * 29.0f : v;
+    case PF_RINGMOD: return k == 0 ? 20.0f * powf(200.0f, v) : k == 1 ? (float)didx(p, fx, 1) : v;
+    case PF_FLANGER: return k == 0 ? 0.05f * powf(100.0f, v) : k == 1 ? 0.3f + 4.7f * v : v * 0.9f;
+    case PF_PHASER:  return k == 0 ? 0.05f * powf(100.0f, v) : k == 1 ? v : v * 0.85f;
+    case PF_CHORUS:  return k == 0 ? 0.1f * powf(30.0f, v) : k == 1 ? 1.0f + 7.0f * v : v;
+    case PF_AUTOPAN: case PF_TREMOLO: return k == 1 ? v : (float)didx(p, fx, k);
+    case PF_COMB:    return k == 0 ? 55.0f * powf(32.0f, v) : k == 1 ? v * 0.95f : v;
     case PF_FREEZE:  return k == 0 ? (float)didx(p, fx, 0) : v;
     case PF_RETRIG:  return k == 0 ? (float)didx(p, fx, 0) : k == 1 ? v : v * 4.0f;
     case PF_HALF:    return k == 0 ? (float)didx(p, fx, 0) : v;
@@ -386,6 +443,12 @@ float perf_pval(const perf_t *p, int fx, int k) {
     }
 }
 
+static void hztext(float v, char *out, int n) {
+    if (v >= 1000.0f) snprintf(out, (size_t)n, "%.1fK", (double)(v / 1000.0f));
+    else if (v >= 100.0f) snprintf(out, (size_t)n, "%dHZ", (int)lroundf(v));
+    else if (v >= 10.0f) snprintf(out, (size_t)n, "%.1fHZ", (double)v);
+    else snprintf(out, (size_t)n, "%.2fHZ", (double)v);
+}
 static void pcent(float v, char *out, int n) { snprintf(out, (size_t)n, "%d%%", (int)lroundf(v * 100.0f)); }
 void perf_ptext(const perf_t *p, int fx, int k, char *out, int n) {
     float v = perf_pval(p, fx, k);
@@ -431,6 +494,19 @@ void perf_ptext(const perf_t *p, int fx, int k, char *out, int n) {
         else pcent(v, out, n);
         break;
     case PF_FREEZE:  if (k == 0) snprintf(out, (size_t)n, "%s", FRZ_TXT[(int)v]); else pcent(v, out, n); break;
+    case PF_DRIVE:   if (k == 0) snprintf(out, (size_t)n, "+%dDB", (int)lroundf(20.0f * log10f(v))); else pcent(v, out, n); break;
+    case PF_RINGMOD:
+        if (k == 0) hztext(v, out, n); else if (k == 1) snprintf(out, (size_t)n, "%s", RM_TXT[(int)v]); else pcent(v, out, n);
+        break;
+    case PF_FLANGER:
+        if (k == 0) hztext(v, out, n); else if (k == 1) snprintf(out, (size_t)n, "%.1fMS", (double)v); else pcent(v / 0.9f, out, n);
+        break;
+    case PF_PHASER:  if (k == 0) hztext(v, out, n); else if (k == 1) pcent(v, out, n); else pcent(v / 0.85f, out, n); break;
+    case PF_CHORUS:  if (k == 0) hztext(v, out, n); else if (k == 1) snprintf(out, (size_t)n, "%.1fMS", (double)v); else pcent(v, out, n); break;
+    case PF_AUTOPAN: case PF_TREMOLO:
+        if (k == 0) snprintf(out, (size_t)n, "%s", AP_TXT[(int)v]); else if (k == 1) pcent(v, out, n); else snprintf(out, (size_t)n, "%s", SHP_TXT[(int)v]);
+        break;
+    case PF_COMB:    if (k == 0) hztext(v, out, n); else if (k == 1) pcent(v / 0.95f, out, n); else pcent(v, out, n); break;
     case PF_RETRIG:
         if (k == 0) snprintf(out, (size_t)n, "%s", RTG_TXT[(int)v]);
         else if (k == 1) pcent(v, out, n);
@@ -471,6 +547,13 @@ static inline void ring_at(const float *ring, double pos, float *l, float *r) {
     uint32_t a = (uint32_t)i & RING_MASK, b = (uint32_t)(i + 1) & RING_MASK;
     *l = ring[a * 2] + (ring[b * 2] - ring[a * 2]) * fr;
     *r = ring[a * 2 + 1] + (ring[b * 2 + 1] - ring[a * 2 + 1]) * fr;
+}
+static inline void md_at(const float *buf, double pos, float *l, float *r) {      /* the MODN-frame delay lines */
+    int64_t i = (int64_t)floor(pos);
+    float fr = (float)(pos - (double)i);
+    uint32_t a = (uint32_t)i & MODMASK, b = (uint32_t)(i + 1) & MODMASK;
+    *l = buf[a * 2] + (buf[b * 2] - buf[a * 2]) * fr;
+    *r = buf[a * 2 + 1] + (buf[b * 2 + 1] - buf[a * 2 + 1]) * fr;
 }
 static inline void slice_at(const float *sl, double pos, int64_t len, float *l, float *r) {
     if (pos < 0.0) pos = 0.0;
@@ -531,6 +614,8 @@ static void engage(perf_t *p, lane_t *L, int fx) {
         if (Ln > SL_N) Ln = SL_N;
         s->L = Ln;
         copy_slice(L, L->ring, L->sb[SB_STU], Ln, Ln);                  /* the last quarter note */
+    } else if (fx == PF_FLANGER || fx == PF_CHORUS || fx == PF_COMB) {
+        memset(L->md[fx == PF_FLANGER ? 0 : fx == PF_CHORUS ? 1 : 2], 0, (size_t)MODN * 2 * sizeof(float));
     } else if (fx == PF_FREEZE) {
         int64_t Ln = (int64_t)(L->beat * FRZ_MUL[(int)perf_pval(p, fx, 0)] + 0.5);
         if (Ln < 256) Ln = 256;
@@ -740,9 +825,13 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
         break;
     }
     case PF_LFO: {                    /* tempo-synced sine on the loop grid: FILT (LP sweep) / VOL / PAN / PTCH */
-        double P = L->beat * LFO_BEATS[(int)perf_pval(p, fx, 0)];
-        double t = L->grid + (double)L->bn; if (t < 0.0) t = 0.0;
-        double ph = fmod(t, P) / P;
+        int ri = (int)perf_pval(p, fx, 0);
+        double ph;
+        if (ri < LFO_NSYNC) {                                                        /* SYNC: locked to the loop grid */
+            double P = L->beat * LFO_BEATS[ri];
+            double t = L->grid + (double)L->bn; if (t < 0.0) t = 0.0;
+            ph = fmod(t, P) / P;
+        } else ph = fmod(k * LFO_HZ[ri - LFO_NSYNC] / SR, 1.0);                      /* FREE: Hz from the moment it was switched on */
         int dst = (int)perf_pval(p, fx, 1);
         float depth = perf_pval(p, fx, 2) * (k < 0.03 * SR ? (float)(k / (0.03 * SR)) : 1.0f);   /* depth eases in over 30 ms */
         float m = sinf(2.0f * (float)M_PI * (float)ph), c = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * (float)ph);
@@ -840,6 +929,103 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
         s->gg += (tgt - s->gg) * 0.02f;
         *wl = il * s->gg; *wr = ir * s->gg;
         s->phase = (float)u; s->speed = s->gg;
+        break;
+    }
+    case PF_DRIVE: {                  /* tanh saturation, level-compensated, with a one-pole tone and a mix */
+        float g = perf_pval(p, fx, 0), mix = perf_pval(p, fx, 2), comp = 1.0f / powf(g, 0.35f);
+        if ((s->fn++ & 15) == 0) s->fcs = 1.0f - expf(-2.0f * (float)M_PI * 700.0f * powf(25.0f, perf_pval(p, fx, 1)) / (float)MARK_SR);
+        float yl = tanhf(il * (1.0f / 32768.0f) * g) * comp * 32768.0f, yr = tanhf(ir * (1.0f / 32768.0f) * g) * comp * 32768.0f;
+        s->hl += s->fcs * (yl - s->hl); s->hr += s->fcs * (yr - s->hr);
+        *wl = il + (s->hl - il) * mix; *wr = ir + (s->hr - ir) * mix;
+        s->phase = g / 30.0f; s->aux = mix; s->speed = s->hl / 32768.0f;
+        break;
+    }
+    case PF_RINGMOD: {                /* carrier x input; NOTE mode snaps the carrier to the nearest semitone */
+        float f = perf_pval(p, fx, 0), mix = perf_pval(p, fx, 2);
+        if ((int)perf_pval(p, fx, 1) == 1) f = 440.0f * powf(2.0f, roundf(12.0f * log2f(f / 440.0f)) / 12.0f);
+        s->lfo += (double)f / SR; s->lfo -= floor(s->lfo);
+        float c = sinf(2.0f * (float)M_PI * (float)s->lfo);
+        *wl = il + (il * c - il) * mix; *wr = ir + (ir * c - ir) * mix;
+        s->phase = (float)s->lfo; s->speed = c; s->aux = mix;
+        break;
+    }
+    case PF_FLANGER: {                /* short modulated delay with feedback, L / R sweeps a quarter cycle apart */
+        float *b = L->md[0];
+        float rate = perf_pval(p, fx, 0), dep = perf_pval(p, fx, 1), fb = perf_pval(p, fx, 2);
+        s->lfo += (double)rate / SR; s->lfo -= floor(s->lfo);
+        double mL = 0.5 + 0.5 * sin(2.0 * M_PI * s->lfo), mR = 0.5 + 0.5 * sin(2.0 * M_PI * (s->lfo + 0.25));
+        double dL = (0.3 + (double)dep * mL) * 0.001 * SR, dR = (0.3 + (double)dep * mR) * 0.001 * SR;
+        float al, ar, bl, br;
+        md_at(b, (double)s->wi - dL, &al, &ar); md_at(b, (double)s->wi - dR, &bl, &br);
+        float yl = al, yr = br; (void)ar; (void)bl;
+        b[s->wi * 2] = il + fb * yl; b[s->wi * 2 + 1] = ir + fb * yr;
+        s->wi = (s->wi + 1) & MODMASK;
+        *wl = (il + yl) * 0.7071f; *wr = (ir + yr) * 0.7071f;
+        s->phase = (float)s->lfo; s->speed = (float)(mL * 2.0 - 1.0); s->aux = fb / 0.9f;
+        break;
+    }
+    case PF_PHASER: {                 /* 4 first-order all-passes swept in cutoff, with feedback; summed with the dry = notches */
+        float rate = perf_pval(p, fx, 0), dep = perf_pval(p, fx, 1), fb = perf_pval(p, fx, 2);
+        s->lfo += (double)rate / SR; s->lfo -= floor(s->lfo);
+        float m = 0.5f + 0.5f * sinf(2.0f * (float)M_PI * (float)s->lfo);
+        if ((s->fn++ & 7) == 0) { float t = tanf((float)M_PI * 250.0f * powf(16.0f, dep * m) / (float)MARK_SR); s->fcs = (t - 1.0f) / (t + 1.0f); }
+        float a = s->fcs, in[2] = { il, ir }, o[2];
+        for (int ch = 0; ch < 2; ch++) {
+            float x = in[ch] + fb * s->fbo[ch];
+            for (int st = 0; st < 4; st++) { float y = -a * x + s->apz[ch][st]; s->apz[ch][st] = x + a * y; x = y; }
+            s->fbo[ch] = x; o[ch] = 0.5f * (in[ch] + x);
+        }
+        *wl = o[0]; *wr = o[1];
+        s->phase = (float)s->lfo; s->speed = m * 2.0f - 1.0f; s->aux = dep;
+        break;
+    }
+    case PF_CHORUS: {                 /* 14 ms +- depth, L / R in opposite phase */
+        float *b = L->md[1];
+        float rate = perf_pval(p, fx, 0), dep = perf_pval(p, fx, 1), mix = perf_pval(p, fx, 2);
+        s->lfo += (double)rate / SR; s->lfo -= floor(s->lfo);
+        double dL = (14.0 + (double)dep * sin(2.0 * M_PI * s->lfo)) * 0.001 * SR, dR = (14.0 + (double)dep * sin(2.0 * M_PI * (s->lfo + 0.5))) * 0.001 * SR;
+        float al, ar, bl, br;
+        md_at(b, (double)s->wi - dL, &al, &ar); md_at(b, (double)s->wi - dR, &bl, &br);
+        b[s->wi * 2] = il; b[s->wi * 2 + 1] = ir;
+        s->wi = (s->wi + 1) & MODMASK;
+        *wl = il * (1.0f - 0.4f * mix) + al * 0.7f * mix; *wr = ir * (1.0f - 0.4f * mix) + br * 0.7f * mix;
+        s->phase = (float)s->lfo; s->speed = (float)sin(2.0 * M_PI * s->lfo); s->aux = mix;
+        break;
+    }
+    case PF_AUTOPAN: case PF_TREMOLO: {   /* beat-synced rate; shape sine / triangle / square (smoothed) */
+        double P = L->beat * AP_BEATS[(int)perf_pval(p, fx, 0)];
+        double t = L->grid + (double)L->bn; if (t < 0.0) t = 0.0;
+        double ph = fmod(t, P) / P;
+        int shp = (int)perf_pval(p, fx, 2);
+        float dep = perf_pval(p, fx, 1);
+        float m = shp == 0 ? sinf(2.0f * (float)M_PI * (float)ph) : shp == 1 ? 4.0f * fabsf((float)ph - 0.5f) - 1.0f : (ph < 0.5 ? 1.0f : -1.0f);
+        s->gg += (m - s->gg) * (shp == 2 ? 0.01f : 0.2f);
+        if (fx == PF_AUTOPAN) {
+            float ang = (dep * s->gg + 1.0f) * (float)M_PI * 0.25f;
+            *wl = il * cosf(ang) * 1.41421356f; *wr = ir * sinf(ang) * 1.41421356f;
+        } else {
+            float g = 1.0f - dep * 0.5f * (1.0f - s->gg);
+            *wl = il * g; *wr = ir * g;
+        }
+        s->phase = (float)ph; s->speed = s->gg; s->aux = dep;
+        break;
+    }
+    case PF_COMB: {                   /* feedback comb tuned to a pitch (a resonator) */
+        float *b = L->md[2];
+        float f = perf_pval(p, fx, 0), fb = perf_pval(p, fx, 1), mix = perf_pval(p, fx, 2);
+        double D = SR / (double)f; if (D > MODN - 4) D = MODN - 4;
+        if (s->dly <= 0.0) s->dly = D;
+        s->dly += (D - s->dly) * 0.002;
+        float al, ar;
+        md_at(b, (double)s->wi - s->dly, &al, &ar);
+        float yl = il + fb * al, yr = ir + fb * ar;
+        if (yl > 40000.0f) yl = 40000.0f; else if (yl < -40000.0f) yl = -40000.0f;
+        if (yr > 40000.0f) yr = 40000.0f; else if (yr < -40000.0f) yr = -40000.0f;
+        b[s->wi * 2] = yl; b[s->wi * 2 + 1] = yr;
+        s->wi = (s->wi + 1) & MODMASK;
+        float nrm = 1.0f - 0.5f * fb;
+        *wl = il + (yl * nrm - il) * mix; *wr = ir + (yr * nrm - ir) * mix;
+        s->phase = (float)(s->dly / (double)MODN); s->speed = fb; s->aux = mix;
         break;
     }
     case PF_KILL: {

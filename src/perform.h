@@ -24,11 +24,12 @@
 enum { PF_BEATREP = 0, PF_STUTTER, PF_PITCH, PF_CRUSH, PF_TSTOP, PF_LFO, PF_REVERSE, PF_VINYL,
        PF_LP, PF_HP, PF_GATE, PF_DELAY, PF_FREEZE, PF_RETRIG, PF_HALF, PF_KILL,
        PF_DUCK,                 /* bank 2, step 1 (17th effect) */
+       PF_DRIVE, PF_RINGMOD, PF_FLANGER, PF_PHASER, PF_CHORUS, PF_AUTOPAN, PF_TREMOLO, PF_COMB,   /* bank 2, steps 2-9 */
        PF_NFX };
 #define PF_BANK 16              /* effects per page of step buttons; < and > flip pages (max 2 pages: masks are 32 bit) */
 #define PF_NBANK ((PF_NFX + PF_BANK - 1) / PF_BANK)
 #define PF_NKNOB 8
-#define PF_MAXSTACK 4
+#define PF_MAXSTACK 6
 #define PF_NLANE 7              /* MIX + 6 tracks (compile-time MARK_TRACKS must be <= 6) */
 #define PF_HOLD_MS 300          /* a step held longer than this is momentary; a shorter tap toggles */
 
@@ -70,6 +71,7 @@ unsigned perf_latch_mask(const perf_t *p);
 
 /* control thread: knobs */
 void perf_knob(perf_t *p, int fx, int knob, int delta);   /* knob 0..7, relative clicks (2 % each; stepped params move one option) */
+void perf_knob_ex(perf_t *p, int fx, int knob, int delta, int fine);   /* fine = 0.5 % per click (automation hold) */
 int  perf_pct(const perf_t *p, int fx, int knob);          /* the stored 0..100 */
 void perf_pct_set(perf_t *p, int fx, int knob, int v);
 
@@ -79,7 +81,7 @@ void perf_pct_set(perf_t *p, int fx, int knob, int v);
  * block until the hold ends (so the whole loop pass holds its value). Released, every knob not held plays its
  * stored curve back in a loop. An effect plays the curve of the track it is bound to (a MIX effect: the first
  * track that holds one). Only effects that are on are touched. */
-#define PF_AU_N 64
+#define PF_AU_N 256                 /* steps per loop; a value is 0..200 (half percent), 255 = empty */
 void perf_auto_hold(perf_t *p, int track);                    /* control thread; 0 = released */
 int  perf_auto_holding(const perf_t *p);
 void perf_auto_clear(perf_t *p, int track, int fx, int knob); /* track < 0 all tracks, fx < 0 all effects, knob < 0 all knobs */
@@ -103,6 +105,6 @@ int         perf_nparams(int fx);
 const char *perf_plabel(int fx, int knob);           /* "RATE" */
 void        perf_ptext(const perf_t *p, int fx, int knob, char *out, int n);   /* "1/8" */
 float       perf_pval(const perf_t *p, int fx, int knob);                      /* decoded value (see perform.c) */
-/* 0 repeat (blue), 1 tape/time (orange), 2 pitch/tone/filter (violet), 3 rhythm (cyan), 4 space (teal), 5 kill (yellow) */
+/* 0 repeat (blue), 1 tape/time (orange), 2 pitch/tone/filter (violet), 3 rhythm (cyan), 4 space (teal), 5 kill (yellow), 6 modulation (lime) */
 int         perf_family(int fx);
 #endif
