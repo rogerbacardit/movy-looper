@@ -2213,6 +2213,22 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* --- v0.14.3: native Shift + pad (shift_pad = rack pad index): note 88 / rack 25 = idx 24 = row 3 column 5 = MUTE of track 4 --- */
+    {
+        CHECK(MUTE(4) - 36 == 24 && FX(4) - 36 == 28);                     /* the pad layout the log values come from */
+        fresh(&host); seti("quantize", 0);
+        for (int k = 1; k <= 3; k++) { tap(REC(k)); run(300); tap(REC(k)); run(2); }
+        seti("t2_fx", 4); seti("t2_fx_on", 1); seti("t2_rev", 1);
+        seti("shift_pad", FX(2) - 36); run(2);                             /* row 4 selector of track 2: FX CLR */
+        CHECK(!strcmp(status_text(), "FX CLR 2") && gett(2, "fx_on") == 0 && gett(2, "rev") == 0 && state(2) == S_PLAY);
+        seti("shift_pad", MUTE(2) - 36); run(2);                           /* row 3 MUTE pad of track 2: SOLO 2 */
+        CHECK(!strcmp(status_text(), "SOLO 2") && state(1) == S_MUTE && state(2) == S_PLAY && state(3) == S_MUTE);
+        seti("shift_pad", MUTE(2) - 36); run(2);                           /* again: the previous mutes come back */
+        CHECK(!strcmp(status_text(), "UNSOLO 2") && state(1) == S_PLAY && state(2) == S_PLAY && state(3) == S_PLAY);
+        seti("shift_pad", 24); run(2);                                     /* the exact value from the device log (rack 25 - 1) */
+        CHECK(!strcmp(status_text(), "SOLO 4") || !strcmp(status_text(), "UNSOLO 4"));
+    }
+
     /* --- v0.14: LFO rate list = 14 synced divisions then 11 free Hz rates, one stepped knob --- */
     {
         fresh(&host); seti("quantize", 0);

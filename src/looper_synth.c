@@ -800,8 +800,8 @@ static void auto_hold_end(synth_t *s, int t_rec_tap) {
     else if (s->auto_turned) say(s, "AUTO %d SAVED", t);
 }
 
-/* Native Move SHIFT + a track selector (module declares shift_pad_param; Movy forwards the rack pad):
- * CLEAR ALL EFFECTS of that track and leave the clip as recorded. Audio, volume, pan and mute are untouched. */
+/* Native Move SHIFT + a pad (module declares shift_pad_param; Movy forwards the rack pad index 0..31, the same value as delete_pad;
+ * the log "note=88 rack=25" is v25 = idx 24 = row 3, column 5 = the MUTE pad of track 4). Row 4 selector: CLEAR ALL EFFECTS of that track and leave the clip as recorded. Audio, volume, pan and mute are untouched. */
 static void fx_clear_track(synth_t *s, int t) {
     if (s->perf) { perf_clear_target(s->perf, t); perf_auto_clear(s->perf, t, -1, -1); }
     set_t(s, t, "fx_on", 0);
@@ -813,7 +813,9 @@ static void fx_clear_track(synth_t *s, int t) {
 }
 static void shift_pad(synth_t *s, int idx) {
     const pad_def_t *p = pad_for_note(NOTE_BASE + idx);
-    if (p && p->act == A_SEL && p->arg >= 1 && p->arg <= NTRK) fx_clear_track(s, p->arg);
+    if (!p || p->arg < 1 || p->arg > NTRK) return;
+    if (p->act == A_SEL) fx_clear_track(s, p->arg);          /* row 4: FX CLR */
+    else if (p->act == A_MUTE) solo_toggle(s, p->arg);       /* row 3: SOLO (again = the previous mutes come back) */
 }
 
 static void pad_down(synth_t *s, const pad_def_t *p) {
