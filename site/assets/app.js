@@ -36,7 +36,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const NS = 'http://www.w3.org/2000/svg';
-const TC = ['#3d7bff', '#19d3e6', '#ffd21f', '#ff4fd8', '#ffa3ec', '#ff8a1f'];
+const TC = ['#3d7bff', '#19d3e6', '#ffd21f', '#a8e82c', '#ffa3ec', '#ff8a1f'];
 const C = { play: '#2ee86b', rec: '#ff3b3b', dub: '#a45cff', arm: '#ff9a1f', yel: '#ffd21f', yelD: '#6b5a12', cy: '#19d3e6', cyD: '#0e5963', roy: '#2a3a8c', wh: '#ffffff', whD: '#5c5c5c' };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, k) => a + (b - a) * k;
@@ -155,8 +155,8 @@ const fixlevel = b => b <= 0 ? FIXL[0] : b === 1 ? FIXL[1] : b === 2 ? FIXL[2] :
 function padColors(s) {
   const any = s.t.some(x => x.st === 'play' || x.st === 'dub' || x.st === 'rec');
   const o = [[], [], [], []];
-  o[0][0] = { c: any ? '#ffffff' : '#6a6a6a' };
-  o[1][0] = { c: any ? '#ffe94d' : '#4a4a4a' };
+  o[0][0] = { c: any ? '#ffe94d' : null };            // STOP ALL (row 1): bright yellow when something runs, unlit when idle
+  o[1][0] = { c: any ? '#ffffff' : '#6a6a6a' };       // ALL START/STOP (row 2)
   o[2][0] = s.arm ? { c: C.arm, b: 1 } : { c: '#4a4a4a' };
   o[3][0] = { c: s.shift ? '#ffffff' : '#6a6a6a' };
   s.t.forEach((t, i) => {
@@ -234,7 +234,7 @@ class Device {
     const g = document.createElementNS(NS, 'g'); g.setAttribute('class', 'lbls'); g.setAttribute('aria-hidden', 'true'); this.svg.appendChild(g);
     const add = (x, y, txt, fs, cls, anchor) => { const e = document.createElementNS(NS, 'text'); e.setAttribute('x', x); e.setAttribute('y', y); e.setAttribute('font-size', fs); e.setAttribute('text-anchor', anchor || 'middle'); if (cls) e.setAttribute('class', cls); e.textContent = txt; g.appendChild(e); return e; };
     const X = [398, 551, 703, 856, 1008, 1160, 1312, 1465], Y = { 4: 245, 3: 362, 2: 479, 1: 596 };
-    const c1 = { 4: 'SHIFT', 3: 'ARM', 2: 'STOP ALL', 1: 'ALL' }, c8 = { 4: 'COUNT', 3: 'REC>PLAY', 2: 'LEN', 1: 'QUANT' }, tr = { 4: 'SEL', 3: 'MUTE', 2: 'PLAY/STOP', 1: 'REC' };
+    const c1 = { 4: 'SHIFT', 3: 'ARM', 2: 'ALL', 1: 'STOP ALL' }, c8 = { 4: 'COUNT', 3: 'REC>PLAY', 2: 'LEN', 1: 'QUANT' }, tr = { 4: 'SEL', 3: 'MUTE', 2: 'PLAY/STOP', 1: 'REC' };
     for (let r = 4; r >= 1; r--) {
       add(X[0], Y[r] + 6, c1[r], 20); add(X[7], Y[r] + 6, c8[r], 20);
       for (let c = 1; c <= 6; c++) { add(X[c], Y[r] - 3, tr[r], 18); add(X[c], Y[r] + 22, 'T' + c, 16, 'n'); }
@@ -642,8 +642,8 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
   const cards = $('#col1-cards'); const link = cardLink(dev, cards, 1);
   const L = (sel, states) => { const el = $(sel, cards); if (el) ledDemo(el, states); };
   L('[data-led=shift]', [{ c: '#6a6a6a', k: 'led.shift.0' }, { c: '#ffffff', k: 'led.shift.1' }, { c: '#ffffff', b: 1, k: 'led.shift.2' }]);
-  L('[data-led=arm]', [{ c: '#4a4a4a', k: 'led.arm.0' }, { c: C.arm, b: 1, k: 'led.arm.1' }, { c: C.rec, b: 1, k: 'led.arm.2' }]);
-  L('[data-led=stopall]', [{ c: '#4a4a4a', k: 'led.stopall.0' }, { c: '#ffe94d', k: 'led.stopall.1' }]);
+  L('[data-led=arm]', [{ c: '#4a4a4a', k: 'led.arm.0' }, { c: C.arm, b: 1, k: 'led.arm.1' }]);
+  L('[data-led=stopall]', [{ c: '#2c2c2c', k: 'led.stopall.0' }, { c: '#ffe94d', k: 'led.stopall.1' }]);
   L('[data-led=all]', [{ c: '#6a6a6a', k: 'led.all.0' }, { c: '#ffffff', k: 'led.all.1' }]);
   // STOP ALL vs ALL START/STOP simulator
   const init = () => ['play', 'play', 'play', 'play', 'stop', 'empty'];
@@ -662,13 +662,13 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
     else logKey = ['sim.all.none'];
     render();
   };
-  $('#sim-stop').addEventListener('click', () => { stopAll(); link.pick(2); });
-  $('#sim-all').addEventListener('click', () => { allBtn(); link.pick(1); });
+  $('#sim-stop').addEventListener('click', () => { stopAll(); link.pick(1); });
+  $('#sim-all').addEventListener('click', () => { allBtn(); link.pick(2); });
   $('#sim-reset').addEventListener('click', () => { ts = init(); logKey = ['sim.hint']; render(); });
   dev.bind((k, d, act) => {
     if (k !== 'pad' || d.col !== 1 || act !== 'click') return;
     link.pick(d.row);
-    if (d.row === 4) { s.shift = !s.shift; render(); } else if (d.row === 3) { s.arm = !s.arm; render(); } else if (d.row === 2) stopAll(); else allBtn();
+    if (d.row === 4) { s.shift = !s.shift; render(); } else if (d.row === 3) { s.arm = !s.arm; render(); } else if (d.row === 1) stopAll(); else allBtn();
   });
   dev.focus([[4, 1], [3, 1], [2, 1], [1, 1]]);
   render(); onLang(render);
@@ -791,7 +791,7 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
   const toggle = () => { s.shift = !s.shift; mk = [s.shift ? 'shift.on' : 'shift.off']; refresh(); };
   $('#shift-btn').addEventListener('click', toggle);
   dev.bind((k, d, act) => { if (act !== 'click' || k !== 'pad') return; if (d.row === 4 && d.col === 1) return toggle(); if (d.col < 2 || d.col > 7) return; const i = d.col - 2;
-    if (s.shift) { if (d.row === 4) { s.t[i].fx = !s.t[i].fx; mk = [s.t[i].fx ? 'shift.fxon' : 'shift.fxoff', i + 1]; } else if (d.row === 3) { const sid = i + 1; if (s.solo === sid) { s.solo = 0; s.t.forEach((x, j) => x.mute = (s.pm || [])[j] || false); mk = ['shift.unsolo']; } else { s.pm = s.t.map(x => x.mute); s.solo = sid; s.t.forEach((x, j) => x.mute = j !== i); mk = ['shift.solo', sid]; } } else if (d.row === 1) mk = ['shift.rev', i + 1]; }
+    if (s.shift) { if (d.row === 4) { mk = [s.t[i].fx ? 'shift.fxclr' : 'shift.fxnone', i + 1]; s.t[i].fx = false; } else if (d.row === 3) { const sid = i + 1; if (s.solo === sid) { s.solo = 0; s.t.forEach((x, j) => x.mute = (s.pm || [])[j] || false); mk = ['shift.unsolo']; } else { s.pm = s.t.map(x => x.mute); s.solo = sid; s.t.forEach((x, j) => x.mute = j !== i); mk = ['shift.solo', sid]; } } else if (d.row === 1) mk = ['shift.rev', i + 1]; }
     else if (d.row === 3) { s.t[i].mute = !s.t[i].mute; mk = [s.t[i].mute ? 'shift.mute' : 'shift.unmute', i + 1]; }
     refresh(); });
   refresh(); onLang(refresh);
@@ -817,10 +817,11 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
   const act = {
     dub() { if (!layers) { key = ['undo.needaudio']; return draw(); } saved = snap(); redo = null; layers = Math.min(4, layers + 1); toast = 'DUB 1'; key = ['undo.dub']; draw(); dev.ring([{ pad: [1, 2] }]); },
     clear() { if (!layers) { key = ['undo.already']; toast = 'CLEAR 1'; return draw(); } saved = { ...snap(), kind: 'clear' }; redo = null; layers = 0; toast = 'CLEAR 1'; key = ['undo.clear']; draw(); dev.ring([{ btn: 'x' }, { pad: [2, 2] }]); },
+    resetfx() { redo = null; toast = 'RESET FX 1'; set = { ...DEF }; key = ['undo.resetfx']; draw(); dev.ring([{ btn: 'x' }, { pad: [4, 2] }]); },
     reset() {
       const was = layers > 0; redo = null; toast = 'RESET 1';
       if (was) { saved = { ...snap(), kind: 'reset' }; key = ['undo.reset']; } else { saved = null; key = ['undo.reset.empty']; }
-      layers = 0; set = { ...DEF }; draw(); dev.ring([{ btn: 'x' }, { pad: [4, 2] }]);
+      layers = 0; set = { ...DEF }; draw(); dev.ring([{ pad: [4, 1] }, { btn: 'x' }, { pad: [4, 2] }]);
     },
     undo() { if (!saved) { toast = 'NOTHING TO UNDO'; key = ['undo.nothing']; return draw(); } redo = snap(); const k = saved.kind; layers = saved.layers; set = { ...saved.set }; saved = null; toast = 'UNDO'; key = [k === 'reset' ? 'undo.undo.reset' : k === 'clear' ? 'undo.undo.clear' : 'undo.undo.dub']; draw(); dev.ring([{ btn: 'undo' }]); },
     redo() { if (!redo) { toast = 'NOTHING TO REDO'; key = ['undo.noredo']; return draw(); } saved = snap(); layers = redo.layers; set = { ...redo.set }; redo = null; toast = 'REDO'; key = ['undo.redo']; draw(); dev.ring([{ btn: 'undo' }]); },
@@ -828,7 +829,7 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
     empty() { layers = 0; set = { ...SET }; saved = redo = null; toast = ''; key = ['undo.hint.empty']; draw(); },
   };
   $$('[data-u]').forEach(b => b.addEventListener('click', () => act[b.dataset.u]()));
-  dev.bind((k, d, a) => { if (a !== 'click') return; if (k === 'undo') act.undo(); else if (k === 'x') act.clear(); else if (k === 'pad' && d.col === 2) { if (d.row === 4) act.reset(); else act.clear(); } });
+  dev.bind((k, d, a) => { if (a !== 'click') return; if (k === 'undo') act.undo(); else if (k === 'x') act.clear(); else if (k === 'pad' && d.col === 2) { if (d.row === 4) act.resetfx(); else act.clear(); } });
   dev.focus([[4, 2], [3, 2], [2, 2], [1, 2]]);
   draw(); dev.ring([{ btn: 'x' }, { pad: [4, 2] }]); onLang(draw);
 })();
@@ -928,7 +929,7 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
   const dev = new Device(host); const s = newState(); s.shift = true;
   ['play', 'play', 'play', 'play', 'empty', 'empty'].forEach((st, i) => { s.t[i].st = st; }); s.sel = 1;
   dev.apply(s); dev.setPad(4, 1, '#ffffff', true);
-  const FAMC = ['#3d7bff', '#ff8a1f', '#a45cff', '#19d3e6', '#1fbfa8', '#ffd21f'];
+  const FAMC = ['#3d7bff', '#ff8a1f', '#a45cff', '#19d3e6', '#1fbfa8', '#ffd21f', '#a8e82c'];
   const cards = $$('.fxcard');
   const famOf = n => { const c = $('#fx-' + n); return c ? getComputedStyle(c).getPropertyValue('--c').trim() : null; };
   let page = 1, pick = 1;
