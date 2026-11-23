@@ -19,7 +19,7 @@ for name, lv in L.items():
     for k in lv.get("knobs", []):
         assert k in keys, (name, k)
 # pad -> note table (Movy rack order: pad 1 bottom-left, banks of 4x4)
-want = {"v01": ("All Start/Stop", 36), "v02": ("Rec/Dub 1", 37), "v05": ("Stop All", 40),
+want = {"v01": ("Stop All", 36), "v02": ("Rec/Dub 1", 37), "v05": ("All Start/Stop", 40),
         "v06": ("Play/Stop 1", 41), "v13": ("Shift", 48), "v17": ("Rec/Dub 4", 52),
         "v19": ("Rec/Dub 6", 54), "v20": ("Quantize", 55), "v32": ("Count-in", 67)}
 for v, (nm, note) in want.items():

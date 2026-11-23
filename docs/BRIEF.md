@@ -18,8 +18,8 @@ Row 1 is the bottom row. Notes are declared as drum voices in the hierarchy (`pa
 |---|---|---|---|
 | row 4 | SHIFT (hold) | track selector (PISTA view) | Count-in on/off |
 | row 3 | ARM auto-rec (toggle) | MUTE (keeps running silently, re-enters in place) | Rec Action: REC→PLAY / REC→DUB |
-| row 2 | STOP ALL | STOP (tap = stop; tap on a stopped track = CLEAR, UNDO restores) | Fixed length: free/1/2/4/8 bars (cycles) |
-| row 1 | ALL START/STOP | REC→PLAY→DUB→PLAY… (per Rec Action) | Quantize on/off |
+| row 2 | ALL START/STOP | STOP (tap = stop; tap on a stopped track = CLEAR, UNDO restores) | Fixed length: free/1/2/4/8 bars (cycles) |
+| row 1 | STOP ALL (unlit when idle) | REC→PLAY→DUB→PLAY… (per Rec Action) | Quantize on/off |
 
 - **REVERSE:** SHIFT + a track's row-1 pad (v0.6.0); ARM held + pad stays as an alias. All gestures are note-on only.
 - **Pad ↔ note table:** a single array in the code, so it is easy to change. Verify Movy's pad → voice order (`schwung-movy/src/keyboard/drum-grid.ts`, banks 4×4: v01–16 on the left, v17–32 on the right).
@@ -109,3 +109,6 @@ The cause of today's "0 params" is that Movy reads params from module.json. Dupl
 
 ## v0.14.5
 - `DISC[fx][k]` = knob type (0 continuous, N stepped); `perf_knob_steps()` exposes it. `perf_knob_ex` keeps an accumulator (`acc`, `acc_fx`, `acc_k`): clicks per position 10 (N<=4) / 6 (N<=8) / 3, reset on another knob/effect or reversal. BEAT REPEAT K1, PITCH K1, BITCRUSH K1/K2 became stepped (their decoded value was already quantised). Continuous knobs: fast-spin acceleration for |delta| >= 6 (x1.1 .. x2). Automation of a stepped knob holds the previous value while ramping and plays back without interpolation. The toast names the option reached.
+
+## v0.14.6
+- Column 1 swap: STOP ALL moves to row 1 (note 36, bottom-left), ALL START/STOP to row 2 (note 40). STOP ALL LED: bright yellow while anything runs, `L_OFF` when idle (was dark grey).

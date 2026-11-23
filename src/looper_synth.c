@@ -69,10 +69,10 @@ static const pad_def_t PAD_GRID[4][8] = {
   /* row 3       */ { P(A_ARM,0,"Arm/Reverse"), P(A_MUTE,1,"Mute 1"), P(A_MUTE,2,"Mute 2"),
                       P(A_MUTE,3,"Mute 3"), P(A_MUTE,4,"Mute 4"), P(A_MUTE,5,"Mute 5"),
                       P(A_MUTE,6,"Mute 6"), P(A_RECACT,0,"Rec Action") },
-  /* row 2       */ { P(A_STOPALL,0,"Stop All"), P(A_STOP,1,"Play/Stop 1"), P(A_STOP,2,"Play/Stop 2"),
+  /* row 2       */ { P(A_ALL,0,"All Start/Stop"), P(A_STOP,1,"Play/Stop 1"), P(A_STOP,2,"Play/Stop 2"),
                       P(A_STOP,3,"Play/Stop 3"), P(A_STOP,4,"Play/Stop 4"), P(A_STOP,5,"Play/Stop 5"),
                       P(A_STOP,6,"Play/Stop 6"), P(A_FIXLEN,0,"Fixed Length") },
-  /* row 1 (bot) */ { P(A_ALL,0,"All Start/Stop"), P(A_REC,1,"Rec/Dub 1"), P(A_REC,2,"Rec/Dub 2"),
+  /* row 1 (bot) */ { P(A_STOPALL,0,"Stop All"), P(A_REC,1,"Rec/Dub 1"), P(A_REC,2,"Rec/Dub 2"),
                       P(A_REC,3,"Rec/Dub 3"), P(A_REC,4,"Rec/Dub 4"), P(A_REC,5,"Rec/Dub 5"),
                       P(A_REC,6,"Rec/Dub 6"), P(A_QUANT,0,"Quantize") },
 };
@@ -1137,7 +1137,7 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
         if (s->shift_held) return n->fx_on[i] ? L_WHITE : TRK_VDIM[i];
         return s->sel == t ? TRK_BRIGHT[i] : TRK_VDIM[i];
     case A_ALL:     return n->any_run ? L_WHITE : L_GREY_40;
-    case A_STOPALL: return n->any_run ? L_BRIGHT_YELLOW : L_DARK_GREY;
+    case A_STOPALL: return n->any_run ? L_BRIGHT_YELLOW : L_OFF;   /* idle = unlit */
     case A_SHIFT:   return s->shift_held ? L_WHITE : s->perf_mode ? (LED_BLINK | L_WHITE) : L_GREY_40;
     case A_ARM:     return s->arm ? (LED_BLINK | L_ORANGE) : L_DARK_GREY;
     /* column 8 (REC SETTINGS): all white; bright = on / not the default, dim = off / default */
