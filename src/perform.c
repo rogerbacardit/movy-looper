@@ -356,7 +356,12 @@ static void auto_block(perf_t *p, const double *tpos, const double *tlen) {
             int touched = atomic_exchange(&p->touch[fx][k], 0);
             if (lane_of[fx] < 0) { p->armed[fx][k] = 0; p->last_step[fx][k] = -1; continue; }
             if (hs < 0) { p->armed[fx][k] = 0; p->last_step[fx][k] = -1; }
-            else if (touched) p->armed[fx][k] = 1;
+            else if (touched && !p->armed[fx][k]) {                 /* arming: every EMPTY step of the loop starts at the current value,
+                                                                     * so the curve always spans the whole loop (IN to OUT), not just where the knob moved */
+                p->armed[fx][k] = 1;
+                uint8_t v0 = (uint8_t)lroundf(p->fine[fx][k] * 2.0f);
+                for (int s = 0; s < PF_AU_N; s++) if (p->au[hold][fx][k][s] == 255) au_put(p, hold, fx, k, s, v0);
+            }
             if (p->armed[fx][k]) {
                 float v = p->fine[fx][k];
                 int ls = p->last_step[fx][k];
@@ -365,9 +370,9 @@ static void auto_block(perf_t *p, const double *tpos, const double *tlen) {
                 p->last_step[fx][k] = hs; p->last_val[fx][k] = v;
                 continue;
             }
-            int owner = lane_of[fx];
-            if (owner == 0) { for (int t = 1; t < PF_NLANE; t++) if (p->aucnt[t][fx][k]) { owner = t; break; } }
-            if (owner < 1 || !p->aucnt[owner][fx][k]) continue;
+            int owner = lane_of[fx];                                  /* the track the effect is bound to, else the first track holding a curve */
+            if (owner < 1 || !p->aucnt[owner][fx][k]) { owner = 0; for (int t = 1; t < PF_NLANE; t++) if (p->aucnt[t][fx][k]) { owner = t; break; } }
+            if (owner < 1) continue;
             double x = au_pos(tpos, tlen, owner);
             if (x < 0.0) continue;
             int i0 = (int)x; if (i0 >= PF_AU_N) i0 = PF_AU_N - 1;

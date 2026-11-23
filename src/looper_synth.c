@@ -950,6 +950,19 @@ static void erase_last(synth_t *s, int t) {
     clear_track(s, t);
 }
 
+/* v0.14.2: Delete + selector = every setting of the track back to its factory value, EXCEPT the audio and IN / OUT:
+ * FX off + default amount, pan centre, volume 100, speed 1x, reverse off, mute off, one-shot off, its PERFORM effects
+ * (latched and held) off and its automation cleared. The old full RESET (looper SHIFT + Delete + selector) also clears audio. */
+static void reset_fx_track(synth_t *s, int t) {
+    if (s->perf) { perf_clear_target(s->perf, t); perf_auto_clear(s->perf, t, -1, -1); }
+    for (int b = 0; b < PF_BANK; b++) if (s->down_fx[b] >= 0 && s->perf && !(perf_on_mask(s->perf) >> s->down_fx[b] & 1u)) s->down_fx[b] = -1;
+    s->grid_view = 0;
+    reset_settings(s, t, 0);
+    set_t(s, t, "fx", 0);
+    s->wave_dirty = 1;
+    say(s, "RESET FX %d", t);
+}
+
 static void delete_pad(synth_t *s, int idx) {
     const pad_def_t *p = pad_for_note(NOTE_BASE + idx);
     if (!p || p->arg < 1 || p->arg > NTRK) return;
@@ -958,10 +971,7 @@ static void delete_pad(synth_t *s, int idx) {
     /* v0.14: Delete + selector now only wipes the track's knob automation. */
     if (p->act == A_SEL && s->shift_held) { s->shift_used = 1; reset_track(s, p->arg); }
     else if (p->act == A_SEL) {                                  /* v0.14: Delete + selector = wipe that track's knob automation (audio stays) */
-        if (s->perf) { perf_auto_clear(s->perf, p->arg, -1, -1); perf_clear_target(s->perf, p->arg); }   /* v0.14.1: its PERFORM effects (latched and held) go off too */
-        for (int b = 0; b < PF_BANK; b++) if (s->down_fx[b] >= 0 && s->perf && !(perf_on_mask(s->perf) >> s->down_fx[b] & 1u)) s->down_fx[b] = -1;
-        s->grid_view = 0;
-        say(s, "FX+AUTO CLR %d", p->arg);
+        reset_fx_track(s, p->arg);
     }
     else if (p->act == A_REC) erase_last(s, p->arg);
     else clear_track(s, p->arg);

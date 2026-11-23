@@ -178,6 +178,8 @@ static void wait_until_saved(const char *dir, const char *f, int ms) {
 static perf_t *(*pf_create)(void); static void (*pf_destroy)(perf_t *);
 static int (*pf_press)(perf_t *, int, int, long, int); static int (*pf_release)(perf_t *, int, long);
 static void (*pf_begin_raw)(perf_t *, double, double, const double *, const double *);
+static int (*pf_pct_get_fn)(const perf_t *, int, int);
+#define pf_pct_get(p, f, k) ((double)pf_pct_get_fn((p), (f), (k)))
 static const double pf_zero[7];
 static void pf_begin(perf_t *p, double g, double b) { pf_begin_raw(p, g, b, pf_zero, pf_zero); }
 static void (*pf_proc)(perf_t *, int, float *, float *);
@@ -190,7 +192,7 @@ static int api_x_k = -1, api_x_v = 0;      /* optional 2nd knob set by api_tones
 static void api_init(void *h) {
     *(void **)&pf_create = dlsym(h, "perf_create"); *(void **)&pf_destroy = dlsym(h, "perf_destroy");
     *(void **)&pf_press = dlsym(h, "perf_press"); *(void **)&pf_release = dlsym(h, "perf_release");
-    *(void **)&pf_begin_raw = dlsym(h, "perf_block_begin"); *(void **)&pf_proc = dlsym(h, "perf_process");
+    *(void **)&pf_begin_raw = dlsym(h, "perf_block_begin"); *(void **)&pf_pct_get_fn = dlsym(h, "perf_pct"); *(void **)&pf_proc = dlsym(h, "perf_process");
     *(void **)&pf_pct_set = dlsym(h, "perf_pct_set"); *(void **)&pf_count = dlsym(h, "perf_count");
     *(void **)&pf_latch_mask = dlsym(h, "perf_latch_mask"); *(void **)&pf_on_mask = dlsym(h, "perf_on_mask");
     *(void **)&pf_entry_fn = dlsym(h, "perf_entry"); *(void **)&pf_top = dlsym(h, "perf_top_fx"); *(void **)&pf_held = dlsym(h, "perf_held_count");
@@ -2157,16 +2159,58 @@ int main(int argc, char **argv) {
         fresh(&host); seti("quantize", 0);
         tap(REC(3)); run(300); tap(REC(3)); run(2);
         seti("t3_pan", 20); seti("t3_level", 140);
-        /* v0.14: Delete + selector wipes the track's knob AUTOMATION; the audio stays */
+        seti("t3_fx", 4); seti("t3_fx_on", 1); seti("t3_fxp", 80); seti("t3_spd", 5); seti("t3_rev", 1); seti("t3_shot", 1);
+        int len3 = gett(3, "len"), off3 = gett(3, "off");
+        /* v0.14.2: Delete + selector resets every setting of the track, keeps the audio and IN / OUT */
         tap(M_SHIFT); tap(FX(3)); setstr("step", "10"); run(3); setstr("step_up", "10");      /* on PISTA 3 */
         down(REC(3)); setstr("knob_delta", "2:-1"); run(60); up(REC(3));
         CHECK(geti("perf_auto") > 0 && geti("perf_n") == 1);
         seti("delete_pad", FX(3) - 36); run(2);
-        CHECK(!strcmp(status_text(), "FX+AUTO CLR 3") && state(3) == S_PLAY && geti("perf_auto") == 0);
+        CHECK(!strcmp(status_text(), "RESET FX 3") && geti("perf_auto") == 0);
         CHECK(geti("perf_n") == 0 && geti("perf_latch") == 0);                 /* the track's effect went off with it */
-        CHECK(gett(3, "pan") == 20 && gett(3, "level") == 140);          /* settings stay */
+        CHECK(gett(3, "pan") == 50 && gett(3, "level") == 100 && gett(3, "fx_on") == 0 && gett(3, "fx") == 0 && gett(3, "fxp") == 50);
+        CHECK(gett(3, "spd") == 3 && gett(3, "rev") == 0 && gett(3, "shot") == 0);
+        CHECK(gett(3, "len") == len3 && gett(3, "off") == off3 && state(3) != S_EMPTY);   /* audio and IN / OUT stay */
         seti("delete_pad", STOP(3) - 36); run(2);
         CHECK(state(3) == S_EMPTY && !strcmp(status_text(), "CLEAR 3"));   /* rows 2-3 still clear the audio */
+    }
+
+    /* --- v0.14.2: automation cycle = exactly one loop of the clip (IN to OUT), at any speed, after many loops --- */
+    {
+        static void (*knob_ex)(perf_t *, int, int, int, int); static void (*hold_fn)(perf_t *, int);
+        *(void **)&knob_ex = dlsym(h, "perf_knob_ex"); *(void **)&hold_fn = dlsym(h, "perf_auto_hold");
+        for (int variant = 0; variant < 3; variant++) {
+            const double len = 44100.0 * 1.37, rate = variant == 1 ? 2.0 : variant == 2 ? 0.5 : 1.0;   /* a loop that is not a block multiple */
+            perf_t *p = pf_create();
+            pf_press(p, PF_GATE, 1, 0, 0);                                     /* GATE bound to track 1 */
+            double tl[7] = { 0 }, tp[7] = { 0 }; tl[1] = len;
+            static double rec_pos[4000], rec_val[4000]; int nrec = 0;
+            double pos = 0.0; int blocks_per_loop = (int)ceil(len / (128.0 * rate));
+            hold_fn(p, 1);
+            for (int b = 0; b < blocks_per_loop; b++) {                          /* record a ramp over exactly one loop */
+                tp[1] = pos; pf_begin_raw(p, pos, 9600.0, tp, tl);
+                if (b % 2 == 0 && b < blocks_per_loop - 2) knob_ex(p, PF_GATE, 1, 1, 1);   /* +0.5 % every other block */
+                if (nrec < 4000) { rec_pos[nrec] = pos / len; rec_val[nrec] = pf_pct_get(p, PF_GATE, 1); nrec++; }
+                pos += 128.0 * rate; if (pos >= len) pos -= len;
+            }
+            hold_fn(p, 0);
+            tp[1] = pos; pf_begin_raw(p, pos, 9600.0, tp, tl);
+            pos += 128.0 * rate; if (pos >= len) pos -= len;
+            int bad = 0, checked = 0;
+            for (int b = 0; b < blocks_per_loop * 25 + 77; b++) {                 /* then 25+ loops of playback */
+                tp[1] = pos; pf_begin_raw(p, pos, 9600.0, tp, tl);
+                if (b > blocks_per_loop * 24 && b % 29 == 0) {                     /* several positions after many loops */
+                    double ph = pos / len, want = -1; int bi = -1; double bd = 9;
+                    for (int i = 0; i < nrec; i++) { double d = fabs(rec_pos[i] - ph); if (d > 0.5) d = 1.0 - d; if (d < bd) { bd = d; bi = i; } }
+                    want = rec_val[bi]; checked++;
+                    if (fabs(pf_pct_get(p, PF_GATE, 1) - want) > 2.0 || bd > 0.02) bad++;
+                }
+                pos += 128.0 * rate; if (pos >= len) pos -= len;
+            }
+            CHECK(checked > 5 && bad == 0);
+            CHECK(pf_pct_get(p, PF_GATE, 1) > 0);
+            pf_destroy(p);
+        }
     }
 
     /* --- v0.14: LFO rate list = 14 synced divisions then 11 free Hz rates, one stepped knob --- */

@@ -2490,7 +2490,10 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
         mk_track_t *pb = base_playing(m);
         double a_pos[MARK_TRACKS + 1] = {0}, a_len[MARK_TRACKS + 1] = {0};   /* L606: knob automation follows each playing track's own loop */
         for (int i = 0; i < MARK_TRACKS; i++)
-            if (m->t[i].len > 0 && (m->t[i].st == MK_PLAY || m->t[i].st == MK_DUB)) { a_pos[i + 1] = (double)m->t[i].pos; a_len[i + 1] = (double)reg_len(&m->t[i]); }
+            if (m->t[i].len > 0 && (m->t[i].st == MK_PLAY || m->t[i].st == MK_DUB)) {
+                double rl_ = (double)reg_len(&m->t[i]);   /* one automation cycle = the clip from IN to OUT: reverse mirrors the head */
+                a_pos[i + 1] = m->t[i].rev ? rl_ - (double)m->t[i].pos : (double)m->t[i].pos; a_len[i + 1] = rl_;
+            }
         perf_block_begin(pf, pb ? pb->pos : (double)m->global_frames, effective_grid(m) / 4.0, a_pos, a_len);
     }
 
