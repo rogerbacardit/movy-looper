@@ -82,10 +82,12 @@ static const pad_def_t PAD_GRID[4][8] = {
 #define MAXBLK            128        /* core block size */
 
 /* Fixed recording length is a number of bars, 0 = free, 1..MAX_BARS. The pad in
- * column 8 cycles free -> 1 -> 2 -> 4 -> 8 -> free; the 16 step buttons pick
+ * column 8 cycles free -> 1 -> 2 -> 4 -> 8 -> 16 -> 32 -> free; the 16 step buttons pick
  * any of 1..16 directly (pressing the chosen one again = free). */
-#define MAX_BARS 16
-static const int CYCLE_BARS[4] = { 1, 2, 4, 8 };
+#define MAX_BARS 32
+#define NSTEP_BTN 16                   /* the step row picks 1..16 bars directly */
+#define NCYCLE 6
+static const int CYCLE_BARS[NCYCLE] = { 1, 2, 4, 8, 16, 32 };
 
 /* Knob view. MIX (sel = 0): the knobs are the volumes (Movy's root page). PISTA
  * (sel = 1..6, chosen with the row-4 selector pads): Movy hands the knob turns
@@ -327,8 +329,23 @@ static void say_rec(synth_t *s, int t) {
 }
 
 /* Fixed recording length for the next recordings, with its status line. */
+/* Whole bars that fit a track buffer at the current tempo (the buffer holds track_secs seconds). */
+static int fit_bars(synth_t *s);
+static int fit_cycle(synth_t *s) {                    /* the largest cycle value (1,2,4..32) that fits */
+    int fit = fit_bars(s), m = 1;
+    for (int i = 0; i < NCYCLE; i++) if (CYCLE_BARS[i] <= fit) m = CYCLE_BARS[i];
+    return m;
+}
 static void set_rec_bars(synth_t *s, int bars) {
-    s->rec_len = clampi_(bars, 0, MAX_BARS);
+    bars = clampi_(bars, 0, MAX_BARS);
+    int fit = fit_bars(s);
+    if (bars > fit) {                                  /* too long for the buffer at this tempo: the largest cycle value that fits */
+        int m = fit_cycle(s);
+        say(s, "LEN %d > MAX %d", bars, m);
+        s->rec_len = m;
+        return;
+    }
+    s->rec_len = bars;
     if (s->rec_len == 0) say(s, "LEN FREE");
     else if (s->rec_len == 1) say(s, "LEN 1 BAR");
     else say(s, "LEN %d BARS", s->rec_len);
@@ -351,13 +368,14 @@ static int clip_bars(synth_t *s, int t) {
 
 /* Max loop length the track buffers hold, in frames. */
 static long cap_frames(synth_t *s) { return (long)get_i(s, "track_secs") * (long)MARK_SR; }
+static int fit_bars(synth_t *s) { long n = (long)((double)cap_frames(s) / bar_frames(s) + 1e-6); return n < 1 ? 1 : n > MAX_BARS ? MAX_BARS : (int)n; }
 
 /* Step button N (0-based). On the SELECTED track (last touched track pad):
  *  - with a clip: its length becomes N+1 bars (shorter = non-destructive trim,
  *    longer = the content repeats to fill), one undo level;
  *  - otherwise: the fixed length of the next recordings; the chosen one again = free. */
 static void step_press(synth_t *s, int button) {
-    if (button < 0 || button >= MAX_BARS) return;
+    if (button < 0 || button >= NSTEP_BTN) return;
     int t = s->cur_track, bars = button + 1;
     if (clip_state(core_state(s, t))) {
         long nl = lround(bar_frames(s) * bars), len = get_t(s, t, "len");
@@ -899,9 +917,10 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         set_i(s, "rec_action", !get_i(s, "rec_action"));
         say(s, get_i(s, "rec_action") ? "REC>DUB" : "REC>PLAY");
         break;
-    case A_FIXLEN: {                       /* cycle free -> 1 -> 2 -> 4 -> 8 -> free */
-        int next = 0;
-        for (int i = 0; i < 4; i++) if (CYCLE_BARS[i] > s->rec_len) { next = CYCLE_BARS[i]; break; }
+    case A_FIXLEN: {                       /* cycle free -> 1 -> 2 -> 4 -> 8 -> 16 -> 32 -> free (clamped to what the buffer holds) */
+        int next = 0, fit = fit_bars(s), fc = fit_cycle(s);
+        for (int i = 0; i < NCYCLE; i++) if (CYCLE_BARS[i] > s->rec_len) { next = CYCLE_BARS[i]; break; }
+        if (next > fit && s->rec_len >= fc) next = 0;             /* already at the largest that fits: back to free, never stuck */
         set_rec_bars(s, next);
         break;
     }
@@ -1431,7 +1450,9 @@ static void build_hierarchy(synth_t *s) {
     static const char *lenopts =
         "[\"Free\",\"1 bar\",\"2 bars\",\"3 bars\",\"4 bars\",\"5 bars\",\"6 bars\",\"7 bars\","
         "\"8 bars\",\"9 bars\",\"10 bars\",\"11 bars\",\"12 bars\",\"13 bars\",\"14 bars\","
-        "\"15 bars\",\"16 bars\"]";
+        "\"15 bars\",\"16 bars\",\"17 bars\",\"18 bars\",\"19 bars\",\"20 bars\",\"21 bars\",\"22 bars\","
+        "\"23 bars\",\"24 bars\",\"25 bars\",\"26 bars\",\"27 bars\",\"28 bars\",\"29 bars\",\"30 bars\","
+        "\"31 bars\",\"32 bars\"]";
 
     APP("{\"pad_layout\":\"drums\",\"pad_leds_param\":\"pad_leds\","
         "\"status_text_param\":\"status_text\",\"display_param\":\"display\",\"delete_pad_param\":\"delete_pad\","
@@ -2104,7 +2125,7 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     if (!strcmp(key, "cur_track")) { s->cur_track = clampi(v, 1, NTRK); return; }
     if (!strcmp(key, "threshold")) { s->threshold = clampi(v, -70, -6); return; }
     if (!strcmp(key, "count_in"))  { s->count_in = v ? 1 : 0; return; }
-    if (!strcmp(key, "rec_len"))   { s->rec_len = clampi(v, 0, MAX_BARS); return; }
+    if (!strcmp(key, "rec_len"))   { set_rec_bars(s, v); return; }   /* the setup enum too: clamped to what the buffer holds */
     if (!strcmp(key, "step"))      {
         if (perf_page(s)) { if (s->shift_held) s->shift_used = 1; perf_step_down(s, v); } else step_press(s, v);
         return;

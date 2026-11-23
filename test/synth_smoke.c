@@ -400,7 +400,7 @@ int main(int argc, char **argv) {
 
     /* --- fixed length: 1 bar @120 = 2 s --- */
     tap(M_STOPALL);
-    for (int i = 0; i < 5; i++) tap(R_FIXLEN);                      /* full cycle -> Free */
+    for (int i = 0; i < 7; i++) tap(R_FIXLEN);                      /* full cycle -> Free */
     CHECK(geti("rec_len") == 0);
     tap(R_FIXLEN); CHECK(geti("rec_len") == 1);
     tap(REC(4)); CHECK(state(4) == S_REC);
@@ -767,6 +767,8 @@ int main(int argc, char **argv) {
         setstr("step", "2");                                          /* 3 bars */
         tap(R_FIXLEN); CHECK(geti("rec_len") == 4); CHECK(step_led(3) == 120);
         tap(R_FIXLEN); CHECK(geti("rec_len") == 8);
+        tap(R_FIXLEN); CHECK(geti("rec_len") == 16);
+        tap(R_FIXLEN); CHECK(geti("rec_len") == 32 && !strcmp(status_text(), "LEN 32 BARS"));
         tap(R_FIXLEN); CHECK(geti("rec_len") == 0); CHECK(!strcmp(status_text(), "LEN FREE"));
         tap(R_FIXLEN); CHECK(geti("rec_len") == 1); CHECK(step_led(0) == 120);
         /* the pad LED and the setup enum agree with the steps */
@@ -784,8 +786,16 @@ int main(int argc, char **argv) {
         seti("cur_track", 3); setstr("step", "2");
         /* the setup page's enum is the same value */
         seti("rec_len", 6); CHECK(geti("rec_len") == 6 && step_led(5) == 120);
-        seti("rec_len", 99); CHECK(geti("rec_len") == 16);
+        seti("rec_len", 99); CHECK(geti("rec_len") == 32);
         seti("rec_len", 0);
+        /* v0.14.6: 32 bars do not fit the 120 s buffer at slow tempos: clamp to the largest that fits, never stuck */
+        seti("bpm_override", 40);                                     /* 6 s per bar: 20 bars fit, so 16 is the largest cycle value */
+        seti("rec_len", 16);
+        seti("rec_len", 32); CHECK(geti("rec_len") == 16 && !strcmp(status_text(), "LEN 32 > MAX 16"));
+        tap(R_FIXLEN); CHECK(geti("rec_len") == 0);                   /* at the largest that fits, the next press goes back to free */
+        seti("rec_len", 8); tap(R_FIXLEN); CHECK(geti("rec_len") == 16);
+        tap(R_FIXLEN); CHECK(geti("rec_len") == 0);                   /* 32 does not fit: free instead of sticking at 16 */
+        seti("rec_len", 0); seti("bpm_override", 0);
     }
 
     /* --- Loop + knob = clip start --- */

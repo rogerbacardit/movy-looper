@@ -252,3 +252,5 @@ A Movy without the feature ignores both params; nothing else changes.
 Knobs por pasos (N): BEAT REPEAT K1 (6); STUTTER K2 (3); PITCH K1 (25 semitonos); BITCRUSH K1 (15 bits) y K2 (32 divisores); LFO K1 (25 tasas) y K2 (4 destinos); REVERSE K1 (4); FILTER LP / HP K3 (2); GATE K1 (6); DELAY K1 (5); FREEZE K1 (5); RETRIGGER K1 (3); HALF SPEED K1 (2); KILL K1 (3); SIDECHAIN K1 (6); RING MOD K2 (2); AUTOPAN y TREMOLO K1 (8) y K3 (3). El resto de knobs son continuos.
 
 **v0.14.6:** en la columna 1 se intercambian STOP ALL (ahora abajo del todo, fila 1) y ALL START/STOP (fila 2). STOP ALL se enciende en amarillo cuando algo suena y queda apagado en reposo.
+
+**v0.14.6:** el pad LEN (columna 8, fila 2) cicla Libre / 1 / 2 / 4 / 8 / 16 / 32 compases. Si el largo no cabe en el buffer de pista (120 s, depende del tempo) se recorta al mayor que cabe y avisa `LEN 32 > MAX 16`; si ya estas en ese maximo, la siguiente pulsacion vuelve a Libre. El enum de Setup llega a 32 compases y lo guardado antiguo (<= 16) sigue valiendo. Los botones de paso siguen fijando 1..16 compases; con un clip de mas de 16 compases se ven todos en gris tenue.
