@@ -1134,8 +1134,9 @@ int main(int argc, char **argv) {
         CHECK(!strcmp(disp_head(), "PISTA 1 IN +8/16") && abs(disp_mark() - 63) <= 2);
         setstr("knob_delta", "1:1:1");                                /* Movy's fine flag is ignored: normal 1/16 step */
         CHECK(abs(gett(1, "off") - 44100 - 5512) <= 3);
-        down(M_SHIFT); setstr("knob_delta", "1:-1"); up(M_SHIFT);     /* SHIFT + K1 = normal step too */
-        CHECK(abs(gett(1, "off") - 44100) <= 3);
+        down(M_SHIFT); setstr("knob_delta", "1:-1"); up(M_SHIFT);     /* SHIFT held = the PERFORM page: K1 never moves IN (v0.14.4) */
+        CHECK(abs(gett(1, "off") - 44100 - 5512) <= 3);
+        setstr("knob_delta", "1:-1"); CHECK(abs(gett(1, "off") - 44100) <= 3);
         setstr("knob_delta", "1:1"); CHECK(abs(gett(1, "off") - 44100 - 5512) <= 3);
         setstr("knob_delta", "9:1"); setstr("knob_delta", "x"); setstr("knob_delta", "1:0");
         setstr("loop_knob", "1:-8");                                  /* Loop + knob keeps working */
@@ -1149,9 +1150,9 @@ int main(int argc, char **argv) {
         UNDO(); CHECK(labs(gett(1, "len") - L) < 8);
         REDO(); CHECK(labs(gett(1, "len") - 55125) < 2);
         UNDO();
-        down(M_SHIFT); setstr("knob_delta", "2:-1"); up(M_SHIFT);     /* SHIFT + K2 = normal 1/16 step */
-        CHECK(labs(gett(1, "len") - 82687) < 3);
-        UNDO();
+        long l_before = gett(1, "len");
+        down(M_SHIFT); setstr("knob_delta", "2:-1"); up(M_SHIFT);     /* SHIFT held = PERFORM page: K2 never moves OUT (v0.14.4) */
+        CHECK(gett(1, "len") == l_before);
         setstr("knob_delta", "2:-16"); setstr("knob_delta", "2:-16"); setstr("knob_delta", "2:-16");
         CHECK(gett(1, "len") >= 5512 && gett(1, "len") <= 5513);      /* never below one 1/16 note */
         UNDO();
@@ -2227,6 +2228,33 @@ int main(int argc, char **argv) {
         CHECK(!strcmp(status_text(), "UNSOLO 2") && state(1) == S_PLAY && state(2) == S_PLAY && state(3) == S_PLAY);
         seti("shift_pad", 24); run(2);                                     /* the exact value from the device log (rack 25 - 1) */
         CHECK(!strcmp(status_text(), "SOLO 4") || !strcmp(status_text(), "UNSOLO 4"));
+    }
+
+    /* --- v0.14.4: in PERFORM the knobs never touch IN / OUT / speed, with or without an effect --- */
+    {
+        fresh(&host); seti("quantize", 0);
+        tap(REC(3)); run(300); tap(REC(3)); run(2);
+        tap(FX(3));                                                         /* PISTA 3: K1 = IN, K2 = OUT, K7 = speed */
+        int off0 = gett(3, "off"), len0 = gett(3, "len"), spd0 = gett(3, "spd"), lv0 = gett(3, "level");
+        setstr("knob_delta", "1:8"); CHECK(gett(3, "off") != off0);          /* outside PERFORM it still moves (sanity) */
+        seti("t3_off", off0);
+        tap(M_SHIFT);                                                        /* PERFORM mode on, no effect */
+        CHECK(geti("knob_capture") == 1);
+        off0 = gett(3, "off");
+        const char *KN[] = { "1:8", "2:-8", "3:5", "4:5", "5:3", "6:3", "7:2", "8:1", "1:8:1", "2:-8:1" };
+        for (int i = 0; i < 10; i++) setstr("knob_delta", KN[i]);
+        setstr("loop_knob", "3:8"); setstr("loop_knob", "3:-8:1");
+        CHECK(gett(3, "off") == off0 && gett(3, "len") == len0 && gett(3, "spd") == spd0 && gett(3, "level") == lv0 && gett(3, "rev") == 0);
+        setstr("step", "10"); run(3); setstr("step_up", "10");               /* an effect on: knobs go to it, never to the clip */
+        setstr("knob_delta", "1:3"); setstr("knob_delta", "2:3"); setstr("knob_delta", "7:3"); setstr("loop_knob", "3:8");
+        CHECK(gett(3, "off") == off0 && gett(3, "len") == len0 && gett(3, "spd") == spd0);
+        setstr("step", "10"); setstr("step_up", "10");                       /* the moment after switching it off */
+        CHECK(geti("perf_n") == 0);
+        for (int i = 0; i < 10; i++) setstr("knob_delta", KN[i]);
+        setstr("loop_knob", "3:8");
+        CHECK(gett(3, "off") == off0 && gett(3, "len") == len0 && gett(3, "spd") == spd0 && gett(3, "level") == lv0);
+        tap(M_SHIFT);                                                        /* mode off: the PISTA knobs work again */
+        setstr("knob_delta", "1:8"); CHECK(gett(3, "off") != off0);
     }
 
     /* --- v0.14: LFO rate list = 14 synced divisions then 11 free Hz rates, one stepped knob --- */

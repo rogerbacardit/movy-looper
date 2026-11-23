@@ -437,6 +437,7 @@ static void loop_knob(synth_t *s, const char *val) {
     int n = 0, d = 0, fine = 0;
     if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
     if (n < 1 || n > NTRK || d == 0) return;
+    if (s->shift_held || s->perf_mode) return;        /* v0.14.4: PERFORM never moves IN / OUT */
     start_knob(s, n, d, fine, 0);
 }
 
@@ -594,6 +595,7 @@ static void knob_delta(synth_t *s, const char *val) {
         }
         return;
     }
+    if (perf_page(s)) return;                      /* v0.14.4: PERFORM mode / page showing and no effect to steer: the knobs do nothing to the clip */
     if (n < 1 || n > 8 || d == 0 || s->sel == 0) return;
     int t = s->sel;
     fine = 0;
@@ -2176,7 +2178,7 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
         RET("%s", hx);
     }
     if (!strcmp(key, "step_bank")) RET("%d", perf_page(s) ? s->perf_bank : -1);   /* -1: not on the PERFORM page, < > stay the host's */
-    if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0 || perf_knob_fx(s) >= 0);
+    if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0 || perf_knob_fx(s) >= 0);   /* with a PISTA selected in PERFORM the module keeps the knobs and ignores the ones with no effect to steer */
     if (!strcmp(key, "screen")) {
         static char sc[GFX_HEX_LEN + 24];       /* get_param runs on one thread */
         perf_ui_set_bank(s->perf_bank);
