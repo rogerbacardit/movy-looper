@@ -25,6 +25,7 @@ enum { PF_BEATREP = 0, PF_STUTTER, PF_PITCH, PF_CRUSH, PF_TSTOP, PF_LFO, PF_REVE
        PF_LP, PF_HP, PF_GATE, PF_DELAY, PF_FREEZE, PF_RETRIG, PF_HALF, PF_KILL,
        PF_DUCK,                 /* bank 2, step 1 (17th effect) */
        PF_DRIVE, PF_RINGMOD, PF_FLANGER, PF_PHASER, PF_CHORUS, PF_AUTOPAN, PF_TREMOLO, PF_COMB,   /* bank 2, steps 2-9 */
+       PF_TEMPO,                /* bank 2, step 10: time-stretch of a track's clip, pitch kept (tracks only, not MIX) */
        PF_NFX };
 #define PF_BANK 16              /* effects per page of step buttons; < and > flip pages (max 2 pages: masks are 32 bit) */
 #define PF_NBANK ((PF_NFX + PF_BANK - 1) / PF_BANK)
@@ -94,6 +95,18 @@ void perf_auto_put(perf_t *p, int track, int fx, int knob, const uint8_t *in);  
 
 /* audio thread */
 /* tpos/tlen: [PF_NLANE] playhead and region length in frames of each PLAYING track, index 1..6 (tlen 0 = not playing) */
+/* the clip each track plays, refreshed by the engine every block, for the effects that read the loop buffer themselves
+ * (TEMPO): idx = buffer frame, region = [off, len) frames, pos = playhead in the region at the block start, rate = frames per frame */
+typedef struct {
+    const void *ctx;
+    void (*load)(const void *ctx, uint32_t idx, float *l, float *r);
+    uint32_t off, len;
+    double pos, rate;
+    int rev, valid;
+} perf_clip_t;
+void perf_clip(perf_t *p, int lane, const perf_clip_t *c);
+void perf_set_bpm(perf_t *p, double bpm);       /* project tempo for the BPM readout / knob of TEMPO (control side) */
+
 void perf_block_begin(perf_t *p, double grid_pos, double beat_frames, const double *tpos, const double *tlen);
 void perf_process(perf_t *p, int lane, float *l, float *r);   /* in place, int16-scaled floats */
 

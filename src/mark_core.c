@@ -355,6 +355,7 @@ static inline void tbuf_store(int16_t *b, uint32_t f, int16_t l, int16_t r) {
 #endif
 }
 
+static void perf_load16(const void *ctx, uint32_t f, float *l, float *r);
 static inline void tbuf_load(const int16_t *b, uint32_t f, float *l, float *r) {
 #if MARK_CH == 1
     *l = *r = (float)b[f];
@@ -363,6 +364,8 @@ static inline void tbuf_load(const int16_t *b, uint32_t f, float *l, float *r) {
     *r = (float)b[f * 2 + 1];
 #endif
 }
+
+static void perf_load16(const void *ctx, uint32_t f, float *l, float *r) { tbuf_load((const int16_t *)ctx, f, l, r); }
 
 /* Overdub: layer on top of what is already stored. */
 static inline void tbuf_add(int16_t *b, uint32_t f, float l, float r) {
@@ -2494,6 +2497,12 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
                 double rl_ = (double)reg_len(&m->t[i]);   /* one automation cycle = the clip from IN to OUT: reverse mirrors the head */
                 a_pos[i + 1] = m->t[i].rev ? rl_ - (double)m->t[i].pos : (double)m->t[i].pos; a_len[i + 1] = rl_;
             }
+        for (int i = 0; i < MARK_TRACKS; i++) {                      /* L606: the clip each track plays, for TEMPO (time-stretch) */
+            mk_track_t *tt = &m->t[i];
+            perf_clip_t pc = { tt->buf, perf_load16, tt->off, tt->len, (double)tt->pos, spd_rate(tt), tt->rev, 0 };
+            pc.valid = tt->len > tt->off && (tt->st == MK_PLAY || tt->st == MK_DUB) && m->swap_track != i;
+            perf_clip(pf, i + 1, &pc);
+        }
         perf_block_begin(pf, pb ? pb->pos : (double)m->global_frames, effective_grid(m) / 4.0, a_pos, a_len);
     }
 

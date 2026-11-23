@@ -188,13 +188,23 @@ static unsigned (*pf_latch_mask)(const perf_t *); static unsigned (*pf_on_mask)(
 static int (*pf_top)(const perf_t *); static int (*pf_held)(const perf_t *);
 static int (*pf_entry_fn)(const perf_t *, int, int *, int *, int *, int *);
 #define perf_entry_ok pf_entry_fn
+/* a 1 s clip: 440 Hz carrier whose level swells twice (envelope period 0.5 s), for the TEMPO tests */
+typedef struct { const void *ctx; void (*load)(const void *, uint32_t, float *, float *); uint32_t off, len; double pos, rate; int rev, valid; } clip_t;
+static void tempo_clip_load(const void *c, uint32_t i, float *l, float *r) {
+    (void)c; double tt = (double)(i % 44100) / 44100.0;
+    float env = (float)(0.55 + 0.45 * sin(2.0 * M_PI * tt * 2.0));
+    *l = *r = (float)(sin(2.0 * M_PI * 440.0 * tt) * 8000.0) * env;
+}
+static void (*pf_clip_fn)(perf_t *, int, const clip_t *); static int (*pf_lane_act)(const perf_t *, int);
+static void (*pf_release_fn)(perf_t *, int, long);
 static int api_x_k = -1, api_x_v = 0;      /* optional 2nd knob set by api_tones on pct_fx */
 static void api_init(void *h) {
     *(void **)&pf_create = dlsym(h, "perf_create"); *(void **)&pf_destroy = dlsym(h, "perf_destroy");
-    *(void **)&pf_press = dlsym(h, "perf_press"); *(void **)&pf_release = dlsym(h, "perf_release");
+    *(void **)&pf_press = dlsym(h, "perf_press"); *(void **)&pf_release = dlsym(h, "perf_release"); *(void **)&pf_release_fn = dlsym(h, "perf_release");
     *(void **)&pf_begin_raw = dlsym(h, "perf_block_begin"); *(void **)&pf_pct_get_fn = dlsym(h, "perf_pct"); *(void **)&pf_proc = dlsym(h, "perf_process");
     *(void **)&pf_pct_set = dlsym(h, "perf_pct_set"); *(void **)&pf_count = dlsym(h, "perf_count");
     *(void **)&pf_latch_mask = dlsym(h, "perf_latch_mask"); *(void **)&pf_on_mask = dlsym(h, "perf_on_mask");
+    *(void **)&pf_clip_fn = dlsym(h, "perf_clip"); *(void **)&pf_lane_act = dlsym(h, "perf_lane_active");
     *(void **)&pf_entry_fn = dlsym(h, "perf_entry"); *(void **)&pf_top = dlsym(h, "perf_top_fx"); *(void **)&pf_held = dlsym(h, "perf_held_count");
 }
 /* two tones through the engine, lane 0; returns the gain of each tone (rms out / rms in) measured over the last 0.5 s */
@@ -2268,6 +2278,80 @@ int main(int argc, char **argv) {
         setstr("knob_delta", "1:8"); CHECK(gett(3, "off") != off0);
     }
 
+    /* --- v0.15.0: TEMPO = time-stretch of a track's clip, pitch kept; K1 = target BPM; tracks only --- */
+    {
+        static void (*kx)(perf_t *, int, int, int, int); *(void **)&kx = dlsym(h, "perf_knob_ex");
+        for (int variant = 0; variant < 4; variant++) {            /* ratio 1/2, 1, 2, then a glide to 3/2 */
+            perf_t *p = pf_create();
+            CHECK(pf_press(p, PF_TEMPO, 0, 0, 0) == 0);              /* MIX: refused */
+            CHECK(pf_press(p, PF_TEMPO, 1, 0, 0) != 0);
+            pf_pct_set(p, PF_TEMPO, 1, variant == 3 ? 40 : 0);       /* K2: jump (or a 1-beat glide) */
+            float want_r = variant == 0 ? 0.5f : variant == 1 ? 1.0f : variant == 2 ? 2.0f : 1.5f;
+            if (variant != 1) {                                       /* K1 by clicks: 1 BPM each at 120 BPM (beat = 22050 frames) */
+                int clicks = (int)lroundf((want_r - 1.0f) * 120.0f);
+                for (int i = 0; i < abs(clicks); i++) kx(p, PF_TEMPO, 0, clicks > 0 ? 1 : -1, 0);
+            }
+            double tl[7] = { 0 }, tp[7] = { 0 }; tl[1] = 44100.0;
+            static float out[44100 * 6]; double pos = 0.0; int no = 0;
+            for (long n = 0; n < 44100 * 6; n++) {
+                if (n % 128 == 0) {
+                    clip_t c = { NULL, tempo_clip_load, 0, 44100, pos, 1.0, 0, 1 }; pf_clip_fn(p, 1, &c);
+                    tp[1] = pos; pf_begin_raw(p, pos, 22050.0, tp, tl);
+                }
+                float l, r; tempo_clip_load(NULL, (uint32_t)pos, &l, &r); r = l;
+                pf_proc(p, 1, &l, &r); out[no++] = l;
+                pos += 1.0; if (pos >= 44100.0) pos -= 44100.0;
+            }
+            /* pitch: zero crossings per second over 2..6 s stay at 440 Hz; tempo: envelope peaks per second = 2 x ratio */
+            long cz = 0; for (long n = 88200 + 1; n < no; n++) if ((out[n - 1] < 0) != (out[n] < 0)) cz++;
+            double hz = (double)cz / 2.0 / 4.0;
+            enum { W = 441 }; static float env[44100 * 6 / W]; int ne = 0;
+            for (long n = 88200; n + W <= no; n += W) { double a = 0; for (int i = 0; i < W; i++) a += (double)out[n + i] * out[n + i]; env[ne++] = (float)sqrt(a / W); }
+            double mean = 0; for (int i = 0; i < ne; i++) mean += env[i]; mean /= ne;
+            static float sm[600]; for (int i = 0; i < ne; i++) { double a = 0; int c = 0; for (int j = -3; j <= 3; j++) if (i + j >= 0 && i + j < ne) { a += env[i + j]; c++; } sm[i] = (float)(a / c); }
+            int ups = 0; for (int i = 1; i < ne; i++) if (sm[i - 1] < mean && sm[i] >= mean) ups++;
+            double peaks_per_s = (double)ups / 4.0;
+            printf("TEMPO ratio %.2f: pitch %.0f Hz, %.2f swells/s (want 440 Hz, %.2f)\n", (double)want_r, hz, peaks_per_s, 2.0 * (double)want_r);
+            CHECK(hz > 420.0 && hz < 460.0);                          /* pitch kept */
+            if (variant != 3) CHECK(fabs(peaks_per_s - 2.0 * want_r) < 0.6);   /* tempo follows the ratio */
+            pf_destroy(p);
+        }
+        /* release: glide back to 1x, resync on a beat, the lane goes quiet and the output is the dry clip again */
+        {
+            perf_t *p = pf_create();
+            pf_press(p, PF_TEMPO, 1, 0, 1);
+            for (int i = 0; i < 30; i++) kx(p, PF_TEMPO, 0, -1, 0);   /* 90 BPM */
+            double tl[7] = { 0 }, tp[7] = { 0 }; tl[1] = 44100.0; double pos = 0.0; int act_end = 1; double diff = 0;
+            for (long n = 0; n < 44100 * 5; n++) {
+                if (n == 44100) pf_release_fn(p, PF_TEMPO, 44100);
+                if (n % 128 == 0) { clip_t c = { NULL, tempo_clip_load, 0, 44100, pos, 1.0, 0, 1 }; pf_clip_fn(p, 1, &c); tp[1] = pos; pf_begin_raw(p, pos, 22050.0, tp, tl); }
+                float l, r; tempo_clip_load(NULL, (uint32_t)pos, &l, &r); r = l; float dry = l;
+                pf_proc(p, 1, &l, &r);
+                if (n > 44100 * 4 + 22050) diff += fabs((double)(l - dry));
+                pos += 1.0; if (pos >= 44100.0) pos -= 44100.0;
+            }
+            act_end = pf_lane_act(p, 1);
+            CHECK(act_end == 0 && diff < 1.0);
+            pf_destroy(p);
+        }
+    }
+
+    /* --- v0.15.0: TEMPO through the module: tracks only, the BPM toast, scene, CPU with 6 effects --- */
+    {
+        fresh(&host); seti("quantize", 0);
+        tap(REC(1)); run(300); tap(REC(1)); run(2);
+        down(M_SHIFT); setstr("step_bank", "1"); setstr("step", "9"); setstr("step_up", "9"); up(M_SHIFT);   /* TEMPO on MIX: refused */
+        CHECK(!strcmp(status_text(), "TEMPO: PICK A TRACK") && geti("perf_n") == 0);
+        tap(FX(1));                                                    /* PISTA 1 */
+        tap(M_SHIFT); setstr("step_bank", "1"); setstr("step", "9"); run(3); setstr("step_up", "9");
+        CHECK(geti("perf_fx") == 25 && geti("perf_n") == 1);
+        setstr("knob_delta", "1:-24"); CHECK(!strcmp(status_text(), "TEMPO 96 BPM (80%)"));
+        setstr("knob_delta", "1:24"); CHECK(!strcmp(status_text(), "TEMPO 120 BPM (100%)"));
+        run(40); { const char *bar = strchr(screen(), '|'); CHECK(bar && geti("perf_boxes") == 3); }
+        { unsigned sq = scr_seq(); run(40); CHECK(scr_seq() != sq); }
+        tap(M_SHIFT);
+    }
+
     /* --- v0.14.5: knob feel: stepped knobs need several clicks per position; the accumulator resets --- */
     {
         static void (*kx)(perf_t *, int, int, int, int); static int (*steps)(int, int); static void (*hold_fn)(perf_t *, int);
@@ -2455,22 +2539,26 @@ int main(int argc, char **argv) {
         up(M_SHIFT);
     }
 
-    /* --- v0.14: CPU per block with six heavy effects at once (measured, printed) --- */
+    /* --- v0.14 / v0.15: CPU per block with six heavy effects at once, TEMPO among them (measured, printed) --- */
     {
-        static const int HEAVY[6] = { PF_PITCH, PF_DELAY, PF_FLANGER, PF_CHORUS, PF_PHASER, PF_COMB };
+        static const int HEAVY[6] = { PF_PITCH, PF_DELAY, PF_FLANGER, PF_CHORUS, PF_TEMPO, PF_COMB };
         for (int mode = 0; mode < 2; mode++) {
             perf_t *p = pf_create();
-            if (mode) for (int i = 0; i < 6; i++) pf_press(p, HEAVY[i], 0, 0, 0);
-            struct timespec t0, t1; double w = 0; long nb = 0;
+            if (mode) { for (int i = 0; i < 6; i++) pf_press(p, HEAVY[i], 1, 0, 0); pf_pct_set(p, PF_TEMPO, 0, 20); }
+            struct timespec t0, t1; double w = 0, pos = 0.0, tl[7] = { 0 }, tp[7] = { 0 }; long nb = 0; tl[1] = 44100.0;
             clock_gettime(CLOCK_MONOTONIC, &t0);
             for (long n = 0; n < 44100 * 4; n++) {
-                if (n % 128 == 0) { pf_begin(p, (double)n, 9600.0); nb++; }
+                if (n % 128 == 0) {
+                    clip_t c = { NULL, tempo_clip_load, 0, 44100, pos, 1.0, 0, 1 }; pf_clip_fn(p, 1, &c);
+                    tp[1] = pos; pf_begin_raw(p, pos, 22050.0, tp, tl); nb++;
+                }
                 float l = (float)(sin(w) * 8000.0), r = l; w += 2 * M_PI * 220.0 / 44100.0;
-                pf_proc(p, 0, &l, &r);
+                pf_proc(p, 1, &l, &r);
+                pos += 1.0; if (pos >= 44100.0) pos -= 44100.0;
             }
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double us = ((t1.tv_sec - t0.tv_sec) * 1e6 + (t1.tv_nsec - t0.tv_nsec) / 1e3) / (double)nb;
-            printf("PERF CPU: %s: %.1f us per 128-frame block (budget 2902 us), lane 0 only\n", mode ? "6 heavy effects (PITCH DELAY FLANGER CHORUS PHASER COMB)" : "no effects", us);
+            printf("PERF CPU: %s: %.1f us per 128-frame block (budget 2902 us), one track lane\n", mode ? "6 effects (PITCH DELAY FLANGER CHORUS TEMPO COMB)" : "no effects", us);
             CHECK(us < 1500.0);
             pf_destroy(p);
         }

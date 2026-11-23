@@ -51,6 +51,8 @@ typedef struct {
     double dly; int wi; float env, fl, fr_; int rel; double tail;
     /* modulation effects */
     float apz[2][4], fbo[2];
+    /* TEMPO: two Hann grains reading the clip, an analysis head advancing at ratio x rate */
+    double tg_src[2], tg_ah, tg_cr, tg_next; int tg_age[2], tg_live[2], tg_alt, tg_init, tg_state, tg_wait;
     /* retrigger / half speed */
     double dprev; int xf; double tau_prev;
 } slot_t;
@@ -84,6 +86,8 @@ struct perf {
     _Atomic int hold;                           /* track whose REC pad is held in PERFORM, 0 = none */
     _Atomic int touch[PF_NFX][3];               /* a knob was turned (set by the control thread, consumed per block) */
     int     acc, acc_fx, acc_k;                 /* stepped knobs: clicks accumulated towards the next position */
+    perf_clip_t clip[PF_NLANE];                 /* what each track plays (set by the engine every block) */
+    double  proj_bpm;                           /* project tempo as the engine last reported it (frames per beat -> BPM) */
     uint8_t armed[PF_NFX][3];                   /* audio thread: being written until the hold ends */
     int     last_step[PF_NFX][3];               /* audio thread: last step written, -1 none */
     float   last_val[PF_NFX][3];                /* ... and the value written there */
@@ -97,21 +101,23 @@ static const uint8_t DEF[PF_NFX][3] = {
     { 50, 100, 0 },  { 50, 0, 0 },    { 0, 100, 0 },   { 0, 7, 53 },
     { 40, 70, 50 },
     { 40, 60, 100 }, { 35, 0, 60 }, { 25, 60, 50 }, { 25, 70, 40 }, { 25, 50, 60 }, { 43, 80, 0 }, { 29, 70, 0 }, { 40, 70, 50 },
+    { 33, 40, 50 },                       /* TEMPO K1: the exact default (1/3 of the range = ratio 1) is set in perf_create */
 };
 static const uint8_t DISC[PF_NFX][3] = {          /* option count of a stepped knob, 0 = continuous */
     { 6, 0, 0 }, { 0, 3, 0 }, { 25, 0, 0 }, { 15, 32, 0 }, { 0 }, { 25, 4, 0 }, { 4, 0, 0 }, { 0 },
     { 0, 0, 2 }, { 0, 0, 2 }, { 6, 0, 0 }, { 5, 0, 0 }, { 5, 0, 0 }, { 3, 0, 0 }, { 2, 0, 0 }, { 3, 0, 0 },
     { 6, 0, 0 },
     { 0 }, { 0, 2, 0 }, { 0 }, { 0 }, { 0 }, { 8, 0, 3 }, { 8, 0, 3 }, { 0 },
+    { 0, 6, 0 },
 };
 static const char *const NAME[PF_NFX] = { "BEAT REPEAT", "STUTTER", "PITCH", "BITCRUSH", "TAPE", "LFO", "REVERSE", "VINYL",
     "FILTER LP", "FILTER HP", "GATE", "DELAY THROW", "ECHO FREEZE", "RETRIGGER", "HALF SPEED", "KILL", "SIDECHAIN",
-    "DRIVE", "RING MOD", "FLANGER", "PHASER", "CHORUS", "AUTOPAN", "TREMOLO", "COMB" };
+    "DRIVE", "RING MOD", "FLANGER", "PHASER", "CHORUS", "AUTOPAN", "TREMOLO", "COMB", "TEMPO" };
 static const char *const SHORT[PF_NFX] = { "RPT", "STU", "PCH", "BIT", "TAP", "LFO", "BCK", "VIN",
     "LPF", "HPF", "GAT", "DLY", "FRZ", "RTG", "HLF", "KIL", "DUK",
-    "DRV", "RNG", "FLG", "PHS", "CHO", "APN", "TRM", "CMB" };
+    "DRV", "RNG", "FLG", "PHS", "CHO", "APN", "TRM", "CMB", "TMP" };
 static const int NP[PF_NFX] = { 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3,
-    3, 3, 3, 3, 3, 3, 3, 3 };
+    3, 3, 3, 3, 3, 3, 3, 3, 3 };
 static const char *const PL[PF_NFX][3] = {          /* <= 4 letters: they must fit beside the knob number tab */
     { "RATE", "DCAY", "DROP" }, { "TIME", "END", "CURV" }, { "SEMI", "FINE", "MIX" }, { "BITS", "DOWN", "MIX" },
     { "TIME", "CURV", "WOW" }, { "RATE", "DEST", "DEPT" }, { "WIND", "MIX", "" }, { "BRAK", "CRKL", "WOW" },
@@ -120,6 +126,7 @@ static const char *const PL[PF_NFX][3] = {          /* <= 4 letters: they must f
     { "RATE", "DEPT", "CURV" },
     { "DRVE", "TONE", "MIX" }, { "FREQ", "MODE", "MIX" }, { "RATE", "DEPT", "FDBK" }, { "RATE", "DEPT", "FDBK" },
     { "RATE", "DEPT", "MIX" }, { "RATE", "DEPT", "SHPE" }, { "RATE", "DEPT", "SHPE" }, { "PTCH", "FDBK", "MIX" },
+    { "BPM", "GLID", "GRAN" },
 };
 /* LFO rate: one stepped knob, SYNC divisions of the loop tempo first, then FREE rates in Hz */
 #define LFO_NSYNC 14
@@ -130,6 +137,10 @@ static const double LFO_BEATS[LFO_NSYNC] = { 0.125, 1.0 / 6.0, 0.25, 1.0 / 3.0, 
 static const double LFO_HZ[LFO_N - LFO_NSYNC] = { 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0, 12.0, 20.0, 32.0 };
 static const char *const AP_TXT[8] = { "1/16", "1/8T", "1/8", "1/4", "1/2", "1BAR", "2BAR", "4BAR" };
 static const double AP_BEATS[8] = { 0.25, 1.0 / 3.0, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0 };
+static const char *const TG_TXT[6] = { "JUMP", "1/2B", "1B", "2B", "1BAR", "2BAR" };
+static const double TG_BEATS[6] = { 0.0, 0.5, 1.0, 2.0, 4.0, 8.0 };
+#define HANN_N 512
+static float HANN[HANN_N + 1];
 static const char *const SHP_TXT[3] = { "SIN", "TRI", "SQR" };
 static const char *const RM_TXT[2] = { "FREE", "NOTE" };
 static const char *const LFO_DST[4] = { "FILT", "VOL", "PAN", "PTCH" };
@@ -149,12 +160,12 @@ static const char *const REV_TXT[4] = { "1/4", "1/2", "1BAR", "FREE" };
 static const double REV_BEATS[3] = { 1.0, 2.0, 4.0 };
 
 /* fixed chain order; ring1 is written after index 3, ring2 after index 13 */
-static const uint8_t CHAIN[PF_NFX] = { PF_BEATREP, PF_STUTTER, PF_RETRIG, PF_REVERSE,
+static const uint8_t CHAIN[PF_NFX] = { PF_TEMPO, PF_BEATREP, PF_STUTTER, PF_RETRIG, PF_REVERSE,
     PF_PITCH, PF_HALF, PF_TSTOP, PF_LFO, PF_VINYL, PF_RINGMOD,
     PF_LP, PF_HP, PF_COMB, PF_CHORUS, PF_FLANGER, PF_PHASER, PF_DRIVE, PF_CRUSH,
     PF_GATE, PF_DUCK, PF_AUTOPAN, PF_TREMOLO, PF_KILL, PF_DELAY, PF_FREEZE };
-#define CH_A_END 4
-#define CH_B_END 23
+#define CH_A_END 5
+#define CH_B_END 24
 
 static void lane_free(lane_t *L) {
     free(L->ring); free(L->ring1); free(L->ring2);
@@ -180,7 +191,9 @@ perf_t *perf_create(void) {
     }
     if (!ok) { perf_destroy(p); return NULL; }
     for (int f = 0; f < PF_NFX; f++) for (int k = 0; k < 3; k++) p->pct[f][k] = DEF[f][k], p->fine[f][k] = (float)DEF[f][k];
-    p->acc_fx = -1;
+    p->acc_fx = -1; p->proj_bpm = 120.0;
+    p->fine[PF_TEMPO][0] = 100.0f / 3.0f;                      /* ratio exactly 1 = the project BPM */
+    for (int i = 0; i <= HANN_N; i++) HANN[i] = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * (float)i / (float)HANN_N);
     memset(p->au, 255, sizeof p->au);
     memset(p->last_step, 0xff, sizeof p->last_step);
     return p;
@@ -204,6 +217,7 @@ static void st_remove(perf_t *p, int i) {
 int perf_press(perf_t *p, int fx, int target, long now, int toggle) {
     if (!p || fx < 0 || fx >= PF_NFX) return PF_P_REFUSED;
     if (target < 0 || target >= PF_NLANE) target = 0;
+    if (fx == PF_TEMPO && target == 0) return PF_P_REFUSED;          /* TEMPO reads one track's clip: not the MIX */
     for (int i = 0; i < p->nst; i++)
         if (p->st[i].fx == fx) {
             if (!p->st[i].latched) return PF_P_REFUSED;       /* already down */
@@ -282,6 +296,11 @@ void perf_knob_ex(perf_t *p, int fx, int k, int delta, int fine) {
         return;
     }
     p->acc = 0; p->acc_fx = -1;
+    if (fx == PF_TEMPO && k == 0) {                            /* K1 = target BPM: one click = 1 BPM (0.1 with REC held), whatever the project tempo */
+        double bpm = p->proj_bpm > 20.0 ? p->proj_bpm : 120.0;
+        setf(p, fx, k, p->fine[fx][k] + (float)((double)delta * (fine ? 0.1 : 1.0) * 100.0 / (1.5 * bpm)));
+        return;
+    }
     if (fx >= 0 && fx < PF_NFX && k >= 0 && k < PF_NKNOB) {
         int ad = delta < 0 ? -delta : delta;
         float accel = ad >= 6 ? (1.0f + 0.1f * (float)(ad - 5) > 2.0f ? 2.0f : 1.0f + 0.1f * (float)(ad - 5)) : 1.0f;   /* gentle: only a fast spin */
@@ -290,6 +309,8 @@ void perf_knob_ex(perf_t *p, int fx, int k, int delta, int fine) {
 }
 
 /* ---- automation ---- */
+void perf_set_bpm(perf_t *p, double bpm) { if (p && bpm > 20.0 && bpm < 400.0) p->proj_bpm = bpm; }
+void perf_clip(perf_t *p, int lane, const perf_clip_t *c) { if (p && c && lane >= 0 && lane < PF_NLANE) p->clip[lane] = *c; }
 void perf_auto_hold(perf_t *p, int track) {
     if (!p) return;
     if (track < 1 || track >= PF_NLANE) track = 0;
@@ -410,7 +431,7 @@ const char *perf_plabel(int fx, int k) { return fx >= 0 && fx < PF_NFX && k >= 0
 int perf_family(int fx) {
     switch (fx) {
     case PF_BEATREP: return 0;
-    case PF_TSTOP: case PF_REVERSE: case PF_VINYL: case PF_HALF: return 1;
+    case PF_TEMPO: case PF_TSTOP: case PF_REVERSE: case PF_VINYL: case PF_HALF: return 1;
     case PF_PITCH: case PF_CRUSH: case PF_LP: case PF_HP: return 2;
     case PF_STUTTER: case PF_GATE: case PF_RETRIG: case PF_LFO: case PF_DUCK: case PF_AUTOPAN: case PF_TREMOLO: return 3;
     case PF_DRIVE: case PF_RINGMOD: case PF_COMB: return 2;
@@ -457,6 +478,7 @@ float perf_pval(const perf_t *p, int fx, int k) {
     case PF_CHORUS:  return k == 0 ? 0.1f * powf(30.0f, v) : k == 1 ? 1.0f + 7.0f * v : v;
     case PF_AUTOPAN: case PF_TREMOLO: return k == 1 ? v : (float)didx(p, fx, k);
     case PF_COMB:    return k == 0 ? 55.0f * powf(32.0f, v) : k == 1 ? v * 0.95f : v;
+    case PF_TEMPO:   return k == 0 ? 0.5f + 1.5f * v : k == 2 ? v : (float)didx(p, fx, k);   /* K1: ratio = target BPM / project BPM, 0.5 .. 2 */
     case PF_FREEZE:  return k == 0 ? (float)didx(p, fx, 0) : v;
     case PF_RETRIG:  return k == 0 ? (float)didx(p, fx, 0) : k == 1 ? v : v * 4.0f;
     case PF_HALF:    return k == 0 ? (float)didx(p, fx, 0) : v;
@@ -527,6 +549,10 @@ void perf_ptext(const perf_t *p, int fx, int k, char *out, int n) {
     case PF_CHORUS:  if (k == 0) hztext(v, out, n); else if (k == 1) snprintf(out, (size_t)n, "%.1fMS", (double)v); else pcent(v, out, n); break;
     case PF_AUTOPAN: case PF_TREMOLO:
         if (k == 0) snprintf(out, (size_t)n, "%s", AP_TXT[(int)v]); else if (k == 1) pcent(v, out, n); else snprintf(out, (size_t)n, "%s", SHP_TXT[(int)v]);
+        break;
+    case PF_TEMPO:
+        if (k == 0) snprintf(out, (size_t)n, "%dBPM", (int)lroundf(v * (float)p->proj_bpm)); else if (k == 1) snprintf(out, (size_t)n, "%s", TG_TXT[(int)v]);
+        else snprintf(out, (size_t)n, "%dMS", (int)lroundf(15.0f + 75.0f * v));
         break;
     case PF_COMB:    if (k == 0) hztext(v, out, n); else if (k == 1) pcent(v / 0.95f, out, n); else pcent(v, out, n); break;
     case PF_RETRIG:
@@ -953,6 +979,43 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
         s->phase = (float)u; s->speed = s->gg;
         break;
     }
+    case PF_TEMPO: {                  /* time-stretch of the track's clip, pitch kept: two Hann grains read the loop buffer from an
+                                       * analysis head that runs at ratio x rate while the loop's own playhead keeps its tempo */
+        int lane = (int)(L - p->ln);
+        const perf_clip_t *c = lane >= 1 && lane < PF_NLANE ? &p->clip[lane] : NULL;
+        if (!c || !c->valid || c->len < c->off + 64) { *wl = il; *wr = ir; s->speed = 1.0f; if (!s->held) s->tg_state = 3; break; }
+        double rl = (double)(c->len - c->off), rate = c->rate > 0.0 ? c->rate : 1.0;
+        double P = c->pos + (double)L->bn * rate; if (P >= rl) P = fmod(P, rl);
+        int G = (int)((15.0 + 75.0 * (double)perf_pval(p, fx, 2)) * 0.001 * SR);
+        if (!s->tg_init) { s->tg_init = 1; s->tg_cr = 1.0; s->tg_ah = P; s->tg_next = 0.0; s->tg_state = 0; }
+        double tr = (double)perf_pval(p, fx, 0), gl = TG_BEATS[(int)perf_pval(p, fx, 1)] * L->beat;
+        double target = s->held ? tr : 1.0;
+        if (gl < 2.0) s->tg_cr = target;
+        else { double co = 4.0 / gl; s->tg_cr += (target - s->tg_cr) * (co > 1.0 ? 1.0 : co); }   /* glide: settles in about the time chosen */
+        s->tg_ah += s->tg_cr * rate; if (s->tg_ah >= rl) s->tg_ah -= rl;
+        if (!s->held && s->tg_state == 0 && fabs(s->tg_cr - 1.0) < 0.003) { s->tg_cr = 1.0; s->tg_state = 1; }   /* back at 1x: wait for a beat */
+        if (s->tg_state == 1) {
+            int hit = L->beat > 1000.0 ? fmod(P, L->beat) < rate : P < rate;
+            if (hit) { s->tg_ah = P; s->tg_state = 2; s->tg_wait = G + 64; }                         /* resync to the loop playhead on the beat */
+        } else if (s->tg_state == 2 && --s->tg_wait <= 0) s->tg_state = 3;
+        s->tg_next -= 1.0;
+        if (s->tg_next <= 0.0) { int j = (s->tg_alt ^= 1); s->tg_src[j] = s->tg_ah; s->tg_age[j] = 0; s->tg_live[j] = 1; s->tg_next += (double)G * 0.5; }
+        float sl = 0.0f, sr = 0.0f;
+        for (int j = 0; j < 2; j++) {
+            if (!s->tg_live[j]) continue;
+            double pos = s->tg_src[j] + (double)s->tg_age[j] * rate; if (pos >= rl) pos = fmod(pos, rl);
+            float w = HANN[(int)((float)s->tg_age[j] / (float)G * (float)HANN_N)];
+            double x = c->rev ? rl - 1.0 - pos : pos; if (x < 0.0) x = 0.0;
+            uint32_t i0 = (uint32_t)x, i1 = (double)(i0 + 1) >= rl ? 0 : i0 + 1;
+            float fr = (float)(x - (double)i0), al, ar, bl, br;
+            c->load(c->ctx, c->off + i0, &al, &ar); c->load(c->ctx, c->off + i1, &bl, &br);
+            sl += (al + (bl - al) * fr) * w; sr += (ar + (br - ar) * fr) * w;
+            if (++s->tg_age[j] >= G) s->tg_live[j] = 0;
+        }
+        *wl = sl; *wr = sr;
+        s->speed = (float)s->tg_cr; s->phase = (float)(P / rl); s->aux = (float)(target / 2.0); s->rep = s->tg_state;
+        break;
+    }
     case PF_DRIVE: {                  /* tanh saturation, level-compensated, with a one-pole tone and a mix */
         float g = perf_pval(p, fx, 0), mix = perf_pval(p, fx, 2), comp = 1.0f / powf(g, 0.35f);
         if ((s->fn++ & 15) == 0) s->fcs = 1.0f - expf(-2.0f * (float)M_PI * 700.0f * powf(25.0f, perf_pval(p, fx, 1)) / (float)MARK_SR);
@@ -1130,6 +1193,7 @@ static void stage(perf_t *p, lane_t *L, int fx, float *x0, float *x1) {
         if (!s->held && s->ph2 == 0) { s->ph2 = 1; s->k2 = 0.0; s->u0 = s->speed < 0.0f ? 0.0f : s->speed > 1.0f ? 1.0f : s->speed; s->xf = XFADE; }
         on = s->held || s->ph2 == 1;
     }
+    if (fx == PF_TEMPO) on = s->held || (s->tg_init && s->tg_state != 3);                   /* stays up while gliding back and resyncing */
     float tgt = on ? 1.0f : 0.0f;
     float fi = fx == PF_KILL ? s->fk : FADE_IN, fo = fx == PF_KILL ? s->fk : FADE_OUT;
     if (s->g < tgt) { s->g += fi; if (s->g > tgt) s->g = tgt; }

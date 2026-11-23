@@ -356,6 +356,29 @@ static void scene_comb(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {
     gfx_dline(g, 30, 59, 30 + (int)lroundf(clampf(v->level * 2.0f, 0, 1) * 38.0f), 59, 1, 1, GFX_ON);
 }
 
+static void scene_tempo(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {    /* a metronome: the pendulum swings at the clip's new tempo */
+    float cr = clampf(v->speed, 0.3f, 2.2f), tgt = clampf(v->aux * 2.0f, 0.3f, 2.2f);
+    w3_t w; vp(&w, g, 14.0f, 6.0f);
+    w3_view(&w, 0.25f, 0.5f + 0.25f * sinf(u->rot[1] * 0.5f), 0.0f);
+    w3_xf base = W3_XF(0, -1.1f, 0, 0, 0, 0, 1.0f);
+    w3_box(&w, &base, 0.9f, 0.12f, 0.5f, W3_SOLID);                                    /* the foot */
+    w3_line(&w, NULL, (v3){ -0.55f, -0.98f, 0 }, (v3){ -0.18f, 1.05f, 0 }, W3_SOLID);   /* the case, a truncated pyramid edge on each side */
+    w3_line(&w, NULL, (v3){ 0.55f, -0.98f, 0 }, (v3){ 0.18f, 1.05f, 0 }, W3_SOLID);
+    w3_line(&w, NULL, (v3){ -0.18f, 1.05f, 0 }, (v3){ 0.18f, 1.05f, 0 }, W3_SOLID);
+    w3_line(&w, NULL, (v3){ -0.45f, -0.98f, -0.5f }, (v3){ -0.14f, 1.05f, -0.4f }, W3_DOT);
+    w3_line(&w, NULL, (v3){ 0.45f, -0.98f, -0.5f }, (v3){ 0.14f, 1.05f, -0.4f }, W3_DOT);
+    float ang = 0.62f * sinf(u->rot[0]);                                               /* the pendulum, pivoting at the foot */
+    float tx = sinf(ang) * 1.9f, ty = -0.98f + cosf(ang) * 1.9f;
+    w3_line(&w, NULL, (v3){ 0, -0.98f, 0.1f }, (v3){ tx, ty, 0.1f }, W3_SOLID);
+    float wy = -0.98f + cosf(ang) * (0.7f + 0.9f * (1.0f - clampf((cr - 0.5f) / 1.5f, 0.0f, 1.0f)));   /* the weight slides up when slower */
+    w3_xf wt = W3_XF(sinf(ang) * (wy + 0.98f) / cosf(ang), wy, 0.1f, 0, 0, ang, 1.0f);
+    w3_box(&w, &wt, 0.2f, 0.12f, 0.1f, W3_SOLID);
+    { char pc[8]; snprintf(pc, sizeof pc, "%d%%", (int)lroundf(cr * 100.0f)); gfx_text(g, 8, 50, pc, GFX_ON); }   /* the current ratio, small */
+    gfx_dline(g, 8, 56, 8 + (int)lroundf(clampf(cr / 2.2f, 0, 1) * 30.0f), 56, 1, 1, GFX_ON);   /* current ratio, and a tick for the target */
+    gfx_frect(g, 8 + (int)lroundf(clampf(tgt / 2.2f, 0, 1) * 30.0f), 54, 1, 5, GFX_ON);
+    (void)p;
+}
+
 static void scene_delay(gfx_t *g, perf_t *p, const perf_vis_t *v) {
     float fb = perf_pval(p, PF_DELAY, 1);
     double Td = (double)v->phase * 131072.0; if (Td < 2000.0) Td = 2000.0;
@@ -533,6 +556,7 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     else if (v.fx == PF_RINGMOD) { u->rot[0] += dt * (1.0f + 5.0f * clampf(perf_pval(p, PF_RINGMOD, 0) / 4000.0f, 0.0f, 1.0f)); u->rot[1] += dt * 0.7f; }
     else if (v.fx == PF_PHASER || v.fx == PF_FLANGER || v.fx == PF_CHORUS) u->rot[0] += dt * 0.5f;
     else if (v.fx == PF_COMB) u->rot[0] += dt * 3.0f;
+    else if (v.fx == PF_TEMPO) { u->rot[0] += dt * 3.2f * clampf(v.speed, 0.3f, 2.2f); u->rot[1] += dt; }
     frame(g);
     title(g, perf_name(v.fx), tgt);
     switch (v.fx) {
@@ -553,6 +577,7 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     case PF_KILL:    scene_kill(g, p, &v, tsec); break;
     case PF_DUCK:    scene_duck(g, p, &v); break;
     case PF_DRIVE:   scene_drive(g, u, p, &v); break;
+    case PF_TEMPO:   scene_tempo(g, u, p, &v); break;
     case PF_RINGMOD: scene_ringmod(g, u, p, &v); break;
     case PF_FLANGER: scene_flanger(g, u, p, &v); break;
     case PF_PHASER:  scene_phaser(g, u, p, &v); break;

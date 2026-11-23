@@ -560,6 +560,7 @@ static void perf_step_down(synth_t *s, int button) {
     int fx = s->perf_bank * PF_BANK + button;
     s->down_fx[button] = -1;
     if (fx >= PF_NFX) return;                                  /* empty cell of the last page */
+    if (fx == PF_TEMPO && s->sel == 0) { say(s, "TEMPO: PICK A TRACK"); return; }   /* it stretches one track's clip, not the MIX */
     s->down_fx[button] = fx;
     int r = perf_press(s->perf, fx, s->sel, s->clock_frames, s->perf_mode);
     if (r == PF_P_REFUSED) { if (perf_count(s->perf) >= PF_MAXSTACK) say(s, "PERFORM: MAX %d", PF_MAXSTACK); }
@@ -614,6 +615,8 @@ static void knob_delta(synth_t *s, const char *val) {
                 char tx[16]; perf_ptext(s->perf, pfx, n - 1, tx, sizeof tx);
                 say(s, "%s %s", perf_plabel(pfx, n - 1), tx);
             }
+            if (pfx == PF_TEMPO && n == 1)                                  /* K1 is the target BPM */
+                say(s, "TEMPO %d BPM (%d%%)", (int)lround(perf_pval(s->perf, pfx, 0) * cur_bpm(s)), (int)lround(perf_pval(s->perf, pfx, 0) * 100.0));
             if (s->auto_hold) { s->auto_turned = 1; say(s, "AUTO %d %s %s", s->auto_hold, perf_short(pfx), perf_plabel(pfx, n - 1)); }
         }
         return;
@@ -1951,6 +1954,7 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
     }
     s->clock_frames += frames;
     pedal_tick(s);
+    perf_set_bpm(s->perf, cur_bpm(s));
     if (s->auto_hold && (!s->perf_mode || perf_top_fx(s->perf) < 0)) auto_hold_end(s, 0);   /* the mode or the effect went away under the hold */
     for (int t = 1; t <= NTRK; t++) {
         int pnd = core_state(s, t) == MK_EMPTY && core_pending(s, t);
