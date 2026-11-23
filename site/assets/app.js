@@ -36,8 +36,8 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const NS = 'http://www.w3.org/2000/svg';
-const TC = ['#3d7bff', '#19d3e6', '#ffd21f', '#ff4fd8', '#f4f4f4', '#ff8a1f'];
-const C = { play: '#2ee86b', rec: '#ff3b3b', dub: '#a45cff', arm: '#ff9a1f', yel: '#ffd21f', yelD: '#6b5a12', cy: '#19d3e6', cyD: '#0e5963', roy: '#2a3a8c' };
+const TC = ['#3d7bff', '#19d3e6', '#ffd21f', '#ff4fd8', '#ffa3ec', '#ff8a1f'];
+const C = { play: '#2ee86b', rec: '#ff3b3b', dub: '#a45cff', arm: '#ff9a1f', yel: '#ffd21f', yelD: '#6b5a12', cy: '#19d3e6', cyD: '#0e5963', roy: '#2a3a8c', wh: '#ffffff', whD: '#5c5c5c' };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, k) => a + (b - a) * k;
 function mix(hex, a, base = '#2a2a2a') {
@@ -161,15 +161,15 @@ function padColors(s) {
   o[3][0] = { c: s.shift ? '#ffffff' : '#6a6a6a' };
   s.t.forEach((t, i) => {
     const c = i + 1, e = t.st === 'empty';
-    o[0][c] = t.armed ? { c: C.arm, b: 1 } : t.countin ? { c: '#ffe94d', b: 1 } : e ? (t.pend ? { c: C.rec, b: 1 } : { c: vdim(i) }) : t.st === 'rec' ? { c: C.rec } : t.st === 'dub' ? { c: C.dub } : { c: vdim(i) };
+    o[0][c] = t.armed ? { c: C.arm, b: 1 } : t.countin ? { c: '#ffe94d', b: 1 } : e ? (t.pend ? { c: C.rec, b: 1 } : { c: vdim(i) }) : t.st === 'rec' ? { c: C.rec } : t.st === 'dub' ? { c: C.rec } : { c: vdim(i) };
     o[1][c] = e ? { c: null } : t.mute ? { c: '#4a4a4a' } : (t.st === 'play' || t.st === 'dub') ? { c: C.play } : t.st === 'rec' ? { c: vdim(i) } : { c: dim(i) };
     o[2][c] = s.solo === c ? { c: TC[i], b: 1 } : t.mute ? { c: '#4a4a4a' } : e ? { c: vdim(i) } : { c: TC[i] };
     o[3][c] = s.shift ? { c: t.fx ? '#ffffff' : vdim(i) } : { c: s.sel === c ? TC[i] : vdim(i) };
   });
-  o[3][7] = { c: s.countIn ? C.yel : C.yelD };
-  o[2][7] = { c: s.recAct ? C.dub : C.roy };
+  o[3][7] = { c: s.countIn ? C.wh : C.whD };
+  o[2][7] = { c: s.recAct ? C.wh : C.whD };
   o[1][7] = { c: fixlevel(s.fixlen) };
-  o[0][7] = { c: s.quant ? C.cy : C.cyD };
+  o[0][7] = { c: s.quant ? C.wh : C.whD };
   return o;
 }
 /* ---------- Device (inline SVG clone) ---------- */
@@ -320,7 +320,7 @@ function drawKnobPage(sc, o) {
   });
 }
 /* ---------- reveal + scrollspy + nav + language ---------- */
-const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .08 }) : null;
+const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: 0, rootMargin: '0px 0px -8% 0px' }) : null;
 $$('.reveal').forEach(n => io ? io.observe(n) : n.classList.add('in'));
 const links = $$('#nav-list a'); const secs = links.map(a => $(a.getAttribute('href'))).filter(Boolean);
 const navw = $('#navw'), menuBtn = $('#menu-btn'), navUl = $('#nav-list');
@@ -458,7 +458,7 @@ const KNOBINFO = (view, i) => [t(`ki.${view}.${i}.n`), t(`ki.${view}.${i}.d`)];
     { st: S({ t: [mk('empty', { countin: true })].concat(rest.map(() => mk('empty'))) }), ring: [{ pad: [1, 2] }], scr: { head: 'REC 1', right: 'COUNT', mode: 'count' }, led: ['#ffe94d', 1] },
     { st: S({ t: [mk('rec')].concat(rest.map(() => mk('empty'))) }), ring: [], scr: { head: 'PISTA 1', right: 'REC', mode: 'rec' }, led: [C.rec, 0] },
     { st: S({ t: [mk('play')].concat(rest.map(() => mk('empty'))) }), ring: [{ pad: [1, 2] }], scr: { head: 'PISTA 1', right: 'PLAY', mode: 'play' }, led: [C.play, 0] },
-    { st: S({ t: [mk('dub')].concat(rest.map(() => mk('empty'))) }), ring: [{ pad: [1, 2] }], scr: { head: 'PISTA 1', right: 'DUB', mode: 'dub' }, led: [C.dub, 0] },
+    { st: S({ t: [mk('dub')].concat(rest.map(() => mk('empty'))) }), ring: [{ pad: [1, 2] }], scr: { head: 'PISTA 1', right: 'DUB', mode: 'dub' }, led: [C.rec, 0] },
     { st: S({ t: [mk('play')].concat(rest.map(() => mk('empty'))) }), ring: [{ pad: [1, 2] }], scr: { head: 'PISTA 1', right: 'PLAY', mode: 'dubbed' }, led: [C.play, 0] },
     { st: S({ t: [mk('play', { mute: true })].concat(rest.map(() => mk('empty'))) }), ring: [{ pad: [3, 2] }], scr: { head: 'PISTA 1', right: 'MUTE', mode: 'dubbed' }, led: ['#4a4a4a', 0] },
     { st: S({ t: [mk('stop')].concat(rest.map(() => mk('empty'))) }), ring: [{ pad: [2, 2] }], scr: { head: 'PISTA 1', right: 'STOP', mode: 'dubbed', still: true }, led: [dim(0), 0] },
@@ -641,8 +641,8 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
   s.countIn = false;
   const cards = $('#col1-cards'); const link = cardLink(dev, cards, 1);
   const L = (sel, states) => { const el = $(sel, cards); if (el) ledDemo(el, states); };
-  L('[data-led=shift]', [{ c: '#6a6a6a', k: 'led.shift.0' }, { c: '#ffffff', k: 'led.shift.1' }]);
-  L('[data-led=arm]', [{ c: '#4a4a4a', k: 'led.arm.0' }, { c: C.arm, b: 1, k: 'led.arm.1' }]);
+  L('[data-led=shift]', [{ c: '#6a6a6a', k: 'led.shift.0' }, { c: '#ffffff', k: 'led.shift.1' }, { c: '#ffffff', b: 1, k: 'led.shift.2' }]);
+  L('[data-led=arm]', [{ c: '#4a4a4a', k: 'led.arm.0' }, { c: C.arm, b: 1, k: 'led.arm.1' }, { c: C.rec, b: 1, k: 'led.arm.2' }]);
   L('[data-led=stopall]', [{ c: '#4a4a4a', k: 'led.stopall.0' }, { c: '#ffe94d', k: 'led.stopall.1' }]);
   L('[data-led=all]', [{ c: '#6a6a6a', k: 'led.all.0' }, { c: '#ffffff', k: 'led.all.1' }]);
   // STOP ALL vs ALL START/STOP simulator
@@ -682,10 +682,10 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
   const dev = new Device(host); const s = newState(); s.countIn = true; s.recAct = 0; s.quant = true;
   const cards = $('#col8-cards'); const link = cardLink(dev, cards, 8);
   const L = (sel, states) => { const el = $(sel, cards); if (el) ledDemo(el, states); };
-  L('[data-led=countin]', [{ c: C.yel, k: 'led.countin.1' }, { c: C.yelD, k: 'led.countin.0' }]);
-  L('[data-led=recact]', [{ c: C.roy, k: 'led.recact.0' }, { c: C.dub, k: 'led.recact.1' }]);
+  L('[data-led=countin]', [{ c: C.wh, k: 'led.countin.1' }, { c: C.whD, k: 'led.countin.0' }]);
+  L('[data-led=recact]', [{ c: C.whD, k: 'led.recact.0' }, { c: C.wh, k: 'led.recact.1' }]);
   L('[data-led=fixlen]', [0, 1, 2, 4, 8].map(b => ({ c: fixlevel(b), lit: b ? b + ' ' + (b === 1 ? 'BAR' : 'BARS') : 'FREE', k: b ? 'led.fixlen.n' : 'led.fixlen.0' })));
-  L('[data-led=quant]', [{ c: C.cy, k: 'led.quant.1' }, { c: C.cyD, k: 'led.quant.0' }]);
+  L('[data-led=quant]', [{ c: C.wh, k: 'led.quant.1' }, { c: C.whD, k: 'led.quant.0' }]);
   const LF = [0, 1, 2, 4, 8]; let fi = 0;
   function render() { dev.apply(s); }
   // fixed length tape
@@ -716,7 +716,7 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
   const ra = (id, dub) => { const sc = new Screen($(id)); reg($(id), tm => {
     const c = tm % 9, R = 3, el = c - 0;
     if (c < R) drawWave(sc, { head: 'PISTA 1', right: 'REC', lo: 0, hi: 2, len: 2, recTo: clamp(c / 1.5, 0, 2), inB: 0, outB: 2, seed: 5, pos: clamp(c / 1.5, 0, 2), over: x => x.rect(121, 55, 5, 5, C.rec) });
-    else { const e = c - R, flash = e < .5; drawWave(sc, { head: 'PISTA 1', right: dub ? 'DUB' : 'PLAY', lo: 0, hi: 2, len: 2, inB: 0, outB: 2, seed: 5, dub: dub && e > 1.2, pos: (e / 1.5) % 2, over: x => { x.rect(121, 55, 5, 5, dub ? C.dub : C.play); if (flash) x.text('REC>' + (dub ? 'DUB' : 'PLAY'), 64, 52, 'c', null, true); } }); }
+    else { const e = c - R, flash = e < .5; drawWave(sc, { head: 'PISTA 1', right: dub ? 'DUB' : 'PLAY', lo: 0, hi: 2, len: 2, inB: 0, outB: 2, seed: 5, dub: dub && e > 1.2, pos: (e / 1.5) % 2, over: x => { x.rect(121, 55, 5, 5, dub ? C.rec : C.play); if (flash) x.text('REC>' + (dub ? 'DUB' : 'PLAY'), 64, 52, 'c', null, true); } }); }
   }); };
   ra('#demo-ra0', false); ra('#demo-ra1', true);
   // quantize demo
@@ -839,7 +839,7 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
   const svg = $('#pedal'); if (!svg) return;
   const st = newState(); let cur = 1; let arm = false;
   const strip = $('#pedal-strip'), toast = $('#pedal-toast i');
-  const cols = { empty: '#333', rec: C.rec, play: C.play, dub: C.dub, stop: null };
+  const cols = { empty: '#333', rec: C.rec, play: C.play, dub: C.rec, stop: null };
   for (let i = 0; i < 6; i++) { const e = document.createElement('span'); e.textContent = i + 1; strip.appendChild(e); }
   const showT = m => { toast.textContent = m; };
   function render() { $$('span', strip).forEach((e, i) => { const t = st.t[i]; e.style.background = t.st === 'stop' ? dim(i) : cols[t.st]; e.classList.toggle('sel', i + 1 === cur); }); $('#pedal-arm').textContent = arm ? 'ARM: ON' : 'ARM: off'; $('#pedal-arm').style.color = arm ? C.arm : ''; }
@@ -883,6 +883,116 @@ const SPD = [['1/4', .25], ['1/2', .5], ['3/4', .75], ['1', 1], ['1.5', 1.5], ['
   set(0); if (reduce) return;
   reg($('#flow'), (t) => { const k = Math.floor(t / 1.7) % items.length; if (k !== i) { i = k; set(k); } });
 })();
+/* =====================================================================
+   Columnas 2-7 (pistas): mini simulator on the device
+   ===================================================================== */
+(() => {
+  const host = $('#cols-device'); if (!host) return;
+  const dev = new Device(host); const s = newState();
+  ['play', 'play', 'stop', 'empty', 'dub', 'empty'].forEach((st, i) => { s.t[i].st = st; }); s.t[2].mute = true; s.sel = 2;
+  const cards = $('#cols-cards'), log = $('#cols-log');
+  const pads = []; for (let r = 4; r >= 1; r--) for (let c = 2; c <= 7; c++) pads.push([r, c]);
+  dev.focus(pads);
+  let pin = 0, cur = -1, msg = ['cols.hint'];
+  const setRow = r => { if (r === cur) return; cur = r; dev.ring(r ? [2, 3, 4, 5, 6, 7].map(c => ({ pad: [r, c] })) : []); $$('.pcard', cards).forEach(c => c.classList.toggle('hl', +c.dataset.pad === r)); };
+  $$('.pcard', cards).forEach(c => { const r = +c.dataset.pad; ['pointerenter', 'focusin', 'click'].forEach(ev => c.addEventListener(ev, () => { pin = r; setRow(r); })); c.addEventListener('pointerleave', () => { pin = 0; }); });
+  reg(cards, tt => { if (pin) return setRow(pin); if (reduce) return setRow(4); setRow([4, 3, 2, 1][Math.floor(tt / 2.6) % 4]); });
+  const L = (sel, states) => { const el = $(sel, cards); if (el) ledDemo(el, states); };
+  L('[data-led=tsel]', [{ c: vdim(0), k: 'led.tsel.0' }, { c: TC[0], k: 'led.tsel.1' }, { c: '#ffffff', k: 'led.tsel.2' }]);
+  L('[data-led=tmute]', [{ c: TC[1], k: 'led.tmute.0' }, { c: '#4a4a4a', k: 'led.tmute.1' }, { c: TC[1], b: 1, k: 'led.tmute.2' }]);
+  L('[data-led=tplay]', [{ c: C.play, k: 'led.tplay.0' }, { c: dim(2), k: 'led.tplay.1' }, { c: '#2c2c2c', k: 'led.tplay.2' }]);
+  L('[data-led=trec]', [{ c: C.rec, k: 'led.trec.0' }, { c: C.rec, b: 1, k: 'led.trec.1' }, { c: '#ffe94d', b: 1, k: 'led.trec.2' }, { c: C.arm, b: 1, k: 'led.trec.3' }]);
+  const render = () => { dev.apply(s); log.textContent = t(...msg); };
+  dev.bind((k, d, act) => {
+    if (act !== 'click' || k !== 'pad' || d.col < 2 || d.col > 7) return;
+    const i = d.col - 2, tr = s.t[i], n = i + 1; pin = d.row; setRow(d.row);
+    if (d.row === 4) { s.sel = s.sel === n ? 0 : n; msg = s.sel ? ['cols.sel', n] : ['cols.mix']; }
+    else if (d.row === 3) { tr.mute = !tr.mute; msg = [tr.mute ? 'cols.mute' : 'cols.unmute', n]; }
+    else if (d.row === 2) {
+      if (tr.st === 'empty') msg = ['cols.noclip', n];
+      else { tr.st = tr.st === 'stop' ? 'play' : 'stop'; msg = [tr.st === 'play' ? 'cols.play' : 'cols.stop', n]; }
+    } else {
+      const nx = { empty: 'rec', rec: 'play', play: 'dub', dub: 'play', stop: 'dub' }[tr.st];
+      msg = ['cols.' + tr.st + '2' + nx, n]; tr.st = nx;
+    }
+    render();
+  });
+  render(); onLang(render);
+})();
+
+/* =====================================================================
+   Efectos: PERFORM step buttons, flipbooks, track FX
+   ===================================================================== */
+(() => {
+  const host = $('#fx-device'); if (!host) return;
+  const dev = new Device(host); const s = newState(); s.shift = true;
+  ['play', 'play', 'play', 'play', 'empty', 'empty'].forEach((st, i) => { s.t[i].st = st; }); s.sel = 1;
+  dev.apply(s); dev.setPad(4, 1, '#ffffff', true);
+  const FAMC = ['#3d7bff', '#ff8a1f', '#a45cff', '#19d3e6', '#1fbfa8', '#ffd21f'];
+  const cards = $$('.fxcard');
+  const famOf = n => { const c = $('#fx-' + n); return c ? getComputedStyle(c).getPropertyValue('--c').trim() : null; };
+  let page = 1, pick = 1;
+  function paint() {
+    for (let i = 1; i <= 16; i++) {
+      const fx = (page - 1) * 16 + i, col = famOf(fx), p = dev.stepEl[i].querySelector('path');
+      p.style.fill = col ? (fx === pick ? '#ffffff' : col) : '#2a2a2a';
+    }
+    const st = pick > 16 ? pick - 16 : pick;
+    dev.ring((pick > 16) === (page === 2) ? [{ step: st }] : []);
+    $$('[data-fxpage]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.fxpage === page)));
+    cards.forEach(c => c.classList.toggle('hl', +c.dataset.fx === pick));
+  }
+  const choose = (fx, scroll) => { pick = fx; page = fx > 16 ? 2 : 1; paint(); if (scroll) { const c = $('#fx-' + fx); c && c.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' }); } };
+  $$('[data-fxpage]').forEach(b => b.addEventListener('click', () => { page = +b.dataset.fxpage; paint(); }));
+  dev.bind((k, d, act) => { if (k === 'step' && act === 'click') { const fx = (page - 1) * 16 + d.n; if (famOf(fx)) choose(fx, true); } });
+  cards.forEach(c => ['click', 'focusin'].forEach(ev => c.addEventListener(ev, () => choose(+c.dataset.fx, false))));
+  paint();
+  // flipbooks: cycle the 4 captured frames of each effect; a thumbnail click pins that frame
+  $$('.fxshot').forEach(sh => {
+    const img = $('img', sh), base = sh.dataset.frames, thumbs = $$('.fxstrip img', sh.parentElement);
+    let held = -1, curF = -1;
+    const show = f => { if (f === curF) return; curF = f; img.src = `assets/fx/${base}_${f}.png`; thumbs.forEach((x, j) => x.classList.toggle('on', j === f)); };
+    thumbs.forEach((x, j) => x.addEventListener('click', e => { e.stopPropagation(); held = held === j ? -1 : j; show(j); }));
+    reg(sh, tt => { if (held >= 0) return show(held); if (reduce) return show(1); show(Math.floor(tt / .8) % 4); });
+  });
+  // track FX: knob page (K5 focused) + an animated sketch of what the effect does
+  const TF = ['LPF', 'HPF', 'CRUSH', 'DELAY', 'PHASER', 'RING'], TS = ['LPF', 'HPF', 'CRS', 'DLY', 'PHS', 'RNG'];
+  $$('.tfxcard').forEach(card => {
+    const n = +card.dataset.tfx - 1;
+    const sc = new Screen($('.tfxpage', card));
+    const lab = ['IN', 'OUT', 'VOL', 'PAN', 'FX', 'AMT', 'SPD', 'REV'], txt = ['+0/16', '2 BARS', '100', 'C', TS[n], '60', 'x1', 'OFF'], v = [0, .5, .8, .5, 0, .6, 0, 0];
+    drawKnobPage(sc, { title: 'PISTA 1', state: 'PLAY', focus: 4, e: lab.map((l, i) => ({ lab: l, txt: txt[i], v: v[i], b: i === 4 || i === 6 || i === 7 })) });
+    const cv = $('.tfxart', card); cv.width = 320; cv.height = 120; const g = cv.getContext('2d');
+    const col = getComputedStyle(document.documentElement).getPropertyValue('--t6').trim() || '#ff8a1f';
+    const W = 320, H = 120, mid = H / 2;
+    const line = (f, c, w) => { g.beginPath(); for (let x = 0; x <= W; x += 2) { const y = f(x); x ? g.lineTo(x, y) : g.moveTo(x, y); } g.strokeStyle = c; g.lineWidth = w || 2; g.stroke(); };
+    const grid = () => { g.fillStyle = '#111'; g.fillRect(0, 0, W, H); g.strokeStyle = '#222'; g.lineWidth = 1; for (let x = 0; x < W; x += 32) { g.beginPath(); g.moveTo(x + .5, 0); g.lineTo(x + .5, H); g.stroke(); } g.beginPath(); g.moveTo(0, mid + .5); g.lineTo(W, mid + .5); g.stroke(); };
+    const draw = tt => {
+      grid(); const ph = tt;
+      if (n === 0 || n === 1) {            // filter response: a cutoff that sweeps
+        const fc = 70 + 180 * (.5 + .5 * Math.sin(ph * .9));
+        line(x => { const r = n === 0 ? (x - fc) / 40 : (fc - x) / 40; return 30 + (r > 0 ? Math.min(80, r * r * 9) : -6 * Math.exp(-r * r * 6)); }, col, 3);
+        g.fillStyle = '#888'; g.font = '11px ui-monospace,monospace'; g.fillText(n === 0 ? 'LOW ← → HIGH' : 'LOW ← → HIGH', 8, H - 8);
+      } else if (n === 2) {                // bitcrush: sine vs stair steps
+        line(x => mid - 40 * Math.sin(x / 26 + ph), '#555', 1.5);
+        const st = 10 + 8 * (.5 + .5 * Math.sin(ph * .7)), q = 6;
+        line(x => { const xs = Math.floor(x / st) * st; return mid - Math.round(40 * Math.sin(xs / 26 + ph) / 40 * q) / q * 40; }, col, 2.5);
+      } else if (n === 3) {                // delay: decaying echoes on the 8th grid
+        const p = (ph * 40) % 64;
+        for (let e = 0; e < 6; e++) { const x = 20 + e * 50 + p * 0; const h = 80 * Math.pow(.62, e); g.fillStyle = e ? col : '#fff'; g.globalAlpha = e ? .4 + .6 * Math.pow(.7, e) : 1; g.fillRect(x, mid + 40 - h, 14, h); }
+        g.globalAlpha = 1; const cx = 20 + (ph * 60) % 300; g.fillStyle = '#fff'; g.fillRect(cx, 8, 2, H - 16);
+      } else if (n === 4) {                // phaser: moving notches
+        const o = ph * 50;
+        line(x => 30 + 50 * Math.pow(Math.abs(Math.sin((x + o) / 38)), 6), col, 3);
+      } else {                              // ring mod: signal × carrier
+        line(x => mid - 22 * Math.sin(x / 40 + ph), '#555', 1.5);
+        line(x => mid - 40 * Math.sin(x / 40 + ph) * Math.sin(x / (5 + 3 * Math.sin(ph * .5))), col, 2);
+      }
+    };
+    reg(cv, draw); draw(0.5);
+  });
+})();
+
 }
 langPref;
 LANG = langPref();

@@ -57,16 +57,18 @@ int main(int argc, char **argv) {
     tap(note_of(4, 0));                                       /* PERFORM mode on */
     run(8); dump(argv[2], "page");
     char nm[64], st[8];
-    for (int fx = 0; fx < 16; fx++) {
-        snprintf(st, sizeof st, "%d", fx);
+    for (int fx = 0; fx < 17; fx++) {
+        if (fx == 16) { A->set_param(S, "step_bank", "1"); run(4); }          /* page 2: SIDECHAIN on step 1 */
+        snprintf(st, sizeof st, "%d", fx % 16);
         A->set_param(S, "step", st); run(3); A->set_param(S, "step_up", st);   /* one tap: on, and it stays */
         for (int f = 0; f < 4; f++) {
-            run(f == 0 ? 10 : 90 + 110 * f);
+            run(f == 0 ? 60 : 90 + 110 * f);
             snprintf(nm, sizeof nm, "fx%d_%d", fx + 1, f);
             dump(argv[2], nm);
         }
         A->set_param(S, "step", st); A->set_param(S, "step_up", st);           /* tap again: off */
         run(20);
+        if (fx == 16) { dump(argv[2], "page2"); A->set_param(S, "step_bank", "-1"); run(4); }
     }
     /* LFO destinations */
     A->set_param(S, "step", "5"); run(3); A->set_param(S, "step_up", "5");

@@ -110,7 +110,7 @@ Con **SHIFT** (pad de arriba de la columna 1) mantenido, la pantalla muestra la 
 - Al salir del modo (toque de SHIFT) los efectos encendidos siguen sonando y parpadean en los LEDs de paso; al volver a entrar se ve su escena. Cada efecto se queda en la pista (o MIX) donde se encendio. Sin modo, los pasos vuelven a fijar el largo del loop. Entrar en PISTA o MIX no sale del modo. No se guarda.
 - Con el modo apagado, SHIFT mantenido deja los knobs sobre el efecto actual si queda alguno encendido.
 
-**Borrar (Movy Delete + pad):** **X + selector de pista (fila superior) = RESET** de esa pista: borra el audio, devuelve los ajustes de fabrica **y apaga todos los efectos PERFORM ligados a esa pista** (encendidos o mantenidos; si era el objetivo actual vuelve la pagina rejilla). Deshacer devuelve audio y ajustes, no los efectos PERFORM. **X + pad REC (fila 1) = borrar la ultima grabacion**: si la ultima accion de esa pista fue una pasada de overdub y el nucleo aun guarda su captura de deshacer (un nivel), solo se quita esa ultima capa (como un Undo de ese dub, aviso `UNDO DUB 3`); si no, se borra el audio del clip (`CLEAR 3`). **X + filas 2-3** siguen siendo CLEAR del audio.
+**Borrar (Movy Delete + pad):** **X + selector de pista (fila superior) = CLEAR solo del audio** de esa pista (deshacer lo devuelve; ajustes y efectos no se tocan). **RESET completo** (audio, ajustes de fabrica y efectos PERFORM de esa pista): **pad SHIFT del looper (columna 1, fila 4) + X + selector**. **SHIFT nativo del Move + selector de pista = FX CLR**: apaga los efectos PERFORM de esa pista, FX de pista en OFF, reverse off, velocidad 1x y borra su automatizacion; el audio, el volumen, el pan y el mute no se tocan (aviso `FX CLR 3`; necesita la UI `ui-module-leds-v12.js`). **X + pad REC (fila 1) = borrar la ultima grabacion**: si la ultima accion de esa pista fue una pasada de overdub y el nucleo aun guarda su captura de deshacer (un nivel), solo se quita esa ultima capa (como un Undo de ese dub, aviso `UNDO DUB 3`); si no, se borra el audio del clip (`CLEAR 3`). **X + filas 2-3** siguen siendo CLEAR del audio.
 
 **SHIFT + mantener el paso N** = suena el efecto N mientras se mantiene; al soltar vuelve todo exactamente como estaba y en tiempo. Objetivo: la pista seleccionada en vista PISTA, o toda la salida del looper en MIX (el objetivo se fija al pulsar).
 
@@ -187,7 +187,7 @@ Pedalera en el hub USB-A del Move, en modo **CUSTOM** (no PATCH). Necesita el bu
 |---|---|---|
 | 1 | REC/DUB/PLAY de la pista seleccionada (como el pad de la fila 1) | - |
 | 2 | PLAY/STOP de la pista seleccionada (como el pad de la fila 2) | CLEAR de la pista seleccionada (se puede deshacer) |
-| 3 | pista anterior (1..6, da la vuelta) | ARM auto-rec on/off (a 1 s, sin soltar) |
+| 3 | pista anterior (1..6, da la vuelta) | ARM on/off (a 1 s, sin soltar) |
 | 4 | pista siguiente (da la vuelta) | - |
 | 5 | UNDO (como el boton Undo del Move) | - |
 | 6 | STOP ALL si algo suena, si no ALL START | - |
@@ -216,7 +216,8 @@ and since v0.4.0 `step_buttons_param`, `step_leds_param`, `loop_knob_param`):
 A Movy without the feature ignores both params; nothing else changes.
 
 - `display`: `"<seq>|<pos 0-127>|<128 peaks as 256 hex digits, or empty>|<header>"`, the selected track's waveform overview (header e.g. `PLAY 1 - 4 BARS`). Peaks are cached in the module and `seq` bumps only when they change.
-- `delete_pad` (write): Movy sends the rack pad index 0-31 when Delete + pad is pressed; the module CLEARs that pad's track (audio only); on the PISTA selector pad (top row) it RESETs the track instead (audio + all settings, undoable).
+- `delete_pad` (write): Movy sends the rack pad index 0-31 when Delete + pad is pressed; the module CLEARs that pad's track (audio only); with the looper SHIFT pad held on a PISTA selector it RESETs the track (audio + all settings, undoable).
+- `shift_pad` (write): Movy sends the rack pad index when Move's own Shift + pad is pressed (the press is not forwarded as a note); on a PISTA selector it clears that track's effects (`FX CLR`).
 - `step`: write-only, step button index 0..15 (Movy sends it instead of a sequencer step).
 - `step_leds`: 32 hex digits, one palette byte per step button.
 - `loop_knob`: write-only `"N:delta[:1]"` while Loop is held (N = knob 1..8, `:1` = Shift/fine).
@@ -228,3 +229,5 @@ A Movy without the feature ignores both params; nothing else changes.
 **v0.11.0:** TAPE STOP y TAPE START se unen en el paso 5 (TAPE); el paso 6 es el nuevo LFO. Cambia el modelo de uso del modo PERFORM (toque = encender/apagar, mantener = momentaneo) y desaparece el doble toque de latch. La escena de un efecto encendido se ve en modo PERFORM aunque no haya ningun paso pulsado. Captura: `docs/screens/perform-3d-v0.11.0.png`.
 
 **v0.12.0:** DUB se ve rojo (como REC). Delete + selector de pista solo borra el audio de esa pista; el RESET completo pasa a SHIFT + Delete + selector. En PERFORM, `<` y `>` cambian de pagina de efectos (pagina 2 = SIDECHAIN, paso 1; requiere la UI `ui-module-leds-v11.js`). Los knobs K1-K3 de un efecto PERFORM se graban como automatizacion (64 pasos sobre el loop) mientras una pista graba/hace overdub o con AUTO-REC (SHIFT + ARM) y se reproducen en bucle; Delete + knob (o ARM + knob) la borra. Columna 8 en blanco (brillante = activo / distinto del valor por defecto). Detalle en docs/BRIEF.md.
+
+**v0.13.0:** SHIFT nativo del Move + selector de pista = FX CLR (ver Borrar). **Automatizacion de knobs, nuevo gesto:** en modo PERFORM con un efecto encendido, MANTEN el pad REC (fila 1) de una pista que suena y gira K1-K3: lo que gires se graba a lo largo de todo el loop de esa pista (`AUTO-REC 3`; durante la pulsacion REC no graba ni hace overdub). Al soltar, la automatizacion suena en bucle. Un toque corto de REC sin girar ningun knob sigue siendo el REC normal. X + knob (o ARM + knob) borra la curva de ese knob. La automatizacion se guarda con el set. Desaparece SHIFT + ARM = AUTO-REC.

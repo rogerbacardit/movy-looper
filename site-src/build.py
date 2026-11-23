@@ -40,9 +40,13 @@ def walk(el):
         if ch.get('data-no-i18n') is not None: continue
         if ch.has_attr('data-i18n') or ch.has_attr('data-i18n-html'):
             D[ch.get('data-i18n') or ch.get('data-i18n-html')] = inner(ch); continue
-        # attributes
-        attrs = []
-        for a in ('aria-label', 'alt', 'title'):
+        # attributes (a manual data-i18n-attr="attr:key|..." is kept and registered as is)
+        if ch.has_attr('data-i18n-attr'):
+            for pair in ch['data-i18n-attr'].split('|'):
+                a, key = pair.split(':', 1)
+                if ch.get(a): D[key] = ch.get(a)
+        attrs = [] if not ch.has_attr('data-i18n-attr') else None
+        for a in (('aria-label', 'alt', 'title') if attrs is not None else ()):
             v = ch.get(a)
             if v and translatable(v):
                 k = newkey(ch); D[k] = v; attrs.append('%s:%s' % (a, k))

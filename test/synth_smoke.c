@@ -2173,26 +2173,58 @@ int main(int argc, char **argv) {
         tap(M_SHIFT);
     }
 
-    /* --- v0.12: knob automation: recorded while AUTO-REC is on, played back, wiped by ARM + knob --- */
+    /* --- v0.13: knob automation = HOLD the REC pad in PERFORM with an effect on, turn K1-K3 --- */
     {
         fresh(&host); seti("quantize", 0);
-        tap(REC(3)); run(300); tap(REC(3)); run(2);                     /* a playing loop */
+        tap(REC(3)); run(300); tap(REC(3)); run(2);                     /* a playing loop on track 3 */
         tap(M_SHIFT);
         setstr("step", "10"); run(3); setstr("step_up", "10");          /* GATE on (latched) */
         CHECK(geti("perf_fx") == 10 && geti("perf_auto") == 0);
-        setstr("knob_delta", "2:5"); run(20);
-        CHECK(geti("perf_auto") == 0);                                   /* not recording: nothing stored */
-        down(M_SHIFT); tap(M_ARM); up(M_SHIFT);                          /* SHIFT + ARM = AUTO-REC */
-        CHECK(geti("perf_auto_rec") == 1 && !strcmp(status_text(), "AUTO-REC ON"));
+        setstr("knob_delta", "2:5"); run(20); CHECK(geti("perf_auto") == 0);   /* a turn with no REC held writes nothing */
+        down(REC(3)); run(2);
+        CHECK(!strcmp(status_text(), "AUTO-REC 3") && state(3) == S_PLAY && geti("perf_auto_hold") == 3);   /* no REC/DUB action */
         for (int i = 0; i < 40; i++) { setstr("knob_delta", i < 20 ? "2:-1" : "2:1"); run(8); }
+        run(20);
+        CHECK(state(3) == S_PLAY);
+        up(REC(3)); run(2);
+        CHECK(geti("perf_auto_hold") == 0 && geti("perf_auto") > 40 && state(3) == S_PLAY);   /* the whole pass is written, REC did nothing */
+        { int a = geti("perf_p10_1"); run(100); int b2 = geti("perf_p10_1"); run(100); int c = geti("perf_p10_1");
+          run(100); int d = geti("perf_p10_1");
+          CHECK(a != b2 || b2 != c || c != d); }                          /* playback moves the knob */
+        /* the state carries it: a fresh instance restores the curve */
+        { static char saved[16384]; saved[0] = 0; A->get_param(S, "state", saved, sizeof saved);
+          CHECK(strstr(saved, "\"l6au\":\"3.10.1=") != NULL);
+          fresh(&host); CHECK(geti("perf_auto") == 0);
+          setstr("state", saved); CHECK(geti("perf_auto") > 40); }
+        /* ARM held + knob wipes a curve */
+        down(M_ARM); setstr("knob_delta", "2:1"); up(M_ARM);
+        fresh(&host); seti("quantize", 0);
+        tap(REC(3)); run(300); tap(REC(3)); run(2);
+        tap(M_SHIFT); setstr("step", "10"); run(3); setstr("step_up", "10");
+        down(REC(3)); setstr("knob_delta", "2:-1"); run(60); up(REC(3));
         CHECK(geti("perf_auto") > 0);
-        down(M_SHIFT); tap(M_ARM); up(M_SHIFT); CHECK(geti("perf_auto_rec") == 0);
-        run(400);                                                        /* knob let go: the curve plays back and moves the knob */
-        { int a = geti("perf_p10_1"); run(150); int b2 = geti("perf_p10_1"); run(150); int c = geti("perf_p10_1");
-          CHECK(a != b2 || b2 != c || a != c); }
-        down(M_ARM); setstr("knob_delta", "2:1"); up(M_ARM);             /* ARM held + knob: clear */
-        CHECK(geti("perf_auto") == 0);
-        setstr("knob_delta", "2:1"); setstr("knob_delta", "1:1:2");      /* the host's Delete + knob arrives as fine = 2 */
+        down(M_ARM); setstr("knob_delta", "2:1"); up(M_ARM); CHECK(geti("perf_auto") == 0);
+        /* a plain tap of REC (no knob) keeps the normal action: PLAY -> DUB on release */
+        tap(REC(3)); run(4); CHECK(state(3) == S_DUB);
+        tap(M_SHIFT);
+    }
+
+    /* --- v0.13: native Move SHIFT + selector (shift_pad) = FX CLR: effects off, clip untouched --- */
+    {
+        fresh(&host); seti("quantize", 0);
+        tap(REC(3)); run(300); tap(REC(3)); run(2);
+        int len3 = gett(3, "len");
+        seti("t3_fx", 4); seti("t3_fx_on", 1); seti("t3_fxp", 80); seti("t3_level", 140); seti("t3_pan", 20);
+        seti("t3_spd", 5); seti("t3_rev", 1);
+        tap(M_SHIFT); setstr("step", "10"); run(3); setstr("step_up", "10");   /* a PERFORM effect on the MIX */
+        tap(FX(3)); setstr("step", "9"); run(3); setstr("step_up", "9");      /* and one on track 3 */
+        down(REC(3)); setstr("knob_delta", "1:-1"); run(60); up(REC(3));
+        seti("shift_pad", FX(3) - 36); run(2);
+        CHECK(!strcmp(status_text(), "FX CLR 3"));
+        CHECK(state(3) == S_PLAY && gett(3, "len") == len3);                    /* audio untouched */
+        CHECK(gett(3, "fx_on") == 0 && gett(3, "fx") == 0 && gett(3, "rev") == 0 && gett(3, "spd") == 3);
+        CHECK(gett(3, "level") == 140 && gett(3, "pan") == 20);                 /* volume and pan untouched */
+        CHECK((geti("perf_on") & (1 << 9)) == 0);                               /* track 3's effect is off, the MIX one stays */
         tap(M_SHIFT);
     }
 

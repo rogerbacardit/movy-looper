@@ -128,6 +128,9 @@ typedef struct {
     int  shift_used;               /* a combo was used while SHIFT was held: its release does not toggle PERFORM */
     long shift_at;                 /* clock_frames at the SHIFT press (a tap is < 300 ms) */
     int  perf_mode;                /* PERFORM mode (SHIFT tap toggles; not persisted) */
+    int  auto_hold;                /* track whose REC pad is held for knob automation (PERFORM), 0 = none */
+    long auto_hold_at;
+    int  auto_turned;              /* a knob was turned during this hold */
     int  perf_bank;                /* PERFORM step-button page (< / > flip it): 0 = steps 1-16, 1 = effects 17+ */
     int  down_fx[PF_BANK];         /* effect bound to each step button while it is down (a page flip must not orphan the release) */
     perf_t *perf;                  /* PERFORM effects (perform.c), attached to the core */
@@ -573,14 +576,14 @@ static void knob_delta(synth_t *s, const char *val) {
     int pfx = perf_knob_fx(s);
     if (pfx >= 0) {                               /* a PERFORM effect is held: the knobs are its parameters */
         if (n >= 1 && n <= PF_NKNOB && d != 0 && n <= perf_nparams(pfx)) {
-            if (fine == 2 || s->arm_held) {            /* Delete (or ARM held) + knob: wipe that knob's automation */
+            if (fine == 2 || s->arm_held) {            /* Delete (or ARM held) + knob: wipe that knob's automation (every track) */
                 if (s->arm_held) s->arm_used = 1;
-                if (perf_auto_has(s->perf, pfx, n - 1)) { perf_auto_clear(s->perf, pfx, n - 1); say(s, "AUTO CLR %s %s", perf_short(pfx), perf_plabel(pfx, n - 1)); }
+                if (perf_auto_has(s->perf, -1, pfx, n - 1)) { perf_auto_clear(s->perf, -1, pfx, n - 1); say(s, "AUTO CLR %s %s", perf_short(pfx), perf_plabel(pfx, n - 1)); }
                 else say(s, "NO AUTO %s %s", perf_short(pfx), perf_plabel(pfx, n - 1));
                 return;
             }
             perf_knob(s->perf, pfx, n - 1, d);
-            if (perf_auto_rec_get(s->perf)) say(s, "AUTO-REC %s %s", perf_short(pfx), perf_plabel(pfx, n - 1));
+            if (s->auto_hold) { s->auto_turned = 1; say(s, "AUTO %d %s %s", s->auto_hold, perf_short(pfx), perf_plabel(pfx, n - 1)); }
         }
         return;
     }
@@ -776,6 +779,36 @@ static void shift_setting(synth_t *s, int act) {
     }
 }
 
+/* PERFORM automation hold: REC pad of a PLAYING track while PERFORM mode has an effect on. */
+static int auto_hold_ok(synth_t *s, int t) {
+    int st = core_state(s, t);
+    return s->perf_mode && !s->shift_held && perf_top_fx(s->perf) >= 0 && (st == MK_PLAY || st == MK_DUB);
+}
+static void auto_hold_end(synth_t *s, int t_rec_tap) {
+    int t = s->auto_hold;
+    if (!t) return;
+    s->auto_hold = 0;
+    perf_auto_hold(s->perf, 0);
+    if (!s->auto_turned && s->clock_frames - s->auto_hold_at < SHIFT_TAP_FRAMES && t_rec_tap) rec_pad(s, t);   /* a plain tap keeps its normal REC action */
+    else if (s->auto_turned) say(s, "AUTO %d SAVED", t);
+}
+
+/* Native Move SHIFT + a track selector (module declares shift_pad_param; Movy forwards the rack pad):
+ * CLEAR ALL EFFECTS of that track and leave the clip as recorded. Audio, volume, pan and mute are untouched. */
+static void fx_clear_track(synth_t *s, int t) {
+    if (s->perf) { perf_clear_target(s->perf, t); perf_auto_clear(s->perf, t, -1, -1); }
+    set_t(s, t, "fx_on", 0);
+    set_t(s, t, "fx", 0);
+    set_t(s, t, "rev", 0);
+    set_t(s, t, "spd", MK_SPD_1X);
+    s->wave_dirty = 1;
+    say(s, "FX CLR %d", t);
+}
+static void shift_pad(synth_t *s, int idx) {
+    const pad_def_t *p = pad_for_note(NOTE_BASE + idx);
+    if (p && p->act == A_SEL && p->arg >= 1 && p->arg <= NTRK) fx_clear_track(s, p->arg);
+}
+
 static void pad_down(synth_t *s, const pad_def_t *p) {
     int t = p->arg;
     int sh = s->shift_held;
@@ -786,17 +819,17 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         shift_setting(s, p->act);
         return;
     }
-    if (sh && p->act == A_ARM) {                               /* SHIFT + ARM: AUTO-REC of PERFORM knob automation */
-        int on = !perf_auto_rec_get(s->perf);
-        perf_auto_rec(s->perf, on);
-        say(s, on ? "AUTO-REC ON" : "AUTO-REC OFF");
-        return;
-    }
     if (sh && p->act == A_REC)  { arm_reverse(s, t); return; }
     if (sh && p->act == A_MUTE) { solo_toggle(s, t); return; }
     switch (p->act) {
     case A_REC:                            /* row 1: REC / DUB (ARM held = reverse) */
         if (s->arm_held) { s->arm_used = 1; arm_reverse(s, t); break; }
+        if (auto_hold_ok(s, t)) {          /* PERFORM + an effect on + a playing track: HOLD = write knob automation, no audio action */
+            s->auto_hold = t; s->auto_hold_at = s->clock_frames; s->auto_turned = 0;
+            perf_auto_hold(s->perf, t);
+            say(s, "AUTO-REC %d", t);
+            break;
+        }
         rec_pad(s, t);
         break;
     case A_STOP: {                         /* row 2: PLAY/STOP toggle */
@@ -886,7 +919,7 @@ static void reset_track(synth_t *s, int t) {
     s->wave_dirty = 1;
     clear_flags(s, t);
     s->rsnap.valid = 0;
-    if (s->perf) perf_clear_target(s->perf, t);       /* every PERFORM effect bound to this track goes off too */
+    if (s->perf) { perf_clear_target(s->perf, t); perf_auto_clear(s->perf, t, -1, -1); }       /* every PERFORM effect bound to this track goes off too */
     trig_t(s, t, "clear");
     {
         char b[32] = ""; int tr = 0, kind = 0, rd = 0;
@@ -929,6 +962,7 @@ static void arm_toggle(synth_t *s) {
 }
 
 static void pad_up(synth_t *s, const pad_def_t *p) {
+    if (p->act == A_REC && s->auto_hold == p->arg) { auto_hold_end(s, 1); return; }
     if (p->act == A_SHIFT) {
         int tap = s->shift_held && !s->shift_used && s->clock_frames - s->shift_at < SHIFT_TAP_FRAMES;
         s->shift_held = 0; s->shift_used = 0;
@@ -1074,7 +1108,7 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
     case A_ALL:     return n->any_run ? L_WHITE : L_GREY_40;
     case A_STOPALL: return n->any_run ? L_BRIGHT_YELLOW : L_DARK_GREY;
     case A_SHIFT:   return s->shift_held ? L_WHITE : s->perf_mode ? (LED_BLINK | L_WHITE) : L_GREY_40;
-    case A_ARM:     return s->arm ? (LED_BLINK | L_ORANGE) : perf_auto_rec_get(s->perf) ? (LED_BLINK | L_RED) : L_DARK_GREY;
+    case A_ARM:     return s->arm ? (LED_BLINK | L_ORANGE) : L_DARK_GREY;
     /* column 8 (REC SETTINGS): all white; bright = on / not the default, dim = off / default */
     case A_COUNTIN: return s->count_in ? L_WHITE : L_GREY_40;
     case A_RECACT:  return n->rec_action ? L_WHITE : L_GREY_40;
@@ -1370,7 +1404,7 @@ static void build_hierarchy(synth_t *s) {
 
     APP("{\"pad_layout\":\"drums\",\"pad_leds_param\":\"pad_leds\","
         "\"status_text_param\":\"status_text\",\"display_param\":\"display\",\"delete_pad_param\":\"delete_pad\","
-        "\"step_buttons_param\":\"step\",\"step_up_param\":\"step_up\",\"step_bank_param\":\"step_bank\",\"screen_param\":\"screen\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
+        "\"step_buttons_param\":\"step\",\"step_up_param\":\"step_up\",\"step_bank_param\":\"step_bank\",\"shift_pad_param\":\"shift_pad\",\"screen_param\":\"screen\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
         "\"knob_capture_param\":\"knob_capture\",\"knob_page_param\":\"knob_page\",\"knob_delta_param\":\"knob_delta\",\"undo_param\":\"undo_cmd\","
         "\"pedal_param\":\"pedal\",\"track_mute_param\":\"track_mute\",\"transport_param\":\"transport\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
@@ -1631,6 +1665,43 @@ static int jcsv(const char *js, const char *key, int idx, int def) {
     return atoi(p);
 }
 
+/* knob automation in the state blob: "T.FX.K=<64 x 2 hex>;..." (FF = empty step), whole entries only */
+static int au_encode(synth_t *s, char *out, int n) {
+    int w = 0; uint8_t b[PF_AU_N];
+    out[0] = 0;
+    for (int t = 1; t <= NTRK; t++)
+        for (int fx = 0; fx < PF_NFX; fx++)
+            for (int k = 0; k < 3; k++) {
+                if (perf_auto_get(s->perf, t, fx, k, b) <= 0) continue;
+                if (w + 16 + 2 * PF_AU_N >= n) return w;
+                w += snprintf(out + w, (size_t)(n - w), "%s%d.%d.%d=", w ? ";" : "", t, fx, k);
+                for (int i = 0; i < PF_AU_N; i++) w += snprintf(out + w, (size_t)(n - w), "%02X", b[i]);
+            }
+    return w;
+}
+static void au_decode(synth_t *s, const char *val) {
+    const char *p = strstr(val, "\"l6au\":\"");
+    if (!s->perf) return;
+    perf_auto_clear(s->perf, -1, -1, -1);
+    if (!p) return;
+    p += 8;
+    while (*p && *p != '"') {
+        int t, fx, k, n = 0;
+        if (sscanf(p, "%d.%d.%d=%n", &t, &fx, &k, &n) < 3 || n <= 0) break;
+        p += n;
+        uint8_t b[PF_AU_N]; int ok = 1;
+        for (int i = 0; i < PF_AU_N; i++) {
+            unsigned v;
+            char h[3] = { p[0], p[0] ? p[1] : 0, 0 };
+            if (!h[0] || !h[1] || sscanf(h, "%2x", &v) != 1) { ok = 0; break; }
+            b[i] = (uint8_t)v; p += 2;
+        }
+        if (!ok) break;
+        perf_auto_put(s->perf, t, fx, k, b);
+        if (*p == ';') p++;
+    }
+}
+
 static int state_get(synth_t *s, char *buf, int buf_len) {
     int n = mark_get_param(s->m, "state", buf, buf_len);
     if (n <= 0 || n >= buf_len) return n;
@@ -1647,10 +1718,12 @@ static int state_get(synth_t *s, char *buf, int buf_len) {
         snprintf(c, sizeof c, "%s%d", t > 1 ? "," : "", s->muted[t - 1] ? s->saved_level[t - 1] : get_t(s, t, "level"));
         strncat(lv, c, sizeof lv - strlen(lv) - 1);
     }
+    static char au[3600];                           /* get_param runs on one thread */
+    { int room = buf_len - n - 400; au_encode(s, au, room < 1 ? 1 : room < (int)sizeof au ? room : (int)sizeof au); }
     int w = snprintf(buf + n, (size_t)(buf_len - n),
         ",\"l6id\":\"%s\",\"l6rl\":%d,\"l6ci\":%d,\"l6thdb\":%d,\"l6ig\":%d,"
-        "\"l6sq\":\"%s\",\"l6mu\":\"%s\",\"l6lv\":\"%s\"}",
-        loop_id_now(s), s->rec_len, s->count_in, s->threshold, s->in_gain, sp, mu, lv);
+        "\"l6sq\":\"%s\",\"l6mu\":\"%s\",\"l6lv\":\"%s\",\"l6au\":\"%s\"}",
+        loop_id_now(s), s->rec_len, s->count_in, s->threshold, s->in_gain, sp, mu, lv, au);
     if (w < 0 || w >= buf_len - n) { buf[n] = '}'; buf[n + 1] = 0; return n + 1; }
     return n + w;
 }
@@ -1661,6 +1734,7 @@ static void state_set(synth_t *s, const char *val) {
         if (core_state(s, t) != MK_EMPTY || s->armed[t - 1] || s->countin[t - 1] >= 0) fresh = 0;
     mark_set_param(s->m, "state", val);
     if (strstr(val, "\"l6rl\":")) {                 /* written by state_get below */
+        au_decode(s, val);
         s->rec_len   = clampi_((int)jnum(val, "l6rl", s->rec_len), 0, MAX_BARS);
         s->count_in  = jnum(val, "l6ci", s->count_in) ? 1 : 0;
         s->threshold = clampi_((int)jnum(val, "l6thdb", s->threshold), -70, -6);
@@ -1812,6 +1886,7 @@ static void tick_block(synth_t *s, const int16_t *in, int16_t *out, int frames) 
     }
     s->clock_frames += frames;
     pedal_tick(s);
+    if (s->auto_hold && (!s->perf_mode || perf_top_fx(s->perf) < 0)) auto_hold_end(s, 0);   /* the mode or the effect went away under the hold */
     for (int t = 1; t <= NTRK; t++) {
         int pnd = core_state(s, t) == MK_EMPTY && core_pending(s, t);
         if (pnd != s->pend_seen[t - 1]) {
@@ -1980,6 +2055,7 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
     if (!s) return;
     s->wave_dirty = 1;
     int v = atoi(val);
+    if (!strcmp(key, "shift_pad")) { if (v >= 0 && v < 32) shift_pad(s, v); return; }
     if (!strcmp(key, "delete_pad")) { if (v >= 0 && v < 32) delete_pad(s, v); return; }
     if (!strcmp(key, "cur_track")) { s->cur_track = clampi(v, 1, NTRK); return; }
     if (!strcmp(key, "threshold")) { s->threshold = clampi(v, -70, -6); return; }
@@ -2076,8 +2152,8 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "perf_target")) { int tg = -1; if (perf_count(s->perf)) perf_entry(s->perf, perf_count(s->perf) - 1, NULL, &tg, NULL, NULL); RET("%d", tg); }
     if (!strcmp(key, "perf_boxes"))   RET("%d", perf_ui_boxes());
     if (!strcmp(key, "perf_on"))      RET("%u", perf_on_mask(s->perf));
-    if (!strcmp(key, "perf_auto"))    RET("%d", perf_auto_has(s->perf, perf_top_fx(s->perf), -1));   /* steps stored for the current effect */
-    if (!strcmp(key, "perf_auto_rec")) RET("%d", perf_auto_rec_get(s->perf));
+    if (!strcmp(key, "perf_auto"))    RET("%d", perf_auto_has(s->perf, -1, perf_top_fx(s->perf), -1));   /* steps stored for the current effect */
+    if (!strcmp(key, "perf_auto_hold")) RET("%d", s->auto_hold);
     if (!strcmp(key, "perf_bank"))    RET("%d", s->perf_bank);
     if (!strcmp(key, "perf_latch"))   RET("%u", perf_latch_mask(s->perf));
     if (!strncmp(key, "perf_p", 6)) {              /* perf_p<fx>_<knob>: stored 0..100 of a PERFORM knob */

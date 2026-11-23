@@ -73,13 +73,13 @@ struct perf {
     entry_t st[PF_MAXSTACK];
     int    nst;
     /* knob automation (see perform.h) */
-    uint8_t au[PF_NFX][3][PF_AU_N];
-    _Atomic int auto_rec;
-    _Atomic int touch[PF_NFX][3];           /* blocks left before a turned knob counts as released (set by the control thread) */
-    int    last_step[PF_NFX][3];            /* audio thread: last step written while recording, -1 none */
-    int    step;                            /* current step, -1 = no loop */
+    uint8_t au[PF_NLANE][PF_NFX][3][PF_AU_N];   /* [track 1..6] */
+    int     aucnt[PF_NLANE][PF_NFX][3];         /* steps stored */
+    _Atomic int hold;                           /* track whose REC pad is held in PERFORM, 0 = none */
+    _Atomic int touch[PF_NFX][3];               /* a knob was turned (set by the control thread, consumed per block) */
+    uint8_t armed[PF_NFX][3];                   /* audio thread: being written until the hold ends */
+    int     last_step[PF_NFX][3];               /* audio thread: last step written, -1 none */
 };
-#define AU_TOUCH_BLOCKS 150                 /* ~0.4 s at 128-frame blocks */
 
 /* defaults; stepped parameters (DISC) hold idx * 100 / (n - 1) */
 static const uint8_t DEF[PF_NFX][3] = {
@@ -155,7 +155,6 @@ perf_t *perf_create(void) {
     for (int f = 0; f < PF_NFX; f++) for (int k = 0; k < 3; k++) p->pct[f][k] = DEF[f][k];
     memset(p->au, 255, sizeof p->au);
     memset(p->last_step, 0xff, sizeof p->last_step);
-    p->step = -1;
     return p;
 }
 void perf_destroy(perf_t *p) {
@@ -232,7 +231,7 @@ static int didx(const perf_t *p, int fx, int k) {
     return i < 0 ? 0 : i > n - 1 ? n - 1 : i;
 }
 void perf_knob(perf_t *p, int fx, int k, int delta) {
-    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3) atomic_store(&p->touch[fx][k], AU_TOUCH_BLOCKS);
+    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3) atomic_store(&p->touch[fx][k], 1);
     if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3 && DISC[fx][k]) {
         int n = DISC[fx][k], i = didx(p, fx, k) + (delta > 0 ? 1 : -1);
         i = i < 0 ? 0 : i > n - 1 ? n - 1 : i;
@@ -243,48 +242,93 @@ void perf_knob(perf_t *p, int fx, int k, int delta) {
 }
 
 /* ---- automation ---- */
-void perf_auto_rec(perf_t *p, int on) { if (p) atomic_store(&p->auto_rec, on ? 1 : 0); }
-int  perf_auto_rec_get(const perf_t *p) { return p ? atomic_load(&((perf_t *)p)->auto_rec) : 0; }
-void perf_auto_clear(perf_t *p, int fx, int knob) {
-    if (!p || fx < 0 || fx >= PF_NFX) return;
-    for (int k = 0; k < 3; k++) if (knob < 0 || knob == k) { memset(p->au[fx][k], 255, PF_AU_N); p->last_step[fx][k] = -1; }
+void perf_auto_hold(perf_t *p, int track) {
+    if (!p) return;
+    if (track < 1 || track >= PF_NLANE) track = 0;
+    if (track) for (int f = 0; f < PF_NFX; f++) for (int k = 0; k < 3; k++) atomic_store(&p->touch[f][k], 0);   /* only turns made DURING the hold arm a knob */
+    atomic_store(&p->hold, track);
 }
-void perf_auto_clear_all(perf_t *p) { if (p) for (int f = 0; f < PF_NFX; f++) perf_auto_clear(p, f, -1); }
-int  perf_auto_has(const perf_t *p, int fx, int knob) {
-    if (!p || fx < 0 || fx >= PF_NFX) return 0;
+int perf_auto_holding(const perf_t *p) { return p ? atomic_load(&((perf_t *)p)->hold) : 0; }
+static void au_put(perf_t *p, int t, int fx, int k, int step, uint8_t v) {
+    uint8_t *c = &p->au[t][fx][k][step];
+    if (*c == 255 && v != 255) p->aucnt[t][fx][k]++;
+    else if (*c != 255 && v == 255) p->aucnt[t][fx][k]--;
+    *c = v;
+}
+void perf_auto_clear(perf_t *p, int track, int fx, int knob) {
+    if (!p) return;
+    for (int t = 1; t < PF_NLANE; t++) {
+        if (track >= 1 && track != t) continue;
+        for (int f = 0; f < PF_NFX; f++) {
+            if (fx >= 0 && fx != f) continue;
+            for (int k = 0; k < 3; k++) {
+                if (knob >= 0 && knob != k) continue;
+                memset(p->au[t][f][k], 255, PF_AU_N); p->aucnt[t][f][k] = 0; p->last_step[f][k] = -1;
+            }
+        }
+    }
+}
+int perf_auto_has(const perf_t *p, int track, int fx, int knob) {
+    if (!p) return 0;
     int n = 0;
-    for (int k = 0; k < 3; k++) if (knob < 0 || knob == k) for (int i = 0; i < PF_AU_N; i++) n += p->au[fx][k][i] != 255;
+    for (int t = 1; t < PF_NLANE; t++) {
+        if (track >= 1 && track != t) continue;
+        for (int f = 0; f < PF_NFX; f++) {
+            if (fx >= 0 && fx != f) continue;
+            for (int k = 0; k < 3; k++) if (knob < 0 || knob == k) n += p->aucnt[t][f][k];
+        }
+    }
     return n;
 }
-int  perf_auto_step(const perf_t *p) { return p ? p->step : -1; }
+int perf_auto_get(const perf_t *p, int track, int fx, int knob, uint8_t *out) {
+    if (!p || track < 1 || track >= PF_NLANE || fx < 0 || fx >= PF_NFX || knob < 0 || knob > 2) return 0;
+    memcpy(out, p->au[track][fx][knob], PF_AU_N);
+    return p->aucnt[track][fx][knob];
+}
+void perf_auto_put(perf_t *p, int track, int fx, int knob, const uint8_t *in) {
+    if (!p || track < 1 || track >= PF_NLANE || fx < 0 || fx >= PF_NFX || knob < 0 || knob > 2) return;
+    for (int i = 0; i < PF_AU_N; i++) au_put(p, track, fx, knob, i, in[i] == 255 || in[i] <= 100 ? in[i] : 255);
+}
 
-/* audio thread, once per block: record a knob that is being turned, play back the others.
- * Only effects that are on; a record fills every step since the last one written, so a fast sweep leaves no holes. */
-static void auto_block(perf_t *p, double grid_pos, double loop_len, int recording) {
-    if (loop_len < 64.0) { p->step = -1; memset(p->last_step, 0xff, sizeof p->last_step); return; }
-    double ph = grid_pos / loop_len; ph -= floor(ph);
-    int step = (int)(ph * PF_AU_N); if (step < 0) step = 0; if (step >= PF_AU_N) step = PF_AU_N - 1;
-    p->step = step;
-    int rec = recording || atomic_load(&p->auto_rec);
-    uint32_t on = 0;
-    for (int l = 0; l < PF_NLANE; l++) on |= atomic_load(&p->ln[l].want);
+static int au_step(const double *tpos, const double *tlen, int t) {
+    if (t < 1 || t >= PF_NLANE || tlen[t] < 64.0) return -1;
+    double ph = tpos[t] / tlen[t]; ph -= floor(ph);
+    int st = (int)(ph * PF_AU_N);
+    return st < 0 ? 0 : st >= PF_AU_N ? PF_AU_N - 1 : st;
+}
+/* audio thread, once per block. WRITE: a knob turned while a REC pad is held (hold = that track) is written every
+ * block at the step under that track's playhead (gaps since the last block filled) until the hold ends. PLAY: every
+ * other knob of an effect that is on copies its stored step into the live value, from the track the effect is bound to. */
+static void auto_block(perf_t *p, const double *tpos, const double *tlen) {
+    int hold = atomic_load(&p->hold);
+    int hs = hold ? au_step(tpos, tlen, hold) : -1;
+    int lane_of[PF_NFX];
+    for (int f = 0; f < PF_NFX; f++) lane_of[f] = -1;
+    for (int l = 0; l < PF_NLANE; l++) {
+        uint32_t w = atomic_load(&p->ln[l].want);
+        for (int f = 0; f < PF_NFX; f++) if ((w >> f) & 1u) lane_of[f] = l;
+    }
     for (int fx = 0; fx < PF_NFX; fx++) {
-        if (!((on >> fx) & 1u)) { for (int k = 0; k < 3; k++) p->last_step[fx][k] = -1; continue; }
         for (int k = 0; k < 3; k++) {
-            int t = atomic_load(&p->touch[fx][k]);
-            if (t > 0) {
-                atomic_store(&p->touch[fx][k], t - 1);
-                if (!rec) { p->last_step[fx][k] = -1; continue; }
-                uint8_t v = p->pct[fx][k]; if (v > 100) v = 100;
+            int touched = atomic_exchange(&p->touch[fx][k], 0);
+            if (lane_of[fx] < 0) { p->armed[fx][k] = 0; p->last_step[fx][k] = -1; continue; }
+            if (hs < 0) { p->armed[fx][k] = 0; p->last_step[fx][k] = -1; }
+            else if (touched) p->armed[fx][k] = 1;
+            if (p->armed[fx][k]) {
+                uint8_t v = p->pct[fx][k] > 100 ? 100 : p->pct[fx][k];
                 int ls = p->last_step[fx][k];
-                p->au[fx][k][step] = v;
-                if (ls >= 0) for (int s = ls; s != step; s = (s + 1) % PF_AU_N) p->au[fx][k][s] = v;
-                p->last_step[fx][k] = step;
-            } else {
-                p->last_step[fx][k] = -1;
-                uint8_t v = p->au[fx][k][step];
-                if (v != 255) p->pct[fx][k] = v;
+                au_put(p, hold, fx, k, hs, v);
+                if (ls >= 0) for (int s = ls; s != hs; s = (s + 1) % PF_AU_N) au_put(p, hold, fx, k, s, v);
+                p->last_step[fx][k] = hs;
+                continue;
             }
+            int owner = lane_of[fx];
+            if (owner == 0) { for (int t = 1; t < PF_NLANE; t++) if (p->aucnt[t][fx][k]) { owner = t; break; } }
+            if (owner < 1 || !p->aucnt[owner][fx][k]) continue;
+            int st = au_step(tpos, tlen, owner);
+            if (st < 0) continue;
+            uint8_t v = p->au[owner][fx][k][st];
+            if (v != 255) p->pct[fx][k] = v;
         }
     }
 }
@@ -503,9 +547,9 @@ static void engage(perf_t *p, lane_t *L, int fx) {
     }
 }
 
-void perf_block_begin(perf_t *p, double grid_pos, double beat_frames, double loop_len, int recording) {
+void perf_block_begin(perf_t *p, double grid_pos, double beat_frames, const double *tpos, const double *tlen) {
     if (!p) return;
-    auto_block(p, grid_pos, loop_len, recording);
+    auto_block(p, tpos, tlen);
     for (int l = 0; l < PF_NLANE; l++) {
         lane_t *L = &p->ln[l];
         L->grid = grid_pos; L->bn = 0;

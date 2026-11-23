@@ -73,21 +73,23 @@ void perf_knob(perf_t *p, int fx, int knob, int delta);   /* knob 0..7, relative
 int  perf_pct(const perf_t *p, int fx, int knob);          /* the stored 0..100 */
 void perf_pct_set(perf_t *p, int fx, int knob, int v);
 
-/* AUTOMATION of the knobs (3 per effect): PF_AU_N steps over the base loop, 255 = empty.
- * While recording (a track in REC/DUB, or AUTO-REC on) a knob that is being turned writes the
- * step under the playhead; a knob that is not being turned plays the stored curve back. Only
- * effects that are on are touched. */
+/* AUTOMATION of the knobs (3 per effect), stored PER TRACK (1..6): PF_AU_N steps over that track's loop,
+ * 255 = empty. Gesture: PERFORM mode, an effect on, HOLD the REC pad of a playing track (perf_auto_hold(track))
+ * and turn K1-K3: a knob turned during the hold is written at the step under THAT track's playhead on every
+ * block until the hold ends (so the whole loop pass holds its value). Released, every knob not held plays its
+ * stored curve back in a loop. An effect plays the curve of the track it is bound to (a MIX effect: the first
+ * track that holds one). Only effects that are on are touched. */
 #define PF_AU_N 64
-void perf_auto_rec(perf_t *p, int on);                     /* AUTO-REC mode (control thread) */
-int  perf_auto_rec_get(const perf_t *p);
-void perf_auto_clear(perf_t *p, int fx, int knob);         /* knob < 0: all knobs of the effect */
-void perf_auto_clear_all(perf_t *p);
-int  perf_auto_has(const perf_t *p, int fx, int knob);     /* number of steps stored (0 = none) */
-int  perf_auto_step(const perf_t *p);                      /* current step 0..PF_AU_N-1, -1 = no loop */
+void perf_auto_hold(perf_t *p, int track);                    /* control thread; 0 = released */
+int  perf_auto_holding(const perf_t *p);
+void perf_auto_clear(perf_t *p, int track, int fx, int knob); /* track < 0 all tracks, fx < 0 all effects, knob < 0 all knobs */
+int  perf_auto_has(const perf_t *p, int track, int fx, int knob);   /* steps stored (same wildcards) */
+int  perf_auto_get(const perf_t *p, int track, int fx, int knob, uint8_t *out);   /* out[PF_AU_N], returns steps stored */
+void perf_auto_put(perf_t *p, int track, int fx, int knob, const uint8_t *in);    /* restore (state load) */
 
 /* audio thread */
-/* loop_len = frames of the base loop region (0 = no loop running: no automation), recording = a track is in REC/DUB */
-void perf_block_begin(perf_t *p, double grid_pos, double beat_frames, double loop_len, int recording);
+/* tpos/tlen: [PF_NLANE] playhead and region length in frames of each PLAYING track, index 1..6 (tlen 0 = not playing) */
+void perf_block_begin(perf_t *p, double grid_pos, double beat_frames, const double *tpos, const double *tlen);
 void perf_process(perf_t *p, int lane, float *l, float *r);   /* in place, int16-scaled floats */
 
 /* any thread */
