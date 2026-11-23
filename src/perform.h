@@ -11,7 +11,7 @@
  * allowed difference after a release is the DELAY THROW tail.
  *
  * Chain order: time/repeat (BEAT REPEAT, STUTTER, RETRIGGER, REVERSE) -> pitch/tape
- * (PITCH, HALF SPEED, TAPE STOP, TAPE START, VINYL) -> filters (LP, HP) -> BITCRUSH ->
+ * (PITCH, HALF SPEED, TAPE, LFO, VINYL) -> filters (LP, HP) -> BITCRUSH ->
  * GATE -> KILL -> DELAY / FREEZE. Up to PF_MAXSTACK effects at once (held or latched).
  *
  * Audio thread: no allocation, no locks, no printf. The control thread keeps the stack
@@ -21,12 +21,12 @@
 #define PERFORM_H
 #include <stdint.h>
 
-enum { PF_BEATREP = 0, PF_STUTTER, PF_PITCH, PF_CRUSH, PF_TSTOP, PF_TSTART, PF_REVERSE, PF_VINYL,
+enum { PF_BEATREP = 0, PF_STUTTER, PF_PITCH, PF_CRUSH, PF_TSTOP, PF_LFO, PF_REVERSE, PF_VINYL,
        PF_LP, PF_HP, PF_GATE, PF_DELAY, PF_FREEZE, PF_RETRIG, PF_HALF, PF_KILL, PF_NFX };
 #define PF_NKNOB 8
 #define PF_MAXSTACK 4
 #define PF_NLANE 7              /* MIX + 6 tracks (compile-time MARK_TRACKS must be <= 6) */
-#define PF_LATCH_MS 300         /* two presses within this = latch */
+#define PF_HOLD_MS 300          /* a step held longer than this is momentary; a shorter tap toggles */
 
 typedef struct perf perf_t;
 
@@ -51,11 +51,14 @@ perf_t *perf_create(void);
 void    perf_destroy(perf_t *p);
 
 /* control thread: the stack */
-enum { PF_P_REFUSED = 0, PF_P_ON, PF_P_LATCHED, PF_P_UNLATCHED };
-int  perf_press(perf_t *p, int fx, int target, long now_frames);   /* SHIFT + step down */
-void perf_release(perf_t *p, int fx);                             /* step up */
+/* toggle = 1 (PERFORM mode): a tap switches the effect on and it stays; held longer than PF_HOLD_MS it is momentary.
+ * toggle = 0 (SHIFT held, mode off): always momentary. Pressing a step that is already on switches it off. */
+enum { PF_P_REFUSED = 0, PF_P_ON, PF_P_OFF };
+int  perf_press(perf_t *p, int fx, int target, long now_frames, int toggle);   /* step down */
+int  perf_release(perf_t *p, int fx, long now_frames);            /* step up; 1 = the effect stays on (a tap) */
+void perf_clear_target(perf_t *p, int target);                    /* switch off everything bound to this target (RESET of a track) */
 int  perf_count(const perf_t *p);
-int  perf_entry(const perf_t *p, int i, int *fx, int *target, int *latched, int *held);   /* i = 0 oldest */
+int  perf_entry(const perf_t *p, int i, int *fx, int *target, int *latched, int *held);   /* i = 0 oldest; latched = toggled on */
 int  perf_top_fx(const perf_t *p);                                /* most recent, -1 none */
 int  perf_held_count(const perf_t *p);
 unsigned perf_on_mask(const perf_t *p);                           /* effects in the stack */

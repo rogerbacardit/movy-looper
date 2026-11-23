@@ -522,20 +522,22 @@ static void pista_select(synth_t *s, int t) {
     s->wave_dirty = 1;
 }
 
-/* ---- PERFORM (perform.c): SHIFT + a held step = a momentary effect --------
- * Steps 1..16 are the 16 effects. The target is frozen at the press: the selected
- * track in PISTA, the whole mix in MIX (a latched effect keeps its own target when
- * the selection changes). Two presses within 300 ms latch it; another tap releases.
- * Up to 4 effects at once, run in a fixed chain order. Releasing SHIFT while the
- * step is still down keeps the effect. */
+/* ---- PERFORM (perform.c): the 16 step buttons are the 16 effects --------
+ * The target is frozen at the press: the selected track in PISTA, the whole mix in MIX
+ * (an effect that is on keeps its own target when the selection changes).
+ * PERFORM mode on: a tap (< 300 ms) switches the effect on and it stays, another tap
+ * switches it off; held longer it is momentary (off on release). SHIFT held with the
+ * mode off: always momentary. Up to 4 effects at once, run in a fixed chain order;
+ * the newest is the current one (scene + knobs). Releasing SHIFT while the step is
+ * still down keeps the effect. */
 static void perf_step_down(synth_t *s, int button) {
     if (button < 0 || button >= PF_NFX || !s->perf) return;
-    int r = perf_press(s->perf, button, s->sel, s->clock_frames);
-    if (r == PF_P_REFUSED) say(s, "PERFORM: MAX %d", PF_MAXSTACK);
-    else if (r == PF_P_LATCHED) say(s, "%s LATCHED", perf_name(button));
-    else if (r == PF_P_UNLATCHED) say(s, "%s OFF", perf_name(button));
+    int r = perf_press(s->perf, button, s->sel, s->clock_frames, s->perf_mode);
+    if (r == PF_P_REFUSED) { if (perf_count(s->perf) >= PF_MAXSTACK) say(s, "PERFORM: MAX %d", PF_MAXSTACK); }
+    else if (r == PF_P_OFF) say(s, "%s OFF", perf_name(button));
+    else if (s->perf_mode) say(s, "%s ON", perf_name(button));
 }
-static void perf_step_up(synth_t *s, int button) { perf_release(s->perf, button); }
+static void perf_step_up(synth_t *s, int button) { perf_release(s->perf, button, s->clock_frames); }
 /* the knobs belong to the most recent effect while a step is down, or while SHIFT is held over a latched one */
 static int perf_knob_fx(const synth_t *s) {
     int top = perf_top_fx(s->perf);
@@ -852,6 +854,7 @@ static void reset_track(synth_t *s, int t) {
     s->wave_dirty = 1;
     clear_flags(s, t);
     s->rsnap.valid = 0;
+    if (s->perf) perf_clear_target(s->perf, t);       /* every PERFORM effect bound to this track goes off too */
     trig_t(s, t, "clear");
     {
         char b[32] = ""; int tr = 0, kind = 0, rd = 0;
@@ -862,10 +865,26 @@ static void reset_track(synth_t *s, int t) {
     say(s, "RESET %d", t);
 }
 
+/* Delete + REC pad: erase the last recording. If this track's latest action is an overdub
+ * pass the core still holds (one level), only that layer goes (an Undo of the dub);
+ * otherwise the clip audio is cleared as with the other rows. */
+static void erase_last(synth_t *s, int t) {
+    char b[32] = ""; int tr = 0, kind = 0, rd = 0;
+    if (get_i(s, "undo_avail") == 1 && core_state(s, t) != MK_DUB
+        && mark_get_param(s->m, "undo_info", b, sizeof b) > 0 && sscanf(b, "%d:%d:%d", &tr, &kind, &rd) == 3
+        && tr == t && kind == 0 && !rd) {
+        s->cur_track = t;
+        undo_cmd(s, "undo");
+        if (get_i(s, "undo_avail") != 1) { say(s, "UNDO DUB %d", t); return; }   /* otherwise the dub held nothing: clear */
+    }
+    clear_track(s, t);
+}
+
 static void delete_pad(synth_t *s, int idx) {
     const pad_def_t *p = pad_for_note(NOTE_BASE + idx);
     if (!p || p->arg < 1 || p->arg > NTRK) return;
     if (p->act == A_SEL) reset_track(s, p->arg);
+    else if (p->act == A_REC) erase_last(s, p->arg);
     else clear_track(s, p->arg);
 }
 
@@ -2012,7 +2031,7 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0 || perf_knob_fx(s) >= 0);
     if (!strcmp(key, "screen")) {
         static char sc[GFX_HEX_LEN + 24];       /* get_param runs on one thread */
-        perf_ui_param(&s->pui, s->perf, perf_page(s), s->sel, s->clock_frames, sc, sizeof sc);
+        perf_ui_param(&s->pui, s->perf, perf_page(s), s->sel, s->clock_frames, s->perf_mode, sc, sizeof sc);
         RET("%s", sc);
     }
     if (!strcmp(key, "sel"))          RET("%d", s->sel);

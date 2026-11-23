@@ -139,6 +139,33 @@ static void scene_tape(gfx_t *g, perf_ui_t *u, const perf_vis_t *v) {
     gfx_rect(g, 29, 57, 30, 3, GFX_ON); gfx_frect(g, 29, 57, wd, 3, GFX_ON);
 }
 
+static void scene_lfo(gfx_t *g, perf_ui_t *u, perf_t *p, const perf_vis_t *v) {
+    float depth = perf_pval(p, PF_LFO, 2), A = 0.35f + 0.85f * depth, ph = v->phase;
+    static const char *const DST[4] = { "FILT", "VOL", "PAN", "PTCH" };
+    int dst = (int)perf_pval(p, PF_LFO, 1);
+    w3_t w; vp(&w, g, 15.0f, 6.0f);
+    w3_view(&w, 0.45f, 0.55f + 0.25f * sinf(u->rot[0]), 0.0f);
+    enum { N = 24 };
+    v3 pa[N + 1], pb[N + 1];
+    for (int i = 0; i <= N; i++) {                                  /* a sine ribbon; its phase is the LFO phase, the bead sits at x = 0 */
+        float x = -2.4f + 4.8f * (float)i / (float)N, y = A * sinf(2.0f * PI_F * (ph + 0.2f * x));
+        pa[i] = (v3){ x, y, 0.7f }; pb[i] = (v3){ x, y, -0.7f };
+    }
+    for (int i = 0; i < N; i++) {
+        w3_line(&w, NULL, pa[i], pa[i + 1], W3_SOLID);
+        w3_line(&w, NULL, pb[i], pb[i + 1], W3_AUTO);
+        if ((i & 3) == 0) w3_line(&w, NULL, pa[i], pb[i], W3_DOT);
+    }
+    w3_line(&w, NULL, (v3){ -2.4f, 0, 0 }, (v3){ 2.4f, 0, 0 }, W3_FAINT);
+    float by = A * sinf(2.0f * PI_F * ph), r = 0.28f + 0.1f * clampf(v->level * 2.0f, 0.0f, 1.0f);
+    w3_xf x = W3_XF(0, by, 0, 1.5707963f, 0, 0, 1.0f);              /* the ring that rides the wave */
+    w3_disc(&w, &x, r, 16, W3_SOLID);
+    w3_line(&w, NULL, (v3){ 0, by, 0.7f }, (v3){ 0, by, -0.7f }, W3_SOLID);
+    gfx_text(g, 11, 56, DST[dst], GFX_ON);
+    int bx = 30 + (int)lroundf(v->phase * 38.0f);                   /* position inside the cycle */
+    gfx_dline(g, 30, 59, 68, 59, 1, 2, GFX_ON); gfx_frect(g, bx - 1, 57, 3, 3, GFX_ON);
+}
+
 static void scene_reverse(gfx_t *g, perf_ui_t *u, const perf_vis_t *v) {
     w3_t w; vp(&w, g, 22.0f, 1.0f);
     w3_view(&w, 0.12f * sinf(u->rot[0] * 0.2f), 0.18f * cosf(u->rot[0] * 0.13f), sinf(u->rot[0] * 0.15f) * 0.5f);
@@ -327,9 +354,10 @@ static void page_grid(gfx_t *g, perf_t *p, int held, const char *tgt) {
     }
 }
 
-static int ui_engaged(perf_t *p, const perf_vis_t *v) { return v->fx >= 0 && perf_held_count(p) > 0; }
+/* the scene shows while a step is down, and in PERFORM mode as long as any effect is on */
+static int ui_engaged(perf_t *p, const perf_vis_t *v, int mode) { return v->fx >= 0 && (perf_held_count(p) > 0 || mode); }
 
-int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long clock_frames) {
+int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long clock_frames, int mode) {
     perf_vis_t v;
     perf_vis(p, &v);
     s_boxes = 0;
@@ -337,7 +365,7 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     float dt = u->last_frames ? (float)(clock_frames - u->last_frames) / (float)MARK_SR : 0.0f;
     if (dt < 0.0f || dt > 0.5f) dt = 0.0f;
     float tsec = (float)clock_frames / (float)MARK_SR;
-    int engaged = ui_engaged(p, &v);
+    int engaged = ui_engaged(p, &v, mode);
     if (!engaged && !shift) return 0;
     gfx_clear(g, GFX_OFF);
     if (!engaged) {
@@ -347,8 +375,9 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     if (v.target) snprintf(tgt, sizeof tgt, "PISTA %d", v.target); else snprintf(tgt, sizeof tgt, "MIX");
     if (shift && v.held && v.k < 0.15 * (double)MARK_SR) { page_grid(g, p, v.fx, tgt); return 1; }   /* the pressed cell flashes inverted */
     float spd = v.speed;
-    if (v.fx == PF_TSTOP || v.fx == PF_TSTART) u->rot[0] += dt * clampf(spd, 0, 1) * 7.0f;
+    if (v.fx == PF_TSTOP) u->rot[0] += dt * clampf(spd, 0, 1) * 7.0f;
     else if (v.fx == PF_VINYL) u->rot[0] += dt * spd * 3.5f;
+    else if (v.fx == PF_LFO) u->rot[0] += dt * 0.5f;
     else if (v.fx == PF_REVERSE) u->rot[0] -= dt * 2.4f;
     else if (v.fx == PF_PITCH) u->rot[0] += dt * 0.9f * powf(2.0f, (perf_pval(p, PF_PITCH, 0) + perf_pval(p, PF_PITCH, 1) / 100.0f) / 12.0f);
     else if (v.fx == PF_STUTTER) u->rot[1] += dt * (1.2f + 5.0f * clampf((float)(v.k / (perf_pval(p, PF_STUTTER, 0) * v.beat)), 0.0f, 1.0f));
@@ -361,7 +390,8 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     case PF_STUTTER: scene_stutter(g, u, p, &v, tsec); break;
     case PF_PITCH:   scene_pitch(g, u, p, &v); break;
     case PF_CRUSH:   scene_crush(g, p, &v, tsec); break;
-    case PF_TSTOP: case PF_TSTART: scene_tape(g, u, &v); break;
+    case PF_TSTOP:   scene_tape(g, u, &v); break;
+    case PF_LFO:     scene_lfo(g, u, p, &v); break;
     case PF_REVERSE: scene_reverse(g, u, &v); break;
     case PF_VINYL:   scene_vinyl(g, u, p, &v); break;
     case PF_LP: case PF_HP: scene_filter(g, p, &v, v.fx == PF_HP, tsec); break;
@@ -374,22 +404,22 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     default: break;
     }
     others(g, &v);
-    if (v.latched) gfx_text(g, 124 - gfx_text_w(tgt) - 7 - gfx_text_w("LATCH"), 2, "LATCH", GFX_OFF);
+    if (v.latched) gfx_text(g, 124 - gfx_text_w(tgt) - 7 - gfx_text_w("ON"), 2, "ON", GFX_OFF);
     panel(g, p, &v);
     return 1;
 }
 
-int perf_ui_param(perf_ui_t *u, perf_t *p, int shift, int target, long clock_frames, char *out, int n) {
+int perf_ui_param(perf_ui_t *u, perf_t *p, int shift, int target, long clock_frames, int mode, char *out, int n) {
     static char hex[GFX_HEX_LEN + 1];
     if (u->shown && u->have && clock_frames - u->last_frames < (long)(MARK_SR / PUI_FPS) && clock_frames >= u->last_frames) {
         /* inside the frame period: repeat the last answer unless the state flipped to "nothing" */
         perf_vis_t v; perf_vis(p, &v);
-        if (ui_engaged(p, &v) || shift) {
+        if (ui_engaged(p, &v, mode) || shift) {
             gfx_hex(&u->prev, hex);
             return snprintf(out, (size_t)n, "%u|%s", u->seq, hex);
         }
     }
-    if (!perf_ui_draw(u, &u->g, p, shift, target, clock_frames)) {
+    if (!perf_ui_draw(u, &u->g, p, shift, target, clock_frames, mode)) {
         u->shown = 0; u->have = 0;
         if (n > 0) out[0] = 0;
         return 0;

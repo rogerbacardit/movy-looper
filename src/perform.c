@@ -42,6 +42,7 @@ typedef struct {
     double lfo;                             /* wow / flutter phase */
     double offp;                            /* retrigger: pitch-drop offset at the last jump */
     int   fn, kmode;
+    int   ph2; double k2; float u0;         /* TAPE: 0 stopping, 1 starting back up, 2 up to speed */
     /* gate */
     float gg;
     /* delay */
@@ -64,38 +65,40 @@ typedef struct {
     uint32_t rng;
 } lane_t;
 
-typedef struct { int fx, target, latched, held; } entry_t;
+typedef struct { int fx, target, latched, held, tog; long t0; } entry_t;
 
 struct perf {
     lane_t ln[PF_NLANE];
     uint8_t pct[PF_NFX][PF_NKNOB];
     entry_t st[PF_MAXSTACK];
     int    nst;
-    int    tap_fx; long tap_t;
 };
 
 /* defaults; stepped parameters (DISC) hold idx * 100 / (n - 1) */
 static const uint8_t DEF[PF_NFX][3] = {
     { 20, 20, 0 },   { 33, 50, 100 }, { 75, 50, 100 }, { 60, 20, 100 },
-    { 40, 0, 0 },    { 40, 0, 0 },    { 100, 100, 0 }, { 40, 40, 0 },
+    { 40, 0, 0 },    { 78, 0, 70 },   { 100, 100, 0 }, { 40, 40, 0 },
     { 75, 25, 0 },   { 30, 25, 0 },   { 40, 85, 0 },   { 50, 40, 85 },
     { 50, 100, 0 },  { 50, 0, 0 },    { 0, 100, 0 },   { 0, 7, 53 },
 };
 static const uint8_t DISC[PF_NFX][3] = {          /* option count of a stepped knob, 0 = continuous */
-    { 0 }, { 0, 3, 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 4, 0, 0 }, { 0 },
+    { 0 }, { 0, 3, 0 }, { 0 }, { 0 }, { 0 }, { 10, 4, 0 }, { 4, 0, 0 }, { 0 },
     { 0, 0, 2 }, { 0, 0, 2 }, { 6, 0, 0 }, { 5, 0, 0 }, { 5, 0, 0 }, { 3, 0, 0 }, { 2, 0, 0 }, { 3, 0, 0 },
 };
-static const char *const NAME[PF_NFX] = { "BEAT REPEAT", "STUTTER", "PITCH", "BITCRUSH", "TAPE STOP", "TAPE START", "REVERSE", "VINYL",
+static const char *const NAME[PF_NFX] = { "BEAT REPEAT", "STUTTER", "PITCH", "BITCRUSH", "TAPE", "LFO", "REVERSE", "VINYL",
     "FILTER LP", "FILTER HP", "GATE", "DELAY THROW", "ECHO FREEZE", "RETRIGGER", "HALF SPEED", "KILL" };
-static const char *const SHORT[PF_NFX] = { "RPT", "STU", "PCH", "BIT", "STP", "STA", "BCK", "VIN",
+static const char *const SHORT[PF_NFX] = { "RPT", "STU", "PCH", "BIT", "TAP", "LFO", "BCK", "VIN",
     "LPF", "HPF", "GAT", "DLY", "FRZ", "RTG", "HLF", "KIL" };
 static const int NP[PF_NFX] = { 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 3, 3, 2, 3 };
 static const char *const PL[PF_NFX][3] = {          /* <= 4 letters: they must fit beside the knob number tab */
     { "RATE", "DCAY", "DROP" }, { "TIME", "END", "CURV" }, { "SEMI", "FINE", "MIX" }, { "BITS", "DOWN", "MIX" },
-    { "TIME", "CURV", "WOW" }, { "TIME", "CURV", "WOW" }, { "WIND", "MIX", "" }, { "BRAK", "CRKL", "WOW" },
+    { "TIME", "CURV", "WOW" }, { "RATE", "DEST", "DEPT" }, { "WIND", "MIX", "" }, { "BRAK", "CRKL", "WOW" },
     { "CUT", "RESO", "SLOP" }, { "CUT", "RESO", "SLOP" }, { "RATE", "DEPT", "SWNG" }, { "TIME", "FDBK", "LEVL" },
     { "SIZE", "MIX", "DCAY" }, { "EVRY", "DCAY", "PTCH" }, { "SPED", "MIX", "" }, { "PART", "FADE", "SPLT" },
 };
+static const char *const LFO_TXT[10] = { "1/16", "1/8T", "1/8", "1/8.", "1/4", "1/4.", "1/2", "1BAR", "2BAR", "4BAR" };
+static const double LFO_BEATS[10] = { 0.25, 1.0 / 3.0, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0, 8.0, 16.0 };
+static const char *const LFO_DST[4] = { "FILT", "VOL", "PAN", "PTCH" };
 static const char *const RATE_TXT[6] = { "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" };
 static const double RATE_MUL[6] = { 1.0, 0.5, 0.25, 0.125, 1.0 / 3.0, 1.0 / 6.0 };
 static const char *const DLY_TXT[5] = { "1/8", "1/8.", "1/4", "1/4.", "1/2" };
@@ -113,7 +116,7 @@ static const double REV_BEATS[3] = { 1.0, 2.0, 4.0 };
 
 /* fixed chain order; ring1 is written after index 3, ring2 after index 13 */
 static const uint8_t CHAIN[PF_NFX] = { PF_BEATREP, PF_STUTTER, PF_RETRIG, PF_REVERSE,
-    PF_PITCH, PF_HALF, PF_TSTOP, PF_TSTART, PF_VINYL,
+    PF_PITCH, PF_HALF, PF_TSTOP, PF_LFO, PF_VINYL,
     PF_LP, PF_HP, PF_CRUSH, PF_GATE, PF_KILL, PF_DELAY, PF_FREEZE };
 #define CH_A_END 4
 #define CH_B_END 14
@@ -139,7 +142,6 @@ perf_t *perf_create(void) {
         for (int f = 0; f < PF_NFX; f++) L->s[f].speed = 1.0f;
     }
     if (!ok) { perf_destroy(p); return NULL; }
-    p->tap_fx = -1;
     for (int f = 0; f < PF_NFX; f++) for (int k = 0; k < 3; k++) p->pct[f][k] = DEF[f][k];
     return p;
 }
@@ -159,31 +161,39 @@ static void st_remove(perf_t *p, int i) {
     for (int j = i; j + 1 < p->nst; j++) p->st[j] = p->st[j + 1];
     p->nst--;
 }
-int perf_press(perf_t *p, int fx, int target, long now) {
+int perf_press(perf_t *p, int fx, int target, long now, int toggle) {
     if (!p || fx < 0 || fx >= PF_NFX) return PF_P_REFUSED;
     if (target < 0 || target >= PF_NLANE) target = 0;
     for (int i = 0; i < p->nst; i++)
-        if (p->st[i].fx == fx && p->st[i].latched) {          /* another tap of a latched step releases it */
-            st_remove(p, i); p->tap_fx = -1; publish(p);
-            return PF_P_UNLATCHED;
+        if (p->st[i].fx == fx) {
+            if (!p->st[i].latched) return PF_P_REFUSED;       /* already down */
+            st_remove(p, i); publish(p);                       /* a tap on an effect that is on switches it off */
+            return PF_P_OFF;
         }
     if (p->nst >= PF_MAXSTACK) return PF_P_REFUSED;
-    int latch = p->tap_fx == fx && now - p->tap_t >= 0 && now - p->tap_t <= (long)(SR * PF_LATCH_MS / 1000.0);
-    entry_t e = { fx, target, latch, 1 };
+    entry_t e = { fx, target, 0, 1, toggle ? 1 : 0, now };
     p->st[p->nst++] = e;
-    if (latch) p->tap_fx = -1; else { p->tap_fx = fx; p->tap_t = now; }
     publish(p);
-    return latch ? PF_P_LATCHED : PF_P_ON;
+    return PF_P_ON;
 }
-void perf_release(perf_t *p, int fx) {
-    if (!p) return;
+int perf_release(perf_t *p, int fx, long now) {
+    if (!p) return 0;
     for (int i = p->nst - 1; i >= 0; i--)
         if (p->st[i].fx == fx && p->st[i].held) {
-            p->st[i].held = 0;
-            if (!p->st[i].latched) st_remove(p, i);
+            entry_t *e = &p->st[i];
+            e->held = 0;
+            long dt = now - e->t0;
+            if (e->tog && dt >= 0 && dt < (long)(SR * PF_HOLD_MS / 1000.0)) { e->latched = 1; publish(p); return 1; }   /* a tap: it stays on */
+            st_remove(p, i);                                   /* a long press is momentary */
             publish(p);
-            return;
+            return 0;
         }
+    return 0;
+}
+void perf_clear_target(perf_t *p, int target) {
+    if (!p) return;
+    for (int i = p->nst - 1; i >= 0; i--) if (p->st[i].target == target) st_remove(p, i);
+    publish(p);
 }
 int perf_count(const perf_t *p) { return p ? p->nst : 0; }
 int perf_entry(const perf_t *p, int i, int *fx, int *target, int *latched, int *held) {
@@ -225,9 +235,9 @@ const char *perf_plabel(int fx, int k) { return fx >= 0 && fx < PF_NFX && k >= 0
 int perf_family(int fx) {
     switch (fx) {
     case PF_BEATREP: return 0;
-    case PF_TSTOP: case PF_TSTART: case PF_REVERSE: case PF_VINYL: case PF_HALF: return 1;
+    case PF_TSTOP: case PF_REVERSE: case PF_VINYL: case PF_HALF: return 1;
     case PF_PITCH: case PF_CRUSH: case PF_LP: case PF_HP: return 2;
-    case PF_STUTTER: case PF_GATE: case PF_RETRIG: return 3;
+    case PF_STUTTER: case PF_GATE: case PF_RETRIG: case PF_LFO: return 3;
     case PF_DELAY: case PF_FREEZE: return 4;
     default: return 5;
     }
@@ -238,7 +248,8 @@ int perf_family(int fx) {
  *  STUTTER 0 beats 1..4, 1 end rate index 0..2 (1/16 1/32 1/64), 2 curve 0 linear .. 1 exponential
  *  PITCH 0 semitones -12..12, 1 fine cents -50..50, 2 mix 0..1
  *  CRUSH 0 bits 16..2, 1 hold 1..32, 2 mix 0..1
- *  TSTOP/TSTART 0 beats .25..2, 1 curve 0 linear .. 1 steep, 2 wow 0..1
+ *  TAPE 0 beats .25..2, 1 curve 0 linear .. 1 steep, 2 wow 0..1 (on = stop, off = start back up over the same time)
+ *  LFO 0 rate index 0..9 (1/16 1/8T 1/8 1/8. 1/4 1/4. 1/2 1 2 4 bars), 1 destination 0..3 (FILT VOL PAN PTCH), 2 depth 0..1 (shape: sine)
  *  REVERSE 0 window index 0..3 (1/4 1/2 1 bar, free), 1 mix 0..1
  *  VINYL 0 floor speed .92..30, 1 crackle 0..1, 2 wow 0..1
  *  LP/HP 0 cutoff Hz 30..18k (exp), 1 reso 0..1, 2 slope index 0..1 (12 / 24 dB)
@@ -255,7 +266,8 @@ float perf_pval(const perf_t *p, int fx, int k) {
     case PF_STUTTER: return k == 0 ? 1.0f + v * 3.0f : k == 1 ? (float)didx(p, fx, 1) : v;
     case PF_PITCH:   return k == 0 ? (float)(int)lroundf(-12.0f + v * 24.0f) : k == 1 ? (float)(int)lroundf(-50.0f + v * 100.0f) : v;
     case PF_CRUSH:   return k == 0 ? (float)(16 - (int)lroundf(v * 14.0f)) : k == 1 ? 1.0f + (float)(int)lroundf(v * 31.0f) : v;
-    case PF_TSTOP: case PF_TSTART: return k == 0 ? 0.25f + v * 1.75f : v;
+    case PF_TSTOP:   return k == 0 ? 0.25f + v * 1.75f : v;
+    case PF_LFO:     return k < 2 ? (float)didx(p, fx, k) : v;
     case PF_REVERSE: return k == 0 ? (float)didx(p, fx, 0) : v;
     case PF_VINYL:   return k == 0 ? 0.92f - v * 0.62f : v;
     case PF_LP: case PF_HP: return k == 0 ? 30.0f * powf(600.0f, v) : k == 1 ? v : (float)didx(p, fx, 2);
@@ -290,7 +302,10 @@ void perf_ptext(const perf_t *p, int fx, int k, char *out, int n) {
         else pcent(v, out, n);
         break;
     case PF_CRUSH:   if (k == 0) snprintf(out, (size_t)n, "%dB", (int)v); else if (k == 1) snprintf(out, (size_t)n, "/%d", (int)v); else pcent(v, out, n); break;
-    case PF_TSTOP: case PF_TSTART:
+    case PF_LFO:
+        if (k == 0) snprintf(out, (size_t)n, "%s", LFO_TXT[(int)v]); else if (k == 1) snprintf(out, (size_t)n, "%s", LFO_DST[(int)v]); else pcent(v, out, n);
+        break;
+    case PF_TSTOP:
         if (k == 0) snprintf(out, (size_t)n, "%.2gB", (double)v);
         else if (k == 1) { if (v < 0.02f) snprintf(out, (size_t)n, "LIN"); else if (v > 0.98f) snprintf(out, (size_t)n, "EXP"); else pcent(v, out, n); }
         else pcent(v, out, n);
@@ -580,36 +595,74 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
         *wl = il + (s->hl - il) * mix; *wr = ir + (s->hr - ir) * mix;
         break;
     }
-    case PF_TSTOP: {
+    case PF_TSTOP: {                  /* TAPE: on = the tape stops; off = it spools back up to speed in the same time */
         double T = (double)perf_pval(p, PF_TSTOP, 0) * L->beat;
-        double u = k / T; if (u > 1.0) u = 1.0;
-        double sp = pow(1.0 - u, 1.0 + 2.0 * (double)perf_pval(p, PF_TSTOP, 1));     /* curve: linear .. steep */
-        if (sp > 0.0) {                                                              /* wow: speed dips, never above 1 */
+        float curve = perf_pval(p, PF_TSTOP, 1), wow = perf_pval(p, PF_TSTOP, 2);
+        if (s->ph2 == 0) {
+            double u = k / T; if (u > 1.0) u = 1.0;
+            double sp = pow(1.0 - u, 1.0 + 2.0 * (double)curve);                     /* curve: linear .. steep */
+            if (sp > 0.0) {                                                          /* wow: speed dips, never above 1 */
+                s->lfo += 2.0 * M_PI * 5.0 / SR;
+                sp *= 1.0 - (double)wow * 0.08 * (0.5 + 0.5 * sin(s->lfo));
+            }
+            s->d += 1.0 - sp;
+            if (s->d > RING_N / 2) s->d = RING_N / 2;
+            s->speed = (float)sp;
+            if (sp <= 0.0) { *wl = *wr = 0.0f; s->hl = s->hr = 0.0f; break; }
+            float a, b;
+            ring_at(L->ring1, (double)L->wc - s->d, &a, &b);
+            float gs = sqrtf((float)sp);
+            *wl = a * gs; *wr = b * gs;
+            s->hl = *wl; s->hr = *wr;
+        } else {                                                                     /* start: from the speed it had, up to 1 */
+            double u = s->k2 / T; s->k2 += 1.0;
+            if (u >= 1.0) { u = 1.0; s->ph2 = 2; }
+            double uu = (double)s->u0 + (1.0 - (double)s->u0) * pow(u, 1.0 + 2.0 * (double)curve);
             s->lfo += 2.0 * M_PI * 5.0 / SR;
-            sp *= 1.0 - (double)perf_pval(p, PF_TSTOP, 2) * 0.08 * (0.5 + 0.5 * sin(s->lfo));
+            double ratio = uu * (1.0 - (double)wow * 0.08 * (0.5 + 0.5 * sin(s->lfo)));
+            if (ratio < 0.03) ratio = 0.03;
+            s->speed = (float)uu;
+            float a, b;
+            gran(L, s, L->ring1, ratio, &a, &b);
+            a *= (float)uu; b *= (float)uu;                                          /* amplitude ramps with the speed */
+            if (s->xf > 0) {                                                         /* hand over from the stopping head without a step */
+                float m = (float)s->xf / (float)XFADE; s->xf--;
+                a += (s->hl - a) * m; b += (s->hr - b) * m;
+            }
+            *wl = a; *wr = b;
         }
-        s->d += 1.0 - sp;
-        if (s->d > RING_N / 2) s->d = RING_N / 2;
-        s->speed = (float)sp;
-        if (sp <= 0.0) { *wl = *wr = 0.0f; break; }
-        float a, b;
-        ring_at(L->ring1, (double)L->wc - s->d, &a, &b);
-        float gs = sqrtf((float)sp);
-        *wl = a * gs; *wr = b * gs;
         break;
     }
-    case PF_TSTART: {
-        double T = (double)perf_pval(p, PF_TSTART, 0) * L->beat;
-        double u = k / T; if (u > 1.0) u = 1.0;
-        u = pow(u, 1.0 + 2.0 * (double)perf_pval(p, PF_TSTART, 1));
-        s->lfo += 2.0 * M_PI * 5.0 / SR;
-        double ratio = u * (1.0 - (double)perf_pval(p, PF_TSTART, 2) * 0.08 * (0.5 + 0.5 * sin(s->lfo)));
-        if (ratio < 0.03) ratio = 0.03;
-        s->speed = (float)u;
-        float a, b;
-        gran(L, s, L->ring1, ratio, &a, &b);
-        float gs = (float)u;                       /* amplitude ramps 0..1 with the speed */
-        *wl = a * gs; *wr = b * gs;
+    case PF_LFO: {                    /* tempo-synced sine on the loop grid: FILT (LP sweep) / VOL / PAN / PTCH */
+        double P = L->beat * LFO_BEATS[(int)perf_pval(p, fx, 0)];
+        double t = L->grid + (double)L->bn; if (t < 0.0) t = 0.0;
+        double ph = fmod(t, P) / P;
+        int dst = (int)perf_pval(p, fx, 1);
+        float depth = perf_pval(p, fx, 2) * (k < 0.03 * SR ? (float)(k / (0.03 * SR)) : 1.0f);   /* depth eases in over 30 ms */
+        float m = sinf(2.0f * (float)M_PI * (float)ph), c = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * (float)ph);
+        s->phase = (float)ph; s->speed = m; s->rep = dst;
+        if (dst == 0) {
+            if ((s->fn++ & 15) == 0) {                                               /* open at phase 0, closed at the half cycle */
+                float fc = 18000.0f * powf(90.0f / 18000.0f, depth * c);
+                svf_set(s, 0, fc, 1.0f / (0.8f + 2.2f * depth));
+                svf_set(s, 1, fc, 1.4142f);
+                s->aux = logf(fc / 30.0f) / logf(600.0f);
+            }
+            float lp, hp, lq, hq, l2, h2, l3, h3;
+            svf_run(s, 0, 0, 0, il, &lp, &hp); svf_run(s, 0, 1, 0, ir, &lq, &hq);
+            svf_run(s, 1, 0, 1, lp, &l2, &h2); svf_run(s, 1, 1, 1, lq, &l3, &h3);
+            *wl = l2; *wr = l3;
+        } else if (dst == 1) {
+            float g = 1.0f - depth * c;
+            *wl = il * g; *wr = ir * g; s->aux = g;
+        } else if (dst == 2) {
+            float ang = (depth * m + 1.0f) * (float)M_PI * 0.25f;
+            *wl = il * cosf(ang) * 1.41421356f; *wr = ir * sinf(ang) * 1.41421356f; s->aux = 0.5f + 0.5f * depth * m;
+        } else {
+            double ratio = pow(2.0, (double)(depth * m) * 7.0 / 12.0);
+            gran(L, s, L->ring1, ratio, wl, wr);
+            s->aux = 0.5f + 0.5f * depth * m;
+        }
         break;
     }
     case PF_REVERSE: {
@@ -746,7 +799,12 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
 
 static void stage(perf_t *p, lane_t *L, int fx, float *x0, float *x1) {
     slot_t *s = &L->s[fx];
-    float tgt = s->held ? 1.0f : 0.0f;
+    int on = s->held;
+    if (fx == PF_TSTOP) {                                      /* TAPE: let go = start back up, then end */
+        if (!s->held && s->ph2 == 0) { s->ph2 = 1; s->k2 = 0.0; s->u0 = s->speed < 0.0f ? 0.0f : s->speed > 1.0f ? 1.0f : s->speed; s->xf = XFADE; }
+        on = s->held || s->ph2 == 1;
+    }
+    float tgt = on ? 1.0f : 0.0f;
     float fi = fx == PF_KILL ? s->fk : FADE_IN, fo = fx == PF_KILL ? s->fk : FADE_OUT;
     if (s->g < tgt) { s->g += fi; if (s->g > tgt) s->g = tgt; }
     else if (s->g > tgt) { s->g -= fo; if (s->g < tgt) s->g = tgt; }
@@ -755,7 +813,7 @@ static void stage(perf_t *p, lane_t *L, int fx, float *x0, float *x1) {
     if (fx == PF_DELAY) { *x0 = wl; *x1 = wr; }               /* the echoes are not gated: only the input is */
     else { *x0 += (wl - *x0) * s->g; *x1 += (wr - *x1) * s->g; }
     s->k += 1.0;
-    if (!s->held && s->g <= 0.0f && (fx != PF_DELAY || s->tail <= 0.0)) {
+    if (!on && s->g <= 0.0f && (fx != PF_DELAY || s->tail <= 0.0)) {
         s->act = 0; s->g = 0.0f; s->speed = 1.0f; s->phase = 0.0f; s->aux = 0.0f; s->env = 0.0f; s->rel = 0; s->tail = 0.0;
         L->act &= ~(1u << fx);
     }

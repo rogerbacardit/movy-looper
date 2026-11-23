@@ -54,31 +54,37 @@ int main(int argc, char **argv) {
     A->set_param(S, "quantize", "0");
     run(10); tap(note_of(1, 1)); run(300); tap(note_of(1, 1)); run(4);
     tap(note_of(4, 1));                                       /* PISTA 1 */
-    note(note_of(4, 0), 1);                                   /* SHIFT held */
+    tap(note_of(4, 0));                                       /* PERFORM mode on */
     run(8); dump(argv[2], "page");
     char nm[64], st[8];
     for (int fx = 0; fx < 16; fx++) {
         snprintf(st, sizeof st, "%d", fx);
-        A->set_param(S, "step", st);
+        A->set_param(S, "step", st); run(3); A->set_param(S, "step_up", st);   /* one tap: on, and it stays */
         for (int f = 0; f < 4; f++) {
             run(f == 0 ? 10 : 90 + 110 * f);
             snprintf(nm, sizeof nm, "fx%d_%d", fx + 1, f);
             dump(argv[2], nm);
         }
-        A->set_param(S, "step_up", st);
+        A->set_param(S, "step", st); A->set_param(S, "step_up", st);           /* tap again: off */
         run(20);
     }
-    /* latch two effects (double tap), then the grid shows their cells; a held third shows stacked tags */
+    /* LFO destinations */
+    A->set_param(S, "step", "5"); run(3); A->set_param(S, "step_up", "5");
+    for (int d = 1; d < 4; d++) {
+        A->set_param(S, "knob_delta", "2:17"); run(150);
+        snprintf(nm, sizeof nm, "lfo_dest%d", d); dump(argv[2], nm);
+    }
+    A->set_param(S, "step", "5"); A->set_param(S, "step_up", "5"); run(20);
+    /* two effects on: the grid with the stacked tags; a held third */
     static const int LAT[2] = { 8, 10 };
     for (int i = 0; i < 2; i++) {
         snprintf(st, sizeof st, "%d", LAT[i]);
-        A->set_param(S, "step", st); run(3); A->set_param(S, "step_up", st); run(3); A->set_param(S, "step", st); A->set_param(S, "step_up", st);
-        run(4);
+        A->set_param(S, "step", st); run(3); A->set_param(S, "step_up", st); run(4);
     }
     dump(argv[2], "grid_latched");
     A->set_param(S, "step", "12"); run(150); dump(argv[2], "combo_a"); run(60); dump(argv[2], "combo_b");
     A->set_param(S, "step", "15"); run(100); dump(argv[2], "combo_c");
     A->set_param(S, "step_up", "15"); A->set_param(S, "step_up", "12"); run(5);
-    note(note_of(4, 0), 0);
+    tap(note_of(4, 0));
     return 0;
 }
