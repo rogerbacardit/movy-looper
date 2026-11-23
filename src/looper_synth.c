@@ -958,8 +958,10 @@ static void delete_pad(synth_t *s, int idx) {
     /* v0.14: Delete + selector now only wipes the track's knob automation. */
     if (p->act == A_SEL && s->shift_held) { s->shift_used = 1; reset_track(s, p->arg); }
     else if (p->act == A_SEL) {                                  /* v0.14: Delete + selector = wipe that track's knob automation (audio stays) */
-        if (s->perf) perf_auto_clear(s->perf, p->arg, -1, -1);
-        say(s, "AUTO CLR %d", p->arg);
+        if (s->perf) { perf_auto_clear(s->perf, p->arg, -1, -1); perf_clear_target(s->perf, p->arg); }   /* v0.14.1: its PERFORM effects (latched and held) go off too */
+        for (int b = 0; b < PF_BANK; b++) if (s->down_fx[b] >= 0 && s->perf && !(perf_on_mask(s->perf) >> s->down_fx[b] & 1u)) s->down_fx[b] = -1;
+        s->grid_view = 0;
+        say(s, "FX+AUTO CLR %d", p->arg);
     }
     else if (p->act == A_REC) erase_last(s, p->arg);
     else clear_track(s, p->arg);

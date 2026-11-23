@@ -2158,12 +2158,12 @@ int main(int argc, char **argv) {
         tap(REC(3)); run(300); tap(REC(3)); run(2);
         seti("t3_pan", 20); seti("t3_level", 140);
         /* v0.14: Delete + selector wipes the track's knob AUTOMATION; the audio stays */
-        tap(M_SHIFT); setstr("step", "10"); run(3); setstr("step_up", "10");
+        tap(M_SHIFT); tap(FX(3)); setstr("step", "10"); run(3); setstr("step_up", "10");      /* on PISTA 3 */
         down(REC(3)); setstr("knob_delta", "2:-1"); run(60); up(REC(3));
-        CHECK(geti("perf_auto") > 0);
-        tap(M_SHIFT);
+        CHECK(geti("perf_auto") > 0 && geti("perf_n") == 1);
         seti("delete_pad", FX(3) - 36); run(2);
-        CHECK(!strcmp(status_text(), "AUTO CLR 3") && state(3) == S_PLAY && geti("perf_auto") == 0);
+        CHECK(!strcmp(status_text(), "FX+AUTO CLR 3") && state(3) == S_PLAY && geti("perf_auto") == 0);
+        CHECK(geti("perf_n") == 0 && geti("perf_latch") == 0);                 /* the track's effect went off with it */
         CHECK(gett(3, "pan") == 20 && gett(3, "level") == 140);          /* settings stay */
         seti("delete_pad", STOP(3) - 36); run(2);
         CHECK(state(3) == S_EMPTY && !strcmp(status_text(), "CLEAR 3"));   /* rows 2-3 still clear the audio */
