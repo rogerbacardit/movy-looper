@@ -15,6 +15,7 @@ JS = {
 'map.stepd': 'Con clip: pone el loop a {0} compás/compases. Pista vacía: fija el largo de las próximas grabaciones (otra vez = libre). Actúa sobre la pista seleccionada.',
 'map.hint.t': 'Toca o pasa el ratón por un pad, knob o botón',
 'map.hint.d': 'La descripción aparece aquí. Cambia entre SHIFT / vista MIX o PISTA con los controles de arriba.',
+'hero.info.t': 'Clica un pad, knob o botón del dibujo', 'hero.info.d': 'Aquí verás qué hace ese control. Los knobs cambian de función según la vista (MIX o PISTA) que esté mostrando la animación.',
 # pads columna 1
 'pi.1.4.n': 'SHIFT', 'pi.1.4.d': 'Mantener pulsado. Gris tenue; blanco mientras lo mantienes. Activa los atajos SHIFT de los demás pads.', 'pi.1.4.s': 'Es el propio modificador.',
 'pi.1.3.n': 'ARM (auto-rec)', 'pi.1.3.d': 'Un toque (pulsar y soltar) activa o desactiva el modo "grabar al detectar sonido". Parpadea en naranja cuando está activo. Mantenido + pad de fila 1 o 2 de una pista = Reverse.', 'pi.1.3.s': 'Sin función SHIFT.',

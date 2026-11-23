@@ -599,5 +599,7 @@ I18N.ca={
 "cs.play.q": "Parar / arrencar amb la Move",
 "cs.play.a": "Stop de la Move = STOP ALL amb memòria; Play = reprèn aquestes pistes des de l'inici (a compàs amb Quantize)",
 "cs.mute.q": "Silenciar tot el looper",
-"cs.mute.a": "M + botó de pista de Movy (la pantalla mostra <code>MUTED</code>; les pistes continuen girant)"
+"cs.mute.a": "M + botó de pista de Movy (la pantalla mostra <code>MUTED</code>; les pistes continuen girant)",
+"hero.info.t": "Clica un pad, knob o botó del dibuix",
+"hero.info.d": "Aquí veuràs què fa aquest control. Els knobs canvien de funció segons la vista (MIX o PISTA) que mostri l'animació."
 };

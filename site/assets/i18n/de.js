@@ -599,5 +599,7 @@ I18N.de={
 "cs.play.q": "Alles stoppen / starten mit der Move",
 "cs.play.a": "Stop der Move = STOP ALL mit Gedächtnis; Play = startet diese Spuren vom Anfang (auf den Takt mit Quantize)",
 "cs.mute.q": "Ganzen Looper stummschalten",
-"cs.mute.a": "M + Movy-Spurtaste (Display zeigt <code>MUTED</code>; die Spuren laufen weiter)"
+"cs.mute.a": "M + Movy-Spurtaste (Display zeigt <code>MUTED</code>; die Spuren laufen weiter)",
+"hero.info.t": "Klicke auf ein Pad, einen Regler oder eine Taste der Zeichnung",
+"hero.info.d": "Hier siehst du, was dieses Bedienelement tut. Die Regler wechseln ihre Funktion je nach Ansicht (MIX oder PISTA), die die Animation gerade zeigt."
 };

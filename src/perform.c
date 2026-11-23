@@ -72,7 +72,14 @@ struct perf {
     uint8_t pct[PF_NFX][PF_NKNOB];
     entry_t st[PF_MAXSTACK];
     int    nst;
+    /* knob automation (see perform.h) */
+    uint8_t au[PF_NFX][3][PF_AU_N];
+    _Atomic int auto_rec;
+    _Atomic int touch[PF_NFX][3];           /* blocks left before a turned knob counts as released (set by the control thread) */
+    int    last_step[PF_NFX][3];            /* audio thread: last step written while recording, -1 none */
+    int    step;                            /* current step, -1 = no loop */
 };
+#define AU_TOUCH_BLOCKS 150                 /* ~0.4 s at 128-frame blocks */
 
 /* defaults; stepped parameters (DISC) hold idx * 100 / (n - 1) */
 static const uint8_t DEF[PF_NFX][3] = {
@@ -80,21 +87,24 @@ static const uint8_t DEF[PF_NFX][3] = {
     { 40, 0, 0 },    { 78, 0, 70 },   { 100, 100, 0 }, { 40, 40, 0 },
     { 75, 25, 0 },   { 30, 25, 0 },   { 40, 85, 0 },   { 50, 40, 85 },
     { 50, 100, 0 },  { 50, 0, 0 },    { 0, 100, 0 },   { 0, 7, 53 },
+    { 40, 70, 50 },
 };
 static const uint8_t DISC[PF_NFX][3] = {          /* option count of a stepped knob, 0 = continuous */
     { 0 }, { 0, 3, 0 }, { 0 }, { 0 }, { 0 }, { 10, 4, 0 }, { 4, 0, 0 }, { 0 },
     { 0, 0, 2 }, { 0, 0, 2 }, { 6, 0, 0 }, { 5, 0, 0 }, { 5, 0, 0 }, { 3, 0, 0 }, { 2, 0, 0 }, { 3, 0, 0 },
+    { 6, 0, 0 },
 };
 static const char *const NAME[PF_NFX] = { "BEAT REPEAT", "STUTTER", "PITCH", "BITCRUSH", "TAPE", "LFO", "REVERSE", "VINYL",
-    "FILTER LP", "FILTER HP", "GATE", "DELAY THROW", "ECHO FREEZE", "RETRIGGER", "HALF SPEED", "KILL" };
+    "FILTER LP", "FILTER HP", "GATE", "DELAY THROW", "ECHO FREEZE", "RETRIGGER", "HALF SPEED", "KILL", "SIDECHAIN" };
 static const char *const SHORT[PF_NFX] = { "RPT", "STU", "PCH", "BIT", "TAP", "LFO", "BCK", "VIN",
-    "LPF", "HPF", "GAT", "DLY", "FRZ", "RTG", "HLF", "KIL" };
-static const int NP[PF_NFX] = { 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 3, 3, 2, 3 };
+    "LPF", "HPF", "GAT", "DLY", "FRZ", "RTG", "HLF", "KIL", "DUK" };
+static const int NP[PF_NFX] = { 3, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3 };
 static const char *const PL[PF_NFX][3] = {          /* <= 4 letters: they must fit beside the knob number tab */
     { "RATE", "DCAY", "DROP" }, { "TIME", "END", "CURV" }, { "SEMI", "FINE", "MIX" }, { "BITS", "DOWN", "MIX" },
     { "TIME", "CURV", "WOW" }, { "RATE", "DEST", "DEPT" }, { "WIND", "MIX", "" }, { "BRAK", "CRKL", "WOW" },
     { "CUT", "RESO", "SLOP" }, { "CUT", "RESO", "SLOP" }, { "RATE", "DEPT", "SWNG" }, { "TIME", "FDBK", "LEVL" },
     { "SIZE", "MIX", "DCAY" }, { "EVRY", "DCAY", "PTCH" }, { "SPED", "MIX", "" }, { "PART", "FADE", "SPLT" },
+    { "RATE", "DEPT", "CURV" },
 };
 static const char *const LFO_TXT[10] = { "1/16", "1/8T", "1/8", "1/8.", "1/4", "1/4.", "1/2", "1BAR", "2BAR", "4BAR" };
 static const double LFO_BEATS[10] = { 0.25, 1.0 / 3.0, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0, 8.0, 16.0 };
@@ -117,9 +127,9 @@ static const double REV_BEATS[3] = { 1.0, 2.0, 4.0 };
 /* fixed chain order; ring1 is written after index 3, ring2 after index 13 */
 static const uint8_t CHAIN[PF_NFX] = { PF_BEATREP, PF_STUTTER, PF_RETRIG, PF_REVERSE,
     PF_PITCH, PF_HALF, PF_TSTOP, PF_LFO, PF_VINYL,
-    PF_LP, PF_HP, PF_CRUSH, PF_GATE, PF_KILL, PF_DELAY, PF_FREEZE };
+    PF_LP, PF_HP, PF_CRUSH, PF_GATE, PF_DUCK, PF_KILL, PF_DELAY, PF_FREEZE };
 #define CH_A_END 4
-#define CH_B_END 14
+#define CH_B_END 15
 
 static void lane_free(lane_t *L) {
     free(L->ring); free(L->ring1); free(L->ring2);
@@ -143,6 +153,9 @@ perf_t *perf_create(void) {
     }
     if (!ok) { perf_destroy(p); return NULL; }
     for (int f = 0; f < PF_NFX; f++) for (int k = 0; k < 3; k++) p->pct[f][k] = DEF[f][k];
+    memset(p->au, 255, sizeof p->au);
+    memset(p->last_step, 0xff, sizeof p->last_step);
+    p->step = -1;
     return p;
 }
 void perf_destroy(perf_t *p) {
@@ -219,6 +232,7 @@ static int didx(const perf_t *p, int fx, int k) {
     return i < 0 ? 0 : i > n - 1 ? n - 1 : i;
 }
 void perf_knob(perf_t *p, int fx, int k, int delta) {
+    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3) atomic_store(&p->touch[fx][k], AU_TOUCH_BLOCKS);
     if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3 && DISC[fx][k]) {
         int n = DISC[fx][k], i = didx(p, fx, k) + (delta > 0 ? 1 : -1);
         i = i < 0 ? 0 : i > n - 1 ? n - 1 : i;
@@ -226,6 +240,53 @@ void perf_knob(perf_t *p, int fx, int k, int delta) {
         return;
     }
     perf_pct_set(p, fx, k, perf_pct(p, fx, k) + delta * 2);
+}
+
+/* ---- automation ---- */
+void perf_auto_rec(perf_t *p, int on) { if (p) atomic_store(&p->auto_rec, on ? 1 : 0); }
+int  perf_auto_rec_get(const perf_t *p) { return p ? atomic_load(&((perf_t *)p)->auto_rec) : 0; }
+void perf_auto_clear(perf_t *p, int fx, int knob) {
+    if (!p || fx < 0 || fx >= PF_NFX) return;
+    for (int k = 0; k < 3; k++) if (knob < 0 || knob == k) { memset(p->au[fx][k], 255, PF_AU_N); p->last_step[fx][k] = -1; }
+}
+void perf_auto_clear_all(perf_t *p) { if (p) for (int f = 0; f < PF_NFX; f++) perf_auto_clear(p, f, -1); }
+int  perf_auto_has(const perf_t *p, int fx, int knob) {
+    if (!p || fx < 0 || fx >= PF_NFX) return 0;
+    int n = 0;
+    for (int k = 0; k < 3; k++) if (knob < 0 || knob == k) for (int i = 0; i < PF_AU_N; i++) n += p->au[fx][k][i] != 255;
+    return n;
+}
+int  perf_auto_step(const perf_t *p) { return p ? p->step : -1; }
+
+/* audio thread, once per block: record a knob that is being turned, play back the others.
+ * Only effects that are on; a record fills every step since the last one written, so a fast sweep leaves no holes. */
+static void auto_block(perf_t *p, double grid_pos, double loop_len, int recording) {
+    if (loop_len < 64.0) { p->step = -1; memset(p->last_step, 0xff, sizeof p->last_step); return; }
+    double ph = grid_pos / loop_len; ph -= floor(ph);
+    int step = (int)(ph * PF_AU_N); if (step < 0) step = 0; if (step >= PF_AU_N) step = PF_AU_N - 1;
+    p->step = step;
+    int rec = recording || atomic_load(&p->auto_rec);
+    uint32_t on = 0;
+    for (int l = 0; l < PF_NLANE; l++) on |= atomic_load(&p->ln[l].want);
+    for (int fx = 0; fx < PF_NFX; fx++) {
+        if (!((on >> fx) & 1u)) { for (int k = 0; k < 3; k++) p->last_step[fx][k] = -1; continue; }
+        for (int k = 0; k < 3; k++) {
+            int t = atomic_load(&p->touch[fx][k]);
+            if (t > 0) {
+                atomic_store(&p->touch[fx][k], t - 1);
+                if (!rec) { p->last_step[fx][k] = -1; continue; }
+                uint8_t v = p->pct[fx][k]; if (v > 100) v = 100;
+                int ls = p->last_step[fx][k];
+                p->au[fx][k][step] = v;
+                if (ls >= 0) for (int s = ls; s != step; s = (s + 1) % PF_AU_N) p->au[fx][k][s] = v;
+                p->last_step[fx][k] = step;
+            } else {
+                p->last_step[fx][k] = -1;
+                uint8_t v = p->au[fx][k][step];
+                if (v != 255) p->pct[fx][k] = v;
+            }
+        }
+    }
 }
 
 const char *perf_name(int fx) { return fx >= 0 && fx < PF_NFX ? NAME[fx] : "---"; }
@@ -237,7 +298,7 @@ int perf_family(int fx) {
     case PF_BEATREP: return 0;
     case PF_TSTOP: case PF_REVERSE: case PF_VINYL: case PF_HALF: return 1;
     case PF_PITCH: case PF_CRUSH: case PF_LP: case PF_HP: return 2;
-    case PF_STUTTER: case PF_GATE: case PF_RETRIG: case PF_LFO: return 3;
+    case PF_STUTTER: case PF_GATE: case PF_RETRIG: case PF_LFO: case PF_DUCK: return 3;
     case PF_DELAY: case PF_FREEZE: return 4;
     default: return 5;
     }
@@ -271,7 +332,7 @@ float perf_pval(const perf_t *p, int fx, int k) {
     case PF_REVERSE: return k == 0 ? (float)didx(p, fx, 0) : v;
     case PF_VINYL:   return k == 0 ? 0.92f - v * 0.62f : v;
     case PF_LP: case PF_HP: return k == 0 ? 30.0f * powf(600.0f, v) : k == 1 ? v : (float)didx(p, fx, 2);
-    case PF_GATE:    return k == 0 ? (float)didx(p, fx, 0) : v;
+    case PF_GATE: case PF_DUCK: return k == 0 ? (float)didx(p, fx, 0) : v;
     case PF_DELAY:   return k == 0 ? (float)didx(p, fx, 0) : k == 1 ? v * 0.88f : v;
     case PF_FREEZE:  return k == 0 ? (float)didx(p, fx, 0) : v;
     case PF_RETRIG:  return k == 0 ? (float)didx(p, fx, 0) : k == 1 ? v : v * 4.0f;
@@ -317,7 +378,7 @@ void perf_ptext(const perf_t *p, int fx, int k, char *out, int n) {
         else if (k == 1) pcent(v, out, n);
         else snprintf(out, (size_t)n, "%dDB", (int)v ? 24 : 12);
         break;
-    case PF_GATE:
+    case PF_GATE: case PF_DUCK:
         if (k == 0) snprintf(out, (size_t)n, "%s", RATE_TXT[(int)v]); else pcent(v, out, n);
         break;
     case PF_DELAY:
@@ -442,8 +503,9 @@ static void engage(perf_t *p, lane_t *L, int fx) {
     }
 }
 
-void perf_block_begin(perf_t *p, double grid_pos, double beat_frames) {
+void perf_block_begin(perf_t *p, double grid_pos, double beat_frames, double loop_len, int recording) {
     if (!p) return;
+    auto_block(p, grid_pos, loop_len, recording);
     for (int l = 0; l < PF_NLANE; l++) {
         lane_t *L = &p->ln[l];
         L->grid = grid_pos; L->bn = 0;
@@ -722,6 +784,18 @@ static void render(perf_t *p, lane_t *L, slot_t *s, int fx, float il, float ir, 
         s->gg += (tgt - s->gg) * 0.01f;
         *wl = il * s->gg; *wr = ir * s->gg;
         s->rep = (int)((int64_t)c & 0x7fff); s->phase = (float)u; s->speed = s->gg;
+        break;
+    }
+    case PF_DUCK: {                   /* sidechain pump: ducks on every grid cell, then swells back (curve = how late) */
+        int idx = (int)perf_pval(p, fx, 0);
+        double Ln = L->beat * RATE_MUL[idx];
+        double t = L->grid + (double)L->bn; if (t < 0.0) t = 0.0;
+        double u = t / Ln; u -= floor(u);
+        float depth = perf_pval(p, fx, 1), curve = perf_pval(p, fx, 2);
+        float tgt = 1.0f - depth * (1.0f - powf((float)u, 0.5f + curve * 2.5f));
+        s->gg += (tgt - s->gg) * 0.02f;
+        *wl = il * s->gg; *wr = ir * s->gg;
+        s->phase = (float)u; s->speed = s->gg;
         break;
     }
     case PF_KILL: {

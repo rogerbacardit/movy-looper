@@ -599,5 +599,7 @@ I18N.fr={
 "cs.play.q": "Tout arrêter / démarrer avec la Move",
 "cs.play.a": "Stop de la Move = STOP ALL avec mémoire ; Play = relance ces pistes depuis le début (sur la mesure avec Quantize)",
 "cs.mute.q": "Couper tout le looper",
-"cs.mute.a": "M + bouton de piste de Movy (l'écran affiche <code>MUTED</code> ; les pistes continuent de tourner)"
+"cs.mute.a": "M + bouton de piste de Movy (l'écran affiche <code>MUTED</code> ; les pistes continuent de tourner)",
+"hero.info.t": "Clique sur un pad, un potard ou un bouton du dessin",
+"hero.info.d": "Tu verras ici ce que fait ce contrôle. Les potards changent de rôle selon la vue (MIX ou PISTA) affichée par l'animation."
 };

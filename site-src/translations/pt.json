@@ -598,5 +598,7 @@
  "cs.play.q": "Parar / arrancar com a Move",
  "cs.play.a": "Stop da Move = STOP ALL com memória; Play = relança essas pistas desde o início (no compasso com Quantize)",
  "cs.mute.q": "Silenciar todo o looper",
- "cs.mute.a": "M + botão de pista do Movy (o ecrã mostra <code>MUTED</code>; as pistas continuam a rodar)"
+ "cs.mute.a": "M + botão de pista do Movy (o ecrã mostra <code>MUTED</code>; as pistas continuam a rodar)",
+ "hero.info.t": "Clica num pad, knob ou botão do desenho",
+ "hero.info.d": "Aqui vês o que esse controlo faz. Os knobs mudam de função conforme a vista (MIX ou PISTA) que a animação está a mostrar."
 }

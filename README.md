@@ -207,7 +207,7 @@ root (`pad_leds_param`, `status_text_param`, `display_param`, `delete_pad_param`
 and since v0.4.0 `step_buttons_param`, `step_leds_param`, `loop_knob_param`):
 
 - `pad_leds`: 64 hex digits, one byte per rack pad (pad 1 first). Bits 0-6 are a
-  Move LED palette index, bit 7 = blink. Track colours: green, blue, yellow,
+  Move LED palette index, bit 7 = blink. Track colours (track 5 = light magenta): green, blue, yellow,
   pink, cyan, orange (dim = empty, bright = playing); red = rec, violet = dub,
   dim white = stopped, grey = muted, red blink = armed.
 - `status_text`: `"<seq>:<text>"` (`MUTE 2`, `REC 1`, `QUANT ON`, ...). Movy shows a
@@ -226,3 +226,5 @@ A Movy without the feature ignores both params; nothing else changes.
 - `display`: the pos field is `"<pos>"` or `"<pos>,<start marker column>"`.
 
 **v0.11.0:** TAPE STOP y TAPE START se unen en el paso 5 (TAPE); el paso 6 es el nuevo LFO. Cambia el modelo de uso del modo PERFORM (toque = encender/apagar, mantener = momentaneo) y desaparece el doble toque de latch. La escena de un efecto encendido se ve en modo PERFORM aunque no haya ningun paso pulsado. Captura: `docs/screens/perform-3d-v0.11.0.png`.
+
+**v0.12.0:** DUB se ve rojo (como REC). Delete + selector de pista solo borra el audio de esa pista; el RESET completo pasa a SHIFT + Delete + selector. En PERFORM, `<` y `>` cambian de pagina de efectos (pagina 2 = SIDECHAIN, paso 1; requiere la UI `ui-module-leds-v11.js`). Los knobs K1-K3 de un efecto PERFORM se graban como automatizacion (64 pasos sobre el loop) mientras una pista graba/hace overdub o con AUTO-REC (SHIFT + ARM) y se reproducen en bucle; Delete + knob (o ARM + knob) la borra. Columna 8 en blanco (brillante = activo / distinto del valor por defecto). Detalle en docs/BRIEF.md.

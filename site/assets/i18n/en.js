@@ -599,5 +599,7 @@ I18N.en={
 "cs.play.q": "Stop / start with the Move",
 "cs.play.a": "Move's Stop = STOP ALL that remembers what was playing; Play = restarts those tracks from the start (on the bar with Quantize)",
 "cs.mute.q": "Mute the whole looper",
-"cs.mute.a": "M + a Movy track button (the screen shows <code>MUTED</code>; tracks keep running)"
+"cs.mute.a": "M + a Movy track button (the screen shows <code>MUTED</code>; tracks keep running)",
+"hero.info.t": "Click a pad, knob or button on the drawing",
+"hero.info.d": "Here you'll see what that control does. Knobs change role depending on the view (MIX or PISTA) the animation is showing."
 };

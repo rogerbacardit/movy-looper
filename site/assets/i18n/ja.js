@@ -599,5 +599,7 @@ I18N.ja={
 "cs.play.q": "Moveで全体を停止/開始",
 "cs.play.a": "MoveのStop = 再生中を記憶するSTOP ALL。Play = そのトラックを先頭から再開(Quantizeなら小節頭)",
 "cs.mute.q": "ルーパー全体をミュート",
-"cs.mute.a": "M + Movyのトラックボタン(画面に <code>MUTED</code>。トラックは回り続けます)"
+"cs.mute.a": "M + Movyのトラックボタン(画面に <code>MUTED</code>。トラックは回り続けます)",
+"hero.info.t": "図のパッド、ノブ、ボタンをクリック",
+"hero.info.d": "そのコントロールの機能がここに表示されます。ノブはアニメーションが表示中のビュー（MIX または PISTA）によって役割が変わります。"
 };

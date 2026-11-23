@@ -599,5 +599,7 @@ I18N.it={
 "cs.play.q": "Fermare / avviare con il Move",
 "cs.play.a": "Stop del Move = STOP ALL con memoria; Play = riavvia quelle tracce dall'inizio (a battuta con Quantize)",
 "cs.mute.q": "Silenziare tutto il looper",
-"cs.mute.a": "M + pulsante di traccia di Movy (lo schermo mostra <code>MUTED</code>; le tracce continuano a girare)"
+"cs.mute.a": "M + pulsante di traccia di Movy (lo schermo mostra <code>MUTED</code>; le tracce continuano a girare)",
+"hero.info.t": "Clicca un pad, una manopola o un tasto del disegno",
+"hero.info.d": "Qui vedrai cosa fa quel controllo. Le manopole cambiano funzione in base alla vista (MIX o PISTA) mostrata dall'animazione."
 };

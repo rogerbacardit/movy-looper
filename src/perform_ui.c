@@ -226,6 +226,21 @@ static void scene_gate(gfx_t *g, perf_t *p, const perf_vis_t *v, float tsec) {
     gfx_dline(g, 6, 59, 6 + (int)lroundf(clampf(v->level * 2.5f, 0, 1) * 70.0f), 59, 1, 1, GFX_ON);
 }
 
+static void scene_duck(gfx_t *g, perf_t *p, const perf_vis_t *v) {      /* the pump curve with a cursor */
+    float depth = perf_pval(p, PF_DUCK, 1), curve = perf_pval(p, PF_DUCK, 2);
+    int x0 = 12, w = 100, y0 = 20, h = 30, prev = -1;
+    for (int i = 0; i <= w; i++) {
+        float u = (float)i / (float)w;
+        float gn = 1.0f - depth * (1.0f - powf(u, 0.5f + curve * 2.5f));
+        int y = y0 + h - (int)lroundf(gn * (float)h);
+        if (prev >= 0) gfx_dline(g, x0 + i - 1, prev, x0 + i, y, 1, 1, GFX_ON);
+        prev = y;
+    }
+    int cx = x0 + (int)lroundf(clampf(v->phase, 0.0f, 1.0f) * (float)w);
+    gfx_dline(g, cx, y0 - 2, cx, y0 + h + 2, 1, 2, GFX_ON);
+    gfx_dline(g, x0, y0 + h + 3, x0 + (int)lroundf(clampf(v->level * 2.5f, 0, 1) * 70.0f), y0 + h + 3, 1, 1, GFX_ON);
+}
+
 static void scene_delay(gfx_t *g, perf_t *p, const perf_vis_t *v) {
     float fb = perf_pval(p, PF_DELAY, 1);
     double Td = (double)v->phase * 131072.0; if (Td < 2000.0) Td = 2000.0;
@@ -336,15 +351,21 @@ static void panel(gfx_t *g, perf_t *p, const perf_vis_t *v) {
 }
 
 /* ---- the PERFORM grid page: 4 x 4 cells, "NN XXX" each, so every name has room ---- */
+static int s_bank = 0;
+void perf_ui_set_bank(int bank) { s_bank = bank < 0 ? 0 : bank >= PF_NBANK ? PF_NBANK - 1 : bank; }
 static void page_grid(gfx_t *g, perf_t *p, int held, const char *tgt) {
     static const struct { int on, off; } STRIPE[6] = { { 1, 1 }, { 1, 0 }, { 3, 1 }, { 2, 2 }, { 1, 3 }, { 4, 2 } };
-    title(g, "PERFORM", tgt);
+    char ttl[16];
+    if (PF_NBANK > 1) snprintf(ttl, sizeof ttl, "PERFORM %d/%d", s_bank + 1, PF_NBANK); else snprintf(ttl, sizeof ttl, "PERFORM");
+    title(g, ttl, tgt);
     unsigned latched = perf_latch_mask(p), on = perf_on_mask(p);
-    for (int i = 0; i < PF_NFX; i++) {
-        int col = i & 3, row = i >> 2, x = col * 32, y = 10 + row * 13, w = col == 3 ? 32 : 33, h = 13;   /* boxes share their borders */
+    for (int j = 0; j < PF_BANK; j++) {
+        int i = s_bank * PF_BANK + j;
+        int col = j & 3, row = j >> 2, x = col * 32, y = 10 + row * 13, w = col == 3 ? 32 : 33, h = 13;   /* boxes share their borders */
         char num[4]; snprintf(num, sizeof num, "%d", i + 1);
         int hot = i == held;
         if (hot) gfx_frect(g, x, y, w, h, GFX_ON); else gfx_rect(g, x, y, w, h, GFX_ON);
+        if (i >= PF_NFX) continue;                                    /* empty cell of the last page */
         int c = hot ? GFX_OFF : GFX_ON, fam = perf_family(i);
         gfx_text(g, x + 3 + (i < 9 ? 5 : 0), y + 3, num, c);
         gfx_text(g, x + 14, y + 3, perf_short(i), c);
@@ -401,6 +422,7 @@ int perf_ui_draw(perf_ui_t *u, gfx_t *g, perf_t *p, int shift, int target, long 
     case PF_RETRIG:  scene_retrig(g, p, &v); break;
     case PF_HALF:    scene_half(g, u, p, &v); break;
     case PF_KILL:    scene_kill(g, p, &v, tsec); break;
+    case PF_DUCK:    scene_duck(g, p, &v); break;
     default: break;
     }
     others(g, &v);

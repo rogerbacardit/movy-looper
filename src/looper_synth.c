@@ -128,6 +128,8 @@ typedef struct {
     int  shift_used;               /* a combo was used while SHIFT was held: its release does not toggle PERFORM */
     long shift_at;                 /* clock_frames at the SHIFT press (a tap is < 300 ms) */
     int  perf_mode;                /* PERFORM mode (SHIFT tap toggles; not persisted) */
+    int  perf_bank;                /* PERFORM step-button page (< / > flip it): 0 = steps 1-16, 1 = effects 17+ */
+    int  down_fx[PF_BANK];         /* effect bound to each step button while it is down (a page flip must not orphan the release) */
     perf_t *perf;                  /* PERFORM effects (perform.c), attached to the core */
     perf_ui_t pui;                 /* PERFORM graphics state (get_param path only) */
     int  knob_acc[9];              /* detent accumulators of the enum knobs */
@@ -531,13 +533,28 @@ static void pista_select(synth_t *s, int t) {
  * the newest is the current one (scene + knobs). Releasing SHIFT while the step is
  * still down keeps the effect. */
 static void perf_step_down(synth_t *s, int button) {
-    if (button < 0 || button >= PF_NFX || !s->perf) return;
-    int r = perf_press(s->perf, button, s->sel, s->clock_frames, s->perf_mode);
+    if (button < 0 || button >= PF_BANK || !s->perf) return;
+    int fx = s->perf_bank * PF_BANK + button;
+    s->down_fx[button] = -1;
+    if (fx >= PF_NFX) return;                                  /* empty cell of the last page */
+    s->down_fx[button] = fx;
+    int r = perf_press(s->perf, fx, s->sel, s->clock_frames, s->perf_mode);
     if (r == PF_P_REFUSED) { if (perf_count(s->perf) >= PF_MAXSTACK) say(s, "PERFORM: MAX %d", PF_MAXSTACK); }
-    else if (r == PF_P_OFF) say(s, "%s OFF", perf_name(button));
-    else if (s->perf_mode) say(s, "%s ON", perf_name(button));
+    else if (r == PF_P_OFF) say(s, "%s OFF", perf_name(fx));
+    else if (s->perf_mode) say(s, "%s ON", perf_name(fx));
 }
-static void perf_step_up(synth_t *s, int button) { perf_release(s->perf, button, s->clock_frames); }
+static void perf_step_up(synth_t *s, int button) {
+    if (button < 0 || button >= PF_BANK || !s->perf || s->down_fx[button] < 0) return;
+    perf_release(s->perf, s->down_fx[button], s->clock_frames);
+    s->down_fx[button] = -1;
+}
+/* < / > (Movy forwards them as step_bank "+1" / "-1"): flip the PERFORM step-button page. */
+static void perf_bank_step(synth_t *s, int dir) {
+    int nb = s->perf_bank + (dir > 0 ? 1 : -1);
+    if (nb < 0 || nb >= PF_NBANK) { say(s, "FX PAGE %d/%d", s->perf_bank + 1, PF_NBANK); return; }
+    s->perf_bank = nb;
+    say(s, "FX PAGE %d/%d", nb + 1, PF_NBANK);
+}
 /* the knobs belong to the most recent effect while a step is down, or while SHIFT is held over a latched one */
 static int perf_knob_fx(const synth_t *s) {
     int top = perf_top_fx(s->perf);
@@ -555,7 +572,16 @@ static void knob_delta(synth_t *s, const char *val) {
     if (sscanf(val, "%d:%d:%d", &n, &d, &fine) < 2) return;
     int pfx = perf_knob_fx(s);
     if (pfx >= 0) {                               /* a PERFORM effect is held: the knobs are its parameters */
-        if (n >= 1 && n <= PF_NKNOB && d != 0 && n <= perf_nparams(pfx)) perf_knob(s->perf, pfx, n - 1, d);
+        if (n >= 1 && n <= PF_NKNOB && d != 0 && n <= perf_nparams(pfx)) {
+            if (fine == 2 || s->arm_held) {            /* Delete (or ARM held) + knob: wipe that knob's automation */
+                if (s->arm_held) s->arm_used = 1;
+                if (perf_auto_has(s->perf, pfx, n - 1)) { perf_auto_clear(s->perf, pfx, n - 1); say(s, "AUTO CLR %s %s", perf_short(pfx), perf_plabel(pfx, n - 1)); }
+                else say(s, "NO AUTO %s %s", perf_short(pfx), perf_plabel(pfx, n - 1));
+                return;
+            }
+            perf_knob(s->perf, pfx, n - 1, d);
+            if (perf_auto_rec_get(s->perf)) say(s, "AUTO-REC %s %s", perf_short(pfx), perf_plabel(pfx, n - 1));
+        }
         return;
     }
     if (n < 1 || n > 8 || d == 0 || s->sel == 0) return;
@@ -760,6 +786,12 @@ static void pad_down(synth_t *s, const pad_def_t *p) {
         shift_setting(s, p->act);
         return;
     }
+    if (sh && p->act == A_ARM) {                               /* SHIFT + ARM: AUTO-REC of PERFORM knob automation */
+        int on = !perf_auto_rec_get(s->perf);
+        perf_auto_rec(s->perf, on);
+        say(s, on ? "AUTO-REC ON" : "AUTO-REC OFF");
+        return;
+    }
     if (sh && p->act == A_REC)  { arm_reverse(s, t); return; }
     if (sh && p->act == A_MUTE) { solo_toggle(s, t); return; }
     switch (p->act) {
@@ -883,7 +915,9 @@ static void erase_last(synth_t *s, int t) {
 static void delete_pad(synth_t *s, int idx) {
     const pad_def_t *p = pad_for_note(NOTE_BASE + idx);
     if (!p || p->arg < 1 || p->arg > NTRK) return;
-    if (p->act == A_SEL) reset_track(s, p->arg);
+    /* v0.12: Delete + selector clears ONLY that track's audio (like Delete + any other pad of its column).
+     * The full RESET (audio + level/pan/FX/mute + its PERFORM effects) moved to SHIFT + Delete + selector. */
+    if (p->act == A_SEL && s->shift_held) { s->shift_used = 1; reset_track(s, p->arg); }
     else if (p->act == A_REC) erase_last(s, p->arg);
     else clear_track(s, p->arg);
 }
@@ -979,17 +1013,11 @@ enum {
 };
 /* Colour rules (RC-505 style): GREEN = playing and RED = recording are
  * reserved for state, so no track identity colour is green or red.
- * Track identity: blue, cyan, yellow, magenta, white, orange.
- * ARM / armed = orange blinking; DUB = violet; mute = grey. */
-static const uint8_t TRK_BRIGHT[NTRK] = { 125,  14,   7,  23, 122,   3 };
-static const uint8_t TRK_DIM[NTRK]    = {  99,  91,  77, 109, 123,  72 };
-static const uint8_t TRK_VDIM[NTRK]   = {  98,  92,  74, 110, 124,  69 };
-/* Brightness of the fixed-length pad: free .. 1 .. 2 .. 3-4 .. 5+ bars. */
-static uint8_t fixlen_level(int bars) {
-    return bars <= 0 ? L_DARK_GREY : bars == 1 ? L_GREY_40 : bars == 2 ? L_LIGHT_GREY
-         : bars <= 4 ? L_OFF_WHITE : L_WHITE;
-}
-
+ * Track identity: blue, cyan, yellow, violet, light magenta/pink (track 5, palette 26), orange.
+ * ARM / armed = orange blinking; DUB = red like REC (v0.12); mute = grey. Column 8 = white. */
+static const uint8_t TRK_BRIGHT[NTRK] = { 125,  14,   7,  23,  26,   3 };
+static const uint8_t TRK_DIM[NTRK]    = {  99,  91,  77, 109, 115,  72 };
+static const uint8_t TRK_VDIM[NTRK]   = {  98,  92,  74, 110, 116,  69 };
 /* One read of the core state per poll, shared by all 32 pads (each core
  * read is a string round trip, so it must not be repeated per pad). */
 typedef struct {
@@ -1020,7 +1048,7 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
         if (st == MK_EMPTY)     return n->pend[i] ? (LED_BLINK | L_RED) : TRK_VDIM[i];  /* waiting on the grid: red blink, armed = orange */
         switch (st) {
         case MK_REC:  return L_RED;
-        case MK_DUB:  return L_PURPLE;
+        case MK_DUB:  return L_RED;           /* overdub is red like REC (v0.12; it was violet) */
         default:      return TRK_VDIM[i];  /* playing / stopped: row 2 shows it */
         }
     }
@@ -1046,11 +1074,12 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
     case A_ALL:     return n->any_run ? L_WHITE : L_GREY_40;
     case A_STOPALL: return n->any_run ? L_BRIGHT_YELLOW : L_DARK_GREY;
     case A_SHIFT:   return s->shift_held ? L_WHITE : s->perf_mode ? (LED_BLINK | L_WHITE) : L_GREY_40;
-    case A_ARM:     return s->arm ? (LED_BLINK | L_ORANGE) : L_DARK_GREY;
-    case A_COUNTIN: return s->count_in ? L_YELLOW : L_DIM_YELLOW;
-    case A_RECACT:  return n->rec_action ? L_PURPLE : L_DARK_ROYAL_BLUE;
-    case A_FIXLEN:  return fixlen_level(s->rec_len);
-    case A_QUANT:   return n->quant ? L_CYAN : L_DIM_CYAN;
+    case A_ARM:     return s->arm ? (LED_BLINK | L_ORANGE) : perf_auto_rec_get(s->perf) ? (LED_BLINK | L_RED) : L_DARK_GREY;
+    /* column 8 (REC SETTINGS): all white; bright = on / not the default, dim = off / default */
+    case A_COUNTIN: return s->count_in ? L_WHITE : L_GREY_40;
+    case A_RECACT:  return n->rec_action ? L_WHITE : L_GREY_40;
+    case A_FIXLEN:  return s->rec_len > 0 ? L_WHITE : L_GREY_40;
+    case A_QUANT:   return n->quant ? L_WHITE : L_GREY_40;
     default:        return L_OFF;
     }
 }
@@ -1071,11 +1100,14 @@ static void build_step_leds(synth_t *s, char *out) {
     static const uint8_t FAM[6] = { L_ROYAL_BLUE, L_ORANGE, L_PURPLE, L_CYAN, L_DIM_CYAN, L_YELLOW };
     unsigned latched = perf_latch_mask(s->perf), on = perf_on_mask(s->perf);
     if (perf_page(s) || perf_held_count(s->perf) > 0) {      /* PERFORM page: family colours, a held one white, a latched one blinking */
-        for (int i = 0; i < 16; i++) {
-            int c = FAM[perf_family(i)];
-            if ((latched >> i) & 1u) c |= LED_BLINK;
-            if (((on >> i) & 1u) && !((latched >> i) & 1u)) c = L_WHITE;
-            snprintf(out + i * 2, 3, "%02X", c);
+        for (int j = 0; j < PF_BANK; j++) {
+            int i = s->perf_bank * PF_BANK + j, c = L_OFF;
+            if (i < PF_NFX) {
+                c = FAM[perf_family(i)];
+                if ((latched >> i) & 1u) c |= LED_BLINK;
+                if (((on >> i) & 1u) && !((latched >> i) & 1u)) c = L_WHITE;
+            }
+            snprintf(out + j * 2, 3, "%02X", c);
         }
         return;
     }
@@ -1087,7 +1119,8 @@ static void build_step_leds(synth_t *s, char *out) {
             if (i + 1 == bars) c = L_WHITE;
             else if (i + 1 < bars) c = L_GREY_40;
         }
-        if ((latched >> i) & 1u) c = FAM[perf_family(i)] | LED_BLINK;     /* a latched effect stays visible without SHIFT */
+        { int fi = s->perf_bank * PF_BANK + i;
+          if (fi < PF_NFX && ((latched >> fi) & 1u)) c = FAM[perf_family(fi)] | LED_BLINK; }     /* a latched effect stays visible without SHIFT */
         snprintf(out + i * 2, 3, "%02X", c);
     }
 }
@@ -1337,7 +1370,7 @@ static void build_hierarchy(synth_t *s) {
 
     APP("{\"pad_layout\":\"drums\",\"pad_leds_param\":\"pad_leds\","
         "\"status_text_param\":\"status_text\",\"display_param\":\"display\",\"delete_pad_param\":\"delete_pad\","
-        "\"step_buttons_param\":\"step\",\"step_up_param\":\"step_up\",\"screen_param\":\"screen\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
+        "\"step_buttons_param\":\"step\",\"step_up_param\":\"step_up\",\"step_bank_param\":\"step_bank\",\"screen_param\":\"screen\",\"step_leds_param\":\"step_leds\",\"loop_knob_param\":\"loop_knob\","
         "\"knob_capture_param\":\"knob_capture\",\"knob_page_param\":\"knob_page\",\"knob_delta_param\":\"knob_delta\",\"undo_param\":\"undo_cmd\","
         "\"pedal_param\":\"pedal\",\"track_mute_param\":\"track_mute\",\"transport_param\":\"transport\",\"levels\":{\"root\":{\"name\":\"Looper 606\",\"params\":[");
     for (int t = 1; t <= NTRK; t++)
@@ -1957,6 +1990,7 @@ static void gen_set_param(void *inst, const char *key, const char *val) {
         return;
     }
     if (!strcmp(key, "step_up"))   { perf_step_up(s, v); return; }
+    if (!strcmp(key, "step_bank")) { if (perf_page(s)) perf_bank_step(s, v); return; }
     if (!strcmp(key, "loop_knob")) { loop_knob(s, val); return; }
     if (!strcmp(key, "knob_delta")) { if (s->shift_held) s->shift_used = 1; knob_delta(s, val); return; }
     if (!strcmp(key, "undo_cmd"))  { undo_cmd(s, val); return; }
@@ -2028,9 +2062,11 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
         build_step_leds(s, hx);
         RET("%s", hx);
     }
+    if (!strcmp(key, "step_bank")) RET("%d", perf_page(s) ? s->perf_bank : -1);   /* -1: not on the PERFORM page, < > stay the host's */
     if (!strcmp(key, "knob_capture")) RET("%d", s->sel != 0 || perf_knob_fx(s) >= 0);
     if (!strcmp(key, "screen")) {
         static char sc[GFX_HEX_LEN + 24];       /* get_param runs on one thread */
+        perf_ui_set_bank(s->perf_bank);
         perf_ui_param(&s->pui, s->perf, perf_page(s), s->sel, s->clock_frames, s->perf_mode, sc, sizeof sc);
         RET("%s", sc);
     }
@@ -2040,6 +2076,9 @@ static int gen_get_param(void *inst, const char *key, char *buf, int buf_len) {
     if (!strcmp(key, "perf_target")) { int tg = -1; if (perf_count(s->perf)) perf_entry(s->perf, perf_count(s->perf) - 1, NULL, &tg, NULL, NULL); RET("%d", tg); }
     if (!strcmp(key, "perf_boxes"))   RET("%d", perf_ui_boxes());
     if (!strcmp(key, "perf_on"))      RET("%u", perf_on_mask(s->perf));
+    if (!strcmp(key, "perf_auto"))    RET("%d", perf_auto_has(s->perf, perf_top_fx(s->perf), -1));   /* steps stored for the current effect */
+    if (!strcmp(key, "perf_auto_rec")) RET("%d", perf_auto_rec_get(s->perf));
+    if (!strcmp(key, "perf_bank"))    RET("%d", s->perf_bank);
     if (!strcmp(key, "perf_latch"))   RET("%u", perf_latch_mask(s->perf));
     if (!strncmp(key, "perf_p", 6)) {              /* perf_p<fx>_<knob>: stored 0..100 of a PERFORM knob */
         int fx, kb;

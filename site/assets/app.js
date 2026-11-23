@@ -385,7 +385,26 @@ $$('.cmd button').forEach(b => b.addEventListener('click', () => { const x = b.p
     drawWave(sc, { head: (st === 'ARM' ? 'ARM ' : 'PISTA ') + (i + 1), right: st, lo: 0, hi: st === 'REC' ? 2 : len, len: st === 'REC' ? 2 : len, recTo, inB: 0, outB: len, seed: i + 1, dub: st === 'DUB', pos: (st === 'ARM' || st === 'COUNT') ? null : pos, markers: st === 'PLAY' && s.sel > 0 });
   }
   dev.apply(s); reg(host, run);
+  // left column: click a control on the drawing to see what it does
+  const info = $('#hero-info'); let last = null;
+  const render = () => {
+    if (!info) return;
+    if (!last) return infoShow(info, t('hero.info.t'), [], t('hero.info.d'));
+    const [k, d] = last;
+    if (k === 'pad') { const [n, desc, sh] = PADINFO(d.row, d.col); infoShow(info, n, [t('map.at', t('row.' + d.row), d.col), d.col === 1 ? 'MASTER' : d.col === 8 ? 'REC SETTINGS' : t('map.track', d.col - 1)], desc, sh); }
+    else if (k === 'knob') { const v = d.view; const e = KNOBINFO(v, d.n); infoShow(info, e[0], [t(v === 'mix' ? 'map.viewmix' : 'map.viewpista')], e[1]); }
+    else if (k === 'step') infoShow(info, t('map.step', d.n), [t('map.steptag')], t('map.stepd', d.n));
+    else infoShow(info, t('bt.' + d.name + '.n'), [t('map.btn')], t('bt.' + d.name + '.d'));
+  };
+  dev.bind((k, d, act) => {
+    if (act !== 'click') return;
+    if (k === 'knob') d.view = s.sel ? 'pista' : 'mix';
+    last = [k, d]; render();
+    dev.ring(k === 'pad' ? [{ pad: [d.row, d.col] }] : k === 'knob' ? [{ knob: d.n }] : k === 'step' ? [{ step: d.n }] : BTN[d.name] ? [{ btn: d.name }] : []);
+  });
+  render(); onLang(render);
 })();
+function infoShow(info, title, tags, body, sh) { info.innerHTML = ''; const h = document.createElement('h4'); h.textContent = title; tags.forEach(x => { const sp = document.createElement('span'); sp.className = 'tag'; sp.textContent = x; h.appendChild(sp); }); info.appendChild(h); const p = document.createElement('p'); p.textContent = body; info.appendChild(p); if (sh) { const q = document.createElement('p'); q.className = 'shiftline'; q.textContent = sh; info.appendChild(q); } }
 /* =====================================================================
    MAPA interactivo
    ===================================================================== */

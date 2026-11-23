@@ -2488,7 +2488,10 @@ static void process_common(mark_t *m, const int16_t *in, int16_t *out,
     perf_t *pf = rt ? NULL : m->perf;
     if (pf) {
         mk_track_t *pb = base_playing(m);
-        perf_block_begin(pf, pb ? pb->pos : (double)m->global_frames, effective_grid(m) / 4.0);
+        int rec_any = 0;                       /* L606: knob automation records while a track records or overdubs */
+        for (int i = 0; i < MARK_TRACKS; i++) if (m->t[i].st == MK_REC || m->t[i].st == MK_DUB) rec_any = 1;
+        perf_block_begin(pf, pb ? pb->pos : (double)m->global_frames, effective_grid(m) / 4.0,
+                         pb ? (double)reg_len(pb) : 0.0, rec_any);
     }
 
     int paused = m->transport_paused;

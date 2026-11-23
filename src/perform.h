@@ -22,7 +22,11 @@
 #include <stdint.h>
 
 enum { PF_BEATREP = 0, PF_STUTTER, PF_PITCH, PF_CRUSH, PF_TSTOP, PF_LFO, PF_REVERSE, PF_VINYL,
-       PF_LP, PF_HP, PF_GATE, PF_DELAY, PF_FREEZE, PF_RETRIG, PF_HALF, PF_KILL, PF_NFX };
+       PF_LP, PF_HP, PF_GATE, PF_DELAY, PF_FREEZE, PF_RETRIG, PF_HALF, PF_KILL,
+       PF_DUCK,                 /* bank 2, step 1 (17th effect) */
+       PF_NFX };
+#define PF_BANK 16              /* effects per page of step buttons; < and > flip pages (max 2 pages: masks are 32 bit) */
+#define PF_NBANK ((PF_NFX + PF_BANK - 1) / PF_BANK)
 #define PF_NKNOB 8
 #define PF_MAXSTACK 4
 #define PF_NLANE 7              /* MIX + 6 tracks (compile-time MARK_TRACKS must be <= 6) */
@@ -69,8 +73,21 @@ void perf_knob(perf_t *p, int fx, int knob, int delta);   /* knob 0..7, relative
 int  perf_pct(const perf_t *p, int fx, int knob);          /* the stored 0..100 */
 void perf_pct_set(perf_t *p, int fx, int knob, int v);
 
+/* AUTOMATION of the knobs (3 per effect): PF_AU_N steps over the base loop, 255 = empty.
+ * While recording (a track in REC/DUB, or AUTO-REC on) a knob that is being turned writes the
+ * step under the playhead; a knob that is not being turned plays the stored curve back. Only
+ * effects that are on are touched. */
+#define PF_AU_N 64
+void perf_auto_rec(perf_t *p, int on);                     /* AUTO-REC mode (control thread) */
+int  perf_auto_rec_get(const perf_t *p);
+void perf_auto_clear(perf_t *p, int fx, int knob);         /* knob < 0: all knobs of the effect */
+void perf_auto_clear_all(perf_t *p);
+int  perf_auto_has(const perf_t *p, int fx, int knob);     /* number of steps stored (0 = none) */
+int  perf_auto_step(const perf_t *p);                      /* current step 0..PF_AU_N-1, -1 = no loop */
+
 /* audio thread */
-void perf_block_begin(perf_t *p, double grid_pos, double beat_frames);
+/* loop_len = frames of the base loop region (0 = no loop running: no automation), recording = a track is in REC/DUB */
+void perf_block_begin(perf_t *p, double grid_pos, double beat_frames, double loop_len, int recording);
 void perf_process(perf_t *p, int lane, float *l, float *r);   /* in place, int16-scaled floats */
 
 /* any thread */

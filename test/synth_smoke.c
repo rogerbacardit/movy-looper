@@ -484,7 +484,7 @@ int main(int argc, char **argv) {
     tap(REC(1)); run(300); tap(REC(1)); run(2); CHECK(state(1) == S_PLAY);
     int len1 = geti("t1_len"); CHECK(len1 > 0);
     tap(STOP(1)); CHECK(state(1) == S_STOP);
-    seti("delete_pad", FX(1) - 36); CHECK(state(1) == S_EMPTY); CHECK(geti("t1_len") == 0);
+    down(M_SHIFT); seti("delete_pad", FX(1) - 36); up(M_SHIFT); CHECK(state(1) == S_EMPTY); CHECK(geti("t1_len") == 0);
     CHECK(geti("undo_avail") == 1);
     UNDO(); run(2);
     CHECK(state(1) == S_STOP); CHECK(geti("t1_len") == len1);
@@ -577,7 +577,7 @@ int main(int argc, char **argv) {
         tap(MUTE(1)); STATUS(); CHECK(!strcmp(txt, "MUTE 1"));
         CHECK(LEDOF(RACKPAD(3, 1)) == 119 && LEDOF(RACKPAD(2, 1)) == 119);   /* mute = grey */
         tap(MUTE(1)); STATUS(); CHECK(!strcmp(txt, "UNMUTE 1"));
-        tap(REC(1)); STATUS(); CHECK(!strcmp(txt, "DUB 1")); CHECK(LEDOF(RACKPAD(1, 1)) == 20);   /* dub = violet */
+        tap(REC(1)); STATUS(); CHECK(!strcmp(txt, "DUB 1")); CHECK(LEDOF(RACKPAD(1, 1)) == 127);  /* dub = red like REC (v0.12) */
         CHECK(LEDOF(RACKPAD(2, 1)) == 126);
         tap(REC(1));
         tap(STOP(1)); STATUS(); CHECK(!strcmp(txt, "STOP 1"));
@@ -585,11 +585,11 @@ int main(int argc, char **argv) {
         seti("delete_pad", REC(1) - 36); STATUS(); CHECK(!strcmp(txt, "CLEAR 1"));      /* an empty dub holds nothing to undo: the clip goes */
         CHECK(LEDOF(RACKPAD(1, 1)) == 98 && LEDOF(RACKPAD(2, 1)) == 0);
         /* settings + master pads */
-        CHECK(LEDOF(RACKPAD(1, 7)) == 92);                       /* quantize off */
-        tap(R_QUANT); STATUS(); CHECK(!strcmp(txt, "QUANT ON")); CHECK(LEDOF(RACKPAD(1, 7)) == 14);
-        tap(R_COUNTIN); STATUS(); CHECK(!strcmp(txt, "COUNT-IN ON")); CHECK(LEDOF(RACKPAD(4, 7)) == 7);
-        tap(R_RECACT); STATUS(); CHECK(!strcmp(txt, "REC>DUB")); CHECK(LEDOF(RACKPAD(3, 7)) == 20);
-        tap(R_FIXLEN); STATUS(); CHECK(!strcmp(txt, "LEN 1 BAR")); CHECK(LEDOF(RACKPAD(2, 7)) == 123);
+        CHECK(LEDOF(RACKPAD(1, 7)) == 123);                      /* quantize off = dim white */
+        tap(R_QUANT); STATUS(); CHECK(!strcmp(txt, "QUANT ON")); CHECK(LEDOF(RACKPAD(1, 7)) == 120);
+        tap(R_COUNTIN); STATUS(); CHECK(!strcmp(txt, "COUNT-IN ON")); CHECK(LEDOF(RACKPAD(4, 7)) == 120);
+        tap(R_RECACT); STATUS(); CHECK(!strcmp(txt, "REC>DUB")); CHECK(LEDOF(RACKPAD(3, 7)) == 120);
+        tap(R_FIXLEN); STATUS(); CHECK(!strcmp(txt, "LEN 1 BAR")); CHECK(LEDOF(RACKPAD(2, 7)) == 120);
         tap(R_FIXLEN); STATUS(); CHECK(!strcmp(txt, "LEN 2 BARS"));
         tap(M_ARM); STATUS(); CHECK(!strcmp(txt, "ARM ON")); CHECK(LEDOF(RACKPAD(3, 0)) == (0x80 | 3));
         tap(M_ARM); STATUS(); CHECK(!strcmp(txt, "ARM OFF"));
@@ -1100,7 +1100,7 @@ int main(int argc, char **argv) {
     /* --- row 4 selector, PISTA knobs, SHIFT combos --- */
     {
         fresh(&host); seti("quantize", 0); in_mode = IN_SINE;
-        static const int vdim[6] = { 98, 92, 74, 110, 124, 69 }, bright[6] = { 125, 14, 7, 23, 122, 3 };
+        static const int vdim[6] = { 98, 92, 74, 110, 116, 69 }, bright[6] = { 125, 14, 7, 23, 26, 3 };
         CHECK(strstr(getstr("ui_hierarchy"), "\"knob_capture_param\":\"knob_capture\"") != NULL);
         CHECK(strstr(sbuf, "\"knob_delta_param\":\"knob_delta\"") != NULL && strstr(sbuf, "\"undo_param\":\"undo_cmd\"") != NULL);
         CHECK(geti("knob_capture") == 0 && geti("sel") == 0);
@@ -1475,11 +1475,11 @@ int main(int argc, char **argv) {
         tap(FX(4));                                                            /* MIX */
         setstr("step", "11"); setstr("step_up", "11");                         /* the whole mix */
         CHECK(geti("perf_n") == 4 && geti("perf_target") == 0);
-        seti("delete_pad", FX(3) - 36); run(2);
+        down(M_SHIFT); seti("delete_pad", FX(3) - 36); run(2); up(M_SHIFT);
         CHECK(geti("perf_n") == 2 && geti("perf_on") == ((1 << 10) | (1 << 11)) && geti("perf_fx") == 11);   /* only track 3's two are gone */
         setstr("step_up", "9"); CHECK(geti("perf_n") == 2);
         setstr("step", "11"); setstr("step_up", "11"); tap(FX(4)); CHECK(geti("sel") == 4);
-        seti("delete_pad", FX(4) - 36); run(2); CHECK(geti("perf_n") == 0 && geti("perf_fx") == -1);
+        down(M_SHIFT); seti("delete_pad", FX(4) - 36); run(2); up(M_SHIFT); CHECK(geti("perf_n") == 0 && geti("perf_fx") == -1);
         run(40); { const char *bar = strchr(screen(), '|'); CHECK(bar && geti("perf_boxes") == 0); }   /* the current target was reset: the grid page */
         tap(M_SHIFT);
     }
@@ -1492,7 +1492,9 @@ int main(int argc, char **argv) {
             int len3 = gett(3, "len");
             seti("t3_fx", 4); seti("t3_fx_on", 1); seti("t3_fxp", 80); seti("t3_level", 140); seti("t3_pan", 20);
             seti("t3_spd", 5); seti("t3_rev", 1); seti("t3_shot", 1);
+            if (row) down(M_SHIFT);
             seti("delete_pad", (row ? FX(3) : STOP(3)) - 36); run(2);
+            if (row) up(M_SHIFT);
             CHECK(state(3) == S_EMPTY && gett(3, "len") == 0);
             CHECK(!strcmp(status_text(), row ? "RESET 3" : "CLEAR 3"));
             if (row) {
@@ -1522,7 +1524,7 @@ int main(int argc, char **argv) {
         tap(REC(1)); run(300); tap(REC(1)); run(2);
         tap(REC(2)); run(300); tap(REC(2)); run(2);
         seti("t1_pan", 10); seti("t2_pan", 90);
-        seti("delete_pad", FX(1) - 36);                 /* reset 1 */
+        down(M_SHIFT); seti("delete_pad", FX(1) - 36); up(M_SHIFT);                 /* reset 1 */
         seti("delete_pad", STOP(2) - 36);               /* plain clear of 2 takes the undo slot */
         UNDO(); run(2);
         CHECK(state(2) == S_STOP && gett(2, "pan") == 90 && gett(1, "pan") == 50);
@@ -1530,12 +1532,12 @@ int main(int argc, char **argv) {
         fresh(&host); seti("quantize", 0);
         for (int k = 1; k <= 3; k++) { tap(REC(k)); run(300); tap(REC(k)); run(2); }
         tap(MUTE(3)); CHECK(state(3) == S_MUTE); seti("t3_pan", 30);
-        seti("delete_pad", FX(3) - 36);                 /* muted track: RESET unmutes, level 100 */
+        down(M_SHIFT); seti("delete_pad", FX(3) - 36); up(M_SHIFT);                 /* muted track: RESET unmutes, level 100 */
         CHECK(state(3) == S_EMPTY && gett(3, "level") == 100);
         tap(REC(3)); run(300); tap(REC(3)); run(2); CHECK(state(3) == S_PLAY);
         down(M_SHIFT); tap(MUTE(1)); up(M_SHIFT);       /* solo 1 */
         CHECK(state(1) == S_PLAY && state(2) == S_MUTE && state(3) == S_MUTE);
-        seti("delete_pad", FX(1) - 36);                 /* resetting the soloed track ends the solo */
+        down(M_SHIFT); seti("delete_pad", FX(1) - 36); up(M_SHIFT);                 /* resetting the soloed track ends the solo */
         CHECK(state(2) == S_PLAY && gett(2, "level") == 100 && gett(1, "level") == 100);
         UNDO(); run(2);                                 /* back to solo 1 */
         CHECK(state(1) == S_STOP || state(1) == S_PLAY); CHECK(state(2) == S_MUTE && state(3) == S_MUTE);
@@ -1544,7 +1546,7 @@ int main(int argc, char **argv) {
         /* solo 2, reset 3 (muted by the solo): 3 leaves the solo state and is unmuted */
         down(M_SHIFT); tap(MUTE(2)); up(M_SHIFT);
         CHECK(state(3) == S_MUTE);
-        seti("delete_pad", FX(3) - 36);
+        down(M_SHIFT); seti("delete_pad", FX(3) - 36); up(M_SHIFT);
         CHECK(state(3) == S_EMPTY && gett(3, "level") == 100);
         down(M_SHIFT); tap(MUTE(2)); up(M_SHIFT);       /* unsolo */
         CHECK(state(1) == S_STOP && state(2) == S_PLAY);
@@ -2143,6 +2145,55 @@ int main(int argc, char **argv) {
             unsigned sq = scr_seq(); run(40); CHECK(scr_seq() != sq || fx == 15);  /* animated (KILL may settle) */
             setstr("step_up", b); up(M_SHIFT); run(8);
         }
+    }
+
+    /* --- v0.12: Delete + selector clears only audio; SHIFT + Delete + selector = RESET --- */
+    {
+        fresh(&host); seti("quantize", 0);
+        tap(REC(3)); run(300); tap(REC(3)); run(2);
+        seti("t3_pan", 20); seti("t3_level", 140);
+        seti("delete_pad", FX(3) - 36); run(2);
+        CHECK(state(3) == S_EMPTY && !strcmp(status_text(), "CLEAR 3"));
+        CHECK(gett(3, "pan") == 20 && gett(3, "level") == 140);          /* settings stay */
+    }
+
+    /* --- v0.12: effect page 2 via step_bank, DUCK is the 17th effect --- */
+    {
+        fresh(&host); seti("quantize", 0);
+        CHECK(geti("step_bank") == -1);                                   /* not on the PERFORM page: < > stay the host's */
+        tap(M_SHIFT); CHECK(geti("step_bank") == 0);
+        setstr("step_bank", "1"); CHECK(geti("perf_bank") == 1 && geti("step_bank") == 1);
+        setstr("step", "0"); run(3); setstr("step_up", "0");
+        CHECK(geti("perf_latch") == (1 << 16) && geti("perf_fx") == 16);
+        setstr("step", "5"); setstr("step_up", "5"); CHECK(geti("perf_n") == 1);   /* empty cell of page 2: nothing */
+        { const char *h = getstr("step_leds"); CHECK(!strncmp(h + 2, "00", 2)); }
+        setstr("step_bank", "1"); CHECK(geti("perf_bank") == 1);          /* no page 3 */
+        setstr("step_bank", "-1"); CHECK(geti("perf_bank") == 0);
+        setstr("step", "0"); setstr("step_up", "0"); CHECK(geti("perf_fx") == 16 || geti("perf_fx") == 0);
+        tap(M_SHIFT);
+    }
+
+    /* --- v0.12: knob automation: recorded while AUTO-REC is on, played back, wiped by ARM + knob --- */
+    {
+        fresh(&host); seti("quantize", 0);
+        tap(REC(3)); run(300); tap(REC(3)); run(2);                     /* a playing loop */
+        tap(M_SHIFT);
+        setstr("step", "10"); run(3); setstr("step_up", "10");          /* GATE on (latched) */
+        CHECK(geti("perf_fx") == 10 && geti("perf_auto") == 0);
+        setstr("knob_delta", "2:5"); run(20);
+        CHECK(geti("perf_auto") == 0);                                   /* not recording: nothing stored */
+        down(M_SHIFT); tap(M_ARM); up(M_SHIFT);                          /* SHIFT + ARM = AUTO-REC */
+        CHECK(geti("perf_auto_rec") == 1 && !strcmp(status_text(), "AUTO-REC ON"));
+        for (int i = 0; i < 40; i++) { setstr("knob_delta", i < 20 ? "2:-1" : "2:1"); run(8); }
+        CHECK(geti("perf_auto") > 0);
+        down(M_SHIFT); tap(M_ARM); up(M_SHIFT); CHECK(geti("perf_auto_rec") == 0);
+        run(400);                                                        /* knob let go: the curve plays back and moves the knob */
+        { int a = geti("perf_p10_1"); run(150); int b2 = geti("perf_p10_1"); run(150); int c = geti("perf_p10_1");
+          CHECK(a != b2 || b2 != c || a != c); }
+        down(M_ARM); setstr("knob_delta", "2:1"); up(M_ARM);             /* ARM held + knob: clear */
+        CHECK(geti("perf_auto") == 0);
+        setstr("knob_delta", "2:1"); setstr("knob_delta", "1:1:2");      /* the host's Delete + knob arrives as fine = 2 */
+        tap(M_SHIFT);
     }
 
     /* --- nothing crashes on garbage --- */
