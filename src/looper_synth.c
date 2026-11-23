@@ -1133,6 +1133,7 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
         if (s->armed[i])        return LED_BLINK | L_ORANGE;
         if (s->countin[i] >= 0) return LED_BLINK | L_BRIGHT_YELLOW;
         if (st == MK_EMPTY)     return n->pend[i] ? (LED_BLINK | L_RED) : TRK_VDIM[i];  /* waiting on the grid: red blink, armed = orange */
+        if (n->pend[i])         return LED_BLINK | (n->pend[i] == 2 ? L_GREEN_PLAY : L_RED);   /* a launch waiting for the bar blinks (green = play) */
         switch (st) {
         case MK_REC:  return L_RED;
         case MK_DUB:  return L_RED;           /* overdub is red like REC (v0.12; it was violet) */
@@ -1148,7 +1149,7 @@ static uint8_t pad_color(synth_t *s, const snap_t *n, const pad_def_t *d) {
         switch (st) {
         case MK_PLAY: case MK_DUB: return L_GREEN_PLAY;
         case MK_REC:  return TRK_VDIM[i];
-        default:      return TRK_DIM[i];   /* stopped with a clip */
+        default:      return n->pend[i] == 2 ? (LED_BLINK | L_GREEN_PLAY) : TRK_DIM[i];   /* stopped with a clip; a launch waiting for the bar blinks green */
         }
     }
     case A_MUTE:

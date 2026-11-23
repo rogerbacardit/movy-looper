@@ -115,3 +115,7 @@ The cause of today's "0 params" is that Movy reads params from module.json. Dupl
 
 ## v0.15.0: TEMPO
 - `perf_clip_t` (set by `mark_core.c` every block through `perf_clip`) gives the effect the track's buffer, region [off, len), playhead, rate, reverse. TEMPO ignores the stream and reads the clip itself with 2 Hann grains (hop G/2, G 15..90 ms), analysis head advancing `ratio * rate` per frame; K1 value = ratio 0.5..2 (fine/100 mapped linearly; default exactly 1 = 100/3 %), shown as ratio x project BPM (`perf_set_bpm` from the shim; the engine's `beat` is a grid unit, not necessarily a beat). Glide: one-pole towards the target over the K2 time; release: glide to 1, wait for a beat boundary of the loop playhead, snap the head there, wait one grain length, then the slot ends. First in the chain (`CH_A_END` 5). Target MIX is refused by `perf_press`.
+
+## v0.15.1
+- Launch latency measured (`LATENCY` lines of the host test): quantize ON waits for the next bar of the base grid (`grid_unit`), up to one bar whatever the base loop length (1/4/16 bars: worst 1.55 / 1.44 / 1.76 s at 120 BPM); the first suspect (wait for the whole loop) is not what happens. Quantize OFF = 0 frames. No disk or allocation on the launch path (`apply_start_play` only flips state). A paused transport kept the pending action forever: `schedule()` now launches at once.
+- `apply_start_play` starts a joining track at `fmod(base->pos / rate_base * rate_track, region length)`; `posf` (per-track playhead, test hook). Pad LEDs: pending play = blinking green on rows 1 and 2.

@@ -2564,6 +2564,40 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* --- v0.15.1: PLAY press -> state PLAY latency (base loops of 1 / 4 / 16 bars, quantize on / off), phase alignment, pending blink --- */
+    {
+        static const int BASES[3] = { 1, 4, 16 };
+        for (int q = 1; q >= 0; q--) for (int bi = 0; bi < 3; bi++) {
+            long worst = 0, total = 0; int cnt = 0, aligned_ok = 1, blink_seen = 0;
+            for (int ph = 0; ph < 3; ph++) {
+                fresh(&host); seti("quantize", q); in_mode = IN_SINE;
+                seti("rec_len", BASES[bi]); tap(REC(1)); run(BASES[bi] * 700 + 50);   /* the base loop closes by itself */
+                CHECK(state(1) == S_PLAY || state(1) == S_DUB);
+                seti("rec_len", BASES[bi] >= 4 ? 2 : 1); tap(REC(2));                                    /* a 1-2 bar clip on track 2 */
+                for (int w = 0; w < 4000 && state(2) != S_PLAY; w++) run(1);
+                run(2); tap(STOP(2)); run(2);
+                CHECK(state(2) == S_STOP);
+                run(137 + ph * 800 + BASES[bi] * 13);                                                    /* press at different loop phases (odd and even bars) */
+                tap(STOP(2)); long blocks = 0;
+                char b[100];
+                while (state(2) != S_PLAY && blocks < 20000) {
+                    if (q && blocks == 3) { A->get_param(S, "pad_leds", b, sizeof b);                       /* waiting: the PLAY pad blinks green */
+                        char hx[3] = { b[(STOP(2) - 36) * 2], b[(STOP(2) - 36) * 2 + 1], 0 }; if (strtol(hx, NULL, 16) == (0x80 | 126)) blink_seen = 1; }
+                    run(1); blocks++;
+                }
+                long fr = blocks * 128; if (fr > worst) worst = fr; total += fr; cnt++;
+                /* phase: the clip offset = time since the base loop start modulo the clip length (checked at the launch block) */
+                long p2 = gett(2, "posf"), p1 = gett(1, "posf"), len2 = gett(2, "len"), len1 = gett(1, "len");
+                long want = (p1 - p2) % len2; if (want < 0) want += len2;                                  /* should be ~0: both share one bar position */
+                if (len1 % len2 == 0 && want > 400 && len2 - want > 400) aligned_ok = 0;
+            }
+            printf("LATENCY base %2d bars quantize %s: worst %6ld frames (%.2f s), mean %.2f s\n", BASES[bi], q ? "ON " : "OFF", worst, (double)worst / 44100.0, (double)total / cnt / 44100.0);
+            if (q) CHECK(worst <= (long)(88200 * 1.0) + 2048 && blink_seen);                              /* at most one bar at 120 BPM (+ a couple of blocks) */
+            else CHECK(worst == 0);                                                                       /* quantize off: immediate */
+            CHECK(aligned_ok);
+        }
+    }
+
     /* --- nothing crashes on garbage --- */
     uint8_t junk[3] = {0x90, 200, 100}; A->on_midi(S, junk, 3, 0);
     A->set_param(S, "nonsense", "1");

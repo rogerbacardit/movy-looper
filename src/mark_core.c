@@ -1336,9 +1336,19 @@ static void apply_start_record(mark_t *m, int ti) {
 
 static void apply_start_play(mark_t *m, int ti) {
     mk_track_t *t = &m->t[ti];
+    /* L606: a track that joins a running loop starts at the clip offset that keeps it phase-aligned: the time since the
+     * base loop's start, at the track's own speed, modulo its own length (a 1-bar clip under a 16-bar loop stays in
+     * sync; the first track, a one-shot or a stopped transport start at the top). */
+    double aligned = 0.0;
+    mk_track_t *base = base_playing(m);
+    if (base && base != t && !m->transport_paused && !t->shot && t->len > t->off) {
+        double elapsed = base->pos / spd_rate(base), rl = (double)reg_len(t);
+        aligned = fmod(elapsed * spd_rate(t), rl);
+        if (aligned < 0.0 || aligned >= rl) aligned = 0.0;
+    }
     solo_stop_others(m, ti);
     t->st = MK_PLAY;
-    t->pos = 0.0;
+    t->pos = aligned;
     t->pending = 0;
     m->edit_rev++;
 }
@@ -1429,7 +1439,7 @@ static void request_finish(mark_t *m, int ti, int end_state) {
  * the RC's rule: quantize corrects timing only against a running rhythm,
  * a synced track, or MIDI sync. */
 static void schedule(mark_t *m, int ti, int action /* 1 rec, 2 play */) {
-    int quantized = m->quantize && (base_playing(m) != NULL || m->clock_running);
+    int quantized = m->quantize && !m->transport_paused && (base_playing(m) != NULL || m->clock_running);   /* a paused transport has no grid to wait for */
     if (!quantized) {
         if (action == 1) apply_start_record(m, ti);
         else apply_start_play(m, ti);
@@ -3115,6 +3125,7 @@ int mark_get_param(mark_t *m, const char *key, char *buf, int buf_len) {
         if (!strcmp(k, "shot"))  return snprintf(buf, (size_t)buf_len, "%d", t->shot);
         if (!strcmp(k, "spd"))   return snprintf(buf, (size_t)buf_len, "%d", t->spd);
         if (!strcmp(k, "len"))   return snprintf(buf, (size_t)buf_len, "%u", t->len);
+        if (!strcmp(k, "posf"))  return snprintf(buf, (size_t)buf_len, "%.0f", t->pos);   /* playhead in the region, frames (tests) */
         if (!strcmp(k, "off"))   return snprintf(buf, (size_t)buf_len, "%u", t->off);
         if (!strcmp(k, "full"))  return snprintf(buf, (size_t)buf_len, "%u", t->full_len > t->len ? t->full_len : t->len);
         if (!strcmp(k, "state")) return snprintf(buf, (size_t)buf_len, "%d", t->st);
