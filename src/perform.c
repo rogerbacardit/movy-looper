@@ -83,6 +83,7 @@ struct perf {
     int     aucnt[PF_NLANE][PF_NFX][3];         /* steps stored */
     _Atomic int hold;                           /* track whose REC pad is held in PERFORM, 0 = none */
     _Atomic int touch[PF_NFX][3];               /* a knob was turned (set by the control thread, consumed per block) */
+    int     acc, acc_fx, acc_k;                 /* stepped knobs: clicks accumulated towards the next position */
     uint8_t armed[PF_NFX][3];                   /* audio thread: being written until the hold ends */
     int     last_step[PF_NFX][3];               /* audio thread: last step written, -1 none */
     float   last_val[PF_NFX][3];                /* ... and the value written there */
@@ -98,7 +99,7 @@ static const uint8_t DEF[PF_NFX][3] = {
     { 40, 60, 100 }, { 35, 0, 60 }, { 25, 60, 50 }, { 25, 70, 40 }, { 25, 50, 60 }, { 43, 80, 0 }, { 29, 70, 0 }, { 40, 70, 50 },
 };
 static const uint8_t DISC[PF_NFX][3] = {          /* option count of a stepped knob, 0 = continuous */
-    { 0 }, { 0, 3, 0 }, { 0 }, { 0 }, { 0 }, { 25, 4, 0 }, { 4, 0, 0 }, { 0 },
+    { 6, 0, 0 }, { 0, 3, 0 }, { 25, 0, 0 }, { 15, 32, 0 }, { 0 }, { 25, 4, 0 }, { 4, 0, 0 }, { 0 },
     { 0, 0, 2 }, { 0, 0, 2 }, { 6, 0, 0 }, { 5, 0, 0 }, { 5, 0, 0 }, { 3, 0, 0 }, { 2, 0, 0 }, { 3, 0, 0 },
     { 6, 0, 0 },
     { 0 }, { 0, 2, 0 }, { 0 }, { 0 }, { 0 }, { 8, 0, 3 }, { 8, 0, 3 }, { 0 },
@@ -179,6 +180,7 @@ perf_t *perf_create(void) {
     }
     if (!ok) { perf_destroy(p); return NULL; }
     for (int f = 0; f < PF_NFX; f++) for (int k = 0; k < 3; k++) p->pct[f][k] = DEF[f][k], p->fine[f][k] = (float)DEF[f][k];
+    p->acc_fx = -1;
     memset(p->au, 255, sizeof p->au);
     memset(p->last_step, 0xff, sizeof p->last_step);
     return p;
@@ -264,13 +266,27 @@ static int didx(const perf_t *p, int fx, int k) {
 void perf_knob(perf_t *p, int fx, int k, int delta) { perf_knob_ex(p, fx, k, delta, 0); }
 void perf_knob_ex(perf_t *p, int fx, int k, int delta, int fine) {
     if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3) atomic_store(&p->touch[fx][k], 1);
-    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3 && DISC[fx][k]) {
-        int n = DISC[fx][k], i = didx(p, fx, k) + (delta > 0 ? 1 : -1);
-        i = i < 0 ? 0 : i > n - 1 ? n - 1 : i;
-        perf_pct_set(p, fx, k, (i * 100 + (n - 1) / 2) / (n - 1));
+    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < 3 && DISC[fx][k] && delta != 0) {
+        int n = DISC[fx][k], cpp = n <= 4 ? 10 : n <= 8 ? 6 : 3;
+        if (p->acc_fx != fx || p->acc_k != k || (p->acc > 0) != (delta > 0)) { p->acc = 0; p->acc_fx = fx; p->acc_k = k; }   /* another knob / effect / direction: start over */
+        p->acc += delta;
+        int i = didx(p, fx, k), moved = 0;
+        while (p->acc >= cpp || p->acc <= -cpp) {
+            int sg = p->acc > 0 ? 1 : -1;
+            p->acc -= sg * cpp;
+            int ni = i + sg;
+            if (ni < 0 || ni > n - 1) { p->acc = 0; break; }
+            i = ni; moved = 1;
+        }
+        if (moved) perf_pct_set(p, fx, k, (i * 100 + (n - 1) / 2) / (n - 1));
         return;
     }
-    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < PF_NKNOB) setf(p, fx, k, p->fine[fx][k] + (float)delta * (fine ? 0.5f : 2.0f));
+    p->acc = 0; p->acc_fx = -1;
+    if (fx >= 0 && fx < PF_NFX && k >= 0 && k < PF_NKNOB) {
+        int ad = delta < 0 ? -delta : delta;
+        float accel = ad >= 6 ? (1.0f + 0.1f * (float)(ad - 5) > 2.0f ? 2.0f : 1.0f + 0.1f * (float)(ad - 5)) : 1.0f;   /* gentle: only a fast spin */
+        setf(p, fx, k, p->fine[fx][k] + (float)delta * (fine ? 0.5f : 2.0f) * accel);
+    }
 }
 
 /* ---- automation ---- */
@@ -331,8 +347,8 @@ static double au_pos(const double *tpos, const double *tlen, int t) {
 static void au_ramp(perf_t *p, int t, int fx, int k, int from_step, float from_v, int to_step, float to_v) {
     int dist = (to_step - from_step + PF_AU_N) % PF_AU_N;
     if (dist == 0) { au_put(p, t, fx, k, to_step, (uint8_t)lroundf(to_v * 2.0f)); return; }
-    for (int d = 1; d <= dist; d++) {                           /* linear ramp from the last value to the new one */
-        float v = from_v + (to_v - from_v) * (float)d / (float)dist;
+    for (int d = 1; d <= dist; d++) {                           /* linear ramp from the last value to the new one (a stepped knob holds, then jumps) */
+        float v = DISC[fx][k] ? (d == dist ? to_v : from_v) : from_v + (to_v - from_v) * (float)d / (float)dist;
         au_put(p, t, fx, k, (from_step + d) % PF_AU_N, (uint8_t)lroundf(v * 2.0f));
     }
 }
@@ -380,12 +396,13 @@ static void auto_block(perf_t *p, const double *tpos, const double *tlen) {
             float fr = (float)(x - (double)i0);
             uint8_t a = p->au[owner][fx][k][i0], b = p->au[owner][fx][k][i1];
             if (a == 255 && b == 255) continue;
-            float v = a == 255 ? (float)b : b == 255 ? (float)a : (float)a + ((float)b - (float)a) * fr;   /* interpolated between steps */
+            float v = a == 255 ? (float)b : b == 255 ? (float)a : DISC[fx][k] ? (float)a : (float)a + ((float)b - (float)a) * fr;   /* interpolated between steps; a stepped knob never is */
             setf(p, fx, k, v * 0.5f);
         }
     }
 }
 
+int perf_knob_steps(int fx, int k) { return fx >= 0 && fx < PF_NFX && k >= 0 && k < 3 ? DISC[fx][k] : 0; }
 const char *perf_name(int fx) { return fx >= 0 && fx < PF_NFX ? NAME[fx] : "---"; }
 const char *perf_short(int fx) { return fx >= 0 && fx < PF_NFX ? SHORT[fx] : "---"; }
 int perf_nparams(int fx) { return fx >= 0 && fx < PF_NFX ? NP[fx] : 0; }

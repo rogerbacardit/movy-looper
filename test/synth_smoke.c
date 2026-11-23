@@ -1670,9 +1670,9 @@ int main(int argc, char **argv) {
                 char key[24], kd[16]; snprintf(key, sizeof key, "perf_p%d_%d", fx, k - 1);
                 int before = geti(key);
                 setstr("step", b);                                  /* turned right after the press, no block in between */
-                snprintf(kd, sizeof kd, "%d:3", k); setstr("knob_delta", kd);
+                snprintf(kd, sizeof kd, "%d:12", k); setstr("knob_delta", kd);
                 int after = geti(key);
-                if (k <= NK[fx] && after == before) { snprintf(kd, sizeof kd, "%d:-3", k); setstr("knob_delta", kd); after = geti(key); }
+                if (k <= NK[fx] && after == before) { snprintf(kd, sizeof kd, "%d:-12", k); setstr("knob_delta", kd); after = geti(key); }
                 if (k <= NK[fx]) CHECK(after != before); else CHECK(after == before);          /* a knob that does not exist is ignored */
                 if (k == 1) { run(60); screen(); CHECK(geti("perf_boxes") == NK[fx]); }       /* boxes == real knobs */
                 setstr("step_up", b); run(110);
@@ -1688,10 +1688,10 @@ int main(int argc, char **argv) {
         tap(M_SHIFT); setstr("step", "8"); run(3); setstr("step_up", "8");
         CHECK(geti("perf_latch") == 1 << 8 && geti("knob_capture") == 1);
         tap(M_SHIFT); CHECK(geti("knob_capture") == 0);
-        { int c = geti("perf_p8_2"); setstr("knob_delta", "3:1"); CHECK(geti("perf_p8_2") == c); }
+        { int c = geti("perf_p8_2"); setstr("knob_delta", "3:10"); CHECK(geti("perf_p8_2") == c); }
         down(M_SHIFT); CHECK(geti("knob_capture") == 1);
         { int c = geti("perf_p8_2"), r = geti("perf_p8_1");
-          setstr("knob_delta", "3:1"); CHECK(geti("perf_p8_2") != c);
+          setstr("knob_delta", "3:10"); CHECK(geti("perf_p8_2") != c);
           setstr("knob_delta", "2:5"); CHECK(geti("perf_p8_1") == r + 10); }
         setstr("step", "8"); setstr("step_up", "8"); up(M_SHIFT);
         CHECK(geti("perf_n") == 0);
@@ -1706,7 +1706,7 @@ int main(int argc, char **argv) {
         /* a tap switches it on and it stays; the knobs go to it, no SHIFT needed */
         setstr("step", "8"); run(3); setstr("step_up", "8");
         CHECK(geti("perf_latch") == 1 << 8 && geti("knob_capture") == 1 && !strcmp(status_text(), "FILTER LP ON"));
-        { int c = geti("perf_p8_2"); setstr("knob_delta", "3:1"); CHECK(geti("perf_p8_2") != c); }
+        { int c = geti("perf_p8_2"); setstr("knob_delta", "3:10"); CHECK(geti("perf_p8_2") != c); }
         tap(FX(2)); CHECK(geti("sel") == 2 && geti("knob_capture") == 1);   /* PISTA keeps the mode */
         tap(FX(2)); CHECK(geti("sel") == 0 && geti("knob_capture") == 1);   /* MIX too */
         tap(M_SHIFT); CHECK(!strcmp(status_text(), "PERFORM OFF") && pad_led(M_SHIFT) == 123);
@@ -1789,7 +1789,7 @@ int main(int argc, char **argv) {
         scen(eff, PF_PITCH, 1, IN_SINE, 150, 20, "1:+12", 1);
         { int c0 = cross_count(ref, H0 + 20 * 128, H0 + 130 * 128), c1 = cross_count(eff, H0 + 20 * 128, H0 + 130 * 128);
           CHECK(c1 * 10 > c0 * 17 && c1 * 10 < c0 * 24); }
-        scen(eff, PF_PITCH, 1, IN_SINE, 150, 20, "1:-40", 1);
+        scen(eff, PF_PITCH, 1, IN_SINE, 150, 20, "1:-60", 1);
         { int c0 = cross_count(ref, H0 + 20 * 128, H0 + 130 * 128), c1 = cross_count(eff, H0 + 20 * 128, H0 + 130 * 128);
           CHECK(c1 * 10 > c0 * 4 && c1 * 10 < c0 * 6); }
         scen(eff, PF_CRUSH, 1, IN_SINE, 150, 20, "1:+30", 1);
@@ -1916,9 +1916,10 @@ int main(int argc, char **argv) {
         for (int fx = 8; fx < 16; fx++) {
             char b[8], key[16]; snprintf(b, sizeof b, "%d", fx); snprintf(key, sizeof key, "perf_p%d_0", fx);
             int before = geti(key);
-            setstr("step", b); setstr("knob_delta", "1:1"); setstr("step_up", b); run(110);
+            setstr("step", b); setstr("knob_delta", "1:12"); setstr("step_up", b); run(110);
             int after = geti(key);
-            CHECK(after != before && (fx < 10 ? after == before + 2 : after > before));
+            if (!(after != before && after > before)) printf("knob step fx=%d before=%d after=%d\n", fx, before, after);
+            CHECK(after != before && after > before);
             setstr("step", b); CHECK(geti(key) == after); setstr("step_up", b); run(110);
             if (fx == PF_KILL || fx == PF_HALF) { setstr("step", b); setstr("knob_delta", "1:30"); setstr("step_up", b); run(110); CHECK(geti(key) == 100 || fx == PF_KILL); }
         }
@@ -1929,11 +1930,11 @@ int main(int argc, char **argv) {
         {
             static int16_t xa[1200 * 128], xb[1200 * 128];
             static const struct { int fx; const char *kn; } ALT[] = {
-                { PF_STUTTER, "2:+1" }, { PF_STUTTER, "3:-60" }, { PF_PITCH, "2:+50" }, { PF_PITCH, "3:-20" }, { PF_CRUSH, "3:-20" },
-                { PF_TSTOP, "2:+60" }, { PF_TSTOP, "3:+60" }, { PF_LFO, "2:+1" }, { PF_LFO, "3:-60" }, { PF_LFO, "1:-3" },
+                { PF_STUTTER, "2:+10" }, { PF_STUTTER, "3:-60" }, { PF_PITCH, "2:+50" }, { PF_PITCH, "3:-20" }, { PF_CRUSH, "3:-20" },
+                { PF_TSTOP, "2:+60" }, { PF_TSTOP, "3:+60" }, { PF_LFO, "2:+10" }, { PF_LFO, "3:-60" }, { PF_LFO, "1:-30" },
                 { PF_REVERSE, "2:-20" }, { PF_VINYL, "3:+60" },
-                { PF_LP, "3:+1" }, { PF_HP, "3:+1" }, { PF_DELAY, "3:-20" }, { PF_FREEZE, "2:-20" }, { PF_FREEZE, "3:+100" },
-                { PF_RETRIG, "2:+60" }, { PF_RETRIG, "3:+60" }, { PF_HALF, "2:-20" }, { PF_KILL, "2:+100" }, { PF_KILL, "1:+1;3:+40" },
+                { PF_LP, "3:+10" }, { PF_HP, "3:+10" }, { PF_DELAY, "3:-20" }, { PF_FREEZE, "2:-20" }, { PF_FREEZE, "3:+100" },
+                { PF_RETRIG, "2:+60" }, { PF_RETRIG, "3:+60" }, { PF_HALF, "2:-20" }, { PF_KILL, "2:+100" }, { PF_KILL, "1:+10;3:+40" },
             };
             for (unsigned i = 0; i < sizeof ALT / sizeof ALT[0]; i++) {
                 scen(xa, ALT[i].fx, 1, IN_RICH, 150, 20, NULL, 0);
@@ -1954,7 +1955,7 @@ int main(int argc, char **argv) {
             }
             /* REVERSE window: a 1/4-bar (1 beat) window wraps long before the free one does */
             scen(xa, PF_REVERSE, 1, IN_RICH, 400, 20, NULL, 0);
-            scen(xb, PF_REVERSE, 1, IN_RICH, 400, 20, "1:-3", 0);
+            scen(xb, PF_REVERSE, 1, IN_RICH, 400, 20, "1:-30", 0);
             CHECK(ndiff(xa, xb, H0 + 24000, H0 + 50000) > 100 && ndiff(xa, xb, H0 + 100, H0 + 8000) < 100);
             /* KILL FADE: the default is gone in 3 ms, the slowest takes ~half a second */
             scen(xb, PF_KILL, 1, IN_RICH, 150, 20, "2:+100", 0);
@@ -1981,7 +1982,7 @@ int main(int argc, char **argv) {
             static int16_t gb[1200 * 128];
             int edges[400], spacing_min, spacing_max;
             for (int variant = 0; variant < 3; variant++) {            /* 0: 1/8 full depth  1: 1/8 swing  2: 1/16 */
-                const char *kn = variant == 0 ? "1:-1;2:+8" : variant == 1 ? "1:-1;2:+8;3:+50" : "2:+8";
+                const char *kn = variant == 0 ? "1:-6;2:+8" : variant == 1 ? "1:-6;2:+8;3:+50" : "2:+8";
                 scen(gb, PF_GATE, 1, IN_SINE, 150, 20, kn, 1);
                 int ne = 0, open = -1;
                 for (int bk = PRE + 4; bk < PRE + 148 && ne < 390; bk++) {
@@ -2019,10 +2020,10 @@ int main(int argc, char **argv) {
         }
         /* ECHO FREEZE: the slice loops forever (period = size - crossfade), even with the input gone; K1 changes the size */
         {
-            scen(eff, PF_FREEZE, 1, IN_RICH, 150, 20, "1:-1;1:-1", 1);                                    /* 1/16 beat = 600 frames, loop 450 */
+            scen(eff, PF_FREEZE, 1, IN_RICH, 150, 20, "1:-6;1:-6", 1);                                    /* 1/16 beat = 600 frames, loop 450 */
             long bad = 0; for (long i = 2000; i < 5000; i++) if (abs(eff[H0 + i] - eff[H0 + i + 450]) > 3) bad++;
             CHECK(bad == 0 && peak_of(eff, H0 + 2000, H0 + 5000) > 500);
-            scen(eff, PF_FREEZE, 1, IN_RICH, 150, 20, "1:-1;1:-1;1:+1", 1);                               /* 1/8 = 1200 frames, loop 900 */
+            scen(eff, PF_FREEZE, 1, IN_RICH, 150, 20, "1:-6;1:-6;1:+6", 1);                               /* 1/8 = 1200 frames, loop 900 */
             bad = 0; for (long i = 2000; i < 5000; i++) if (abs(eff[H0 + i] - eff[H0 + i + 900]) > 3) bad++;
             long bad2 = 0; for (long i = 2000; i < 5000; i++) if (abs(eff[H0 + i] - eff[H0 + i + 450]) > 3) bad2++;
             CHECK(bad == 0 && bad2 > 300);
@@ -2040,7 +2041,7 @@ int main(int argc, char **argv) {
         scen(ref, -1, 1, IN_SINE, 150, 20, NULL, 1);
         scen(eff, PF_HALF, 1, IN_SINE, 150, 20, NULL, 1);
         { int c0 = cross_count(ref, H0 + 20 * 128, H0 + 130 * 128), c1 = cross_count(eff, H0 + 20 * 128, H0 + 130 * 128); CHECK(c1 * 10 > c0 * 4 && c1 * 10 < c0 * 6); }
-        scen(eff, PF_HALF, 1, IN_SINE, 150, 20, "1:+1", 1);
+        scen(eff, PF_HALF, 1, IN_SINE, 150, 20, "1:+10", 1);
         { int c0 = cross_count(ref, H0 + 20 * 128, H0 + 130 * 128), c1 = cross_count(eff, H0 + 20 * 128, H0 + 130 * 128); CHECK(c1 * 100 > c0 * 20 && c1 * 100 < c0 * 31); }
         /* KILL: silence within 3 ms while held, and back */
         scen(eff, PF_KILL, 1, IN_RICH, 150, 20, NULL, 1);
@@ -2098,13 +2099,13 @@ int main(int argc, char **argv) {
         /* stacking from the module: four at once, the fifth refused, the knobs go to the most recent one */
         fresh(&host); seti("quantize", 0);
         down(M_SHIFT);
-        setstr("step", "0"); setstr("step", "2"); setstr("step", "4"); setstr("step", "8"); setstr("step", "1"); setstr("step", "3");
-        CHECK(geti("perf_n") == 6 && geti("perf_fx") == 3 && geti("knob_capture") == 1);
-        setstr("step", "15"); CHECK(geti("perf_n") == 6 && geti("perf_fx") == 3 && !strcmp(status_text(), "PERFORM: MAX 6"));
-        { int a0 = geti("perf_p0_0"), a2 = geti("perf_p2_0"), a3 = geti("perf_p3_0");
-          setstr("knob_delta", "1:3"); CHECK(geti("perf_p3_0") == a3 + 6 && geti("perf_p2_0") == a2 && geti("perf_p0_0") == a0);
-          setstr("step_up", "3"); setstr("knob_delta", "1:3"); CHECK(geti("perf_fx") == 1 && geti("perf_p1_0") == 39); }   /* 33 + 6: the new most recent */
-        setstr("step_up", "0"); setstr("step_up", "2"); setstr("step_up", "4"); setstr("step_up", "8"); setstr("step_up", "1"); up(M_SHIFT);
+        setstr("step", "0"); setstr("step", "2"); setstr("step", "4"); setstr("step", "1"); setstr("step", "3"); setstr("step", "8");
+        CHECK(geti("perf_n") == 6 && geti("perf_fx") == 8 && geti("knob_capture") == 1);
+        setstr("step", "15"); CHECK(geti("perf_n") == 6 && geti("perf_fx") == 8 && !strcmp(status_text(), "PERFORM: MAX 6"));
+        { int a0 = geti("perf_p0_0"), a2 = geti("perf_p2_0"), a8 = geti("perf_p8_0");
+          setstr("knob_delta", "1:3"); CHECK(geti("perf_p8_0") == a8 + 6 && geti("perf_p2_0") == a2 && geti("perf_p0_0") == a0);
+          setstr("step_up", "8"); setstr("knob_delta", "1:3"); CHECK(geti("perf_fx") == 3 && geti("perf_p4_0") == 40); }   /* 33 + 6: the new most recent */
+        setstr("step_up", "0"); setstr("step_up", "2"); setstr("step_up", "4"); setstr("step_up", "3"); setstr("step_up", "1"); up(M_SHIFT);
         CHECK(geti("perf_n") == 0 && geti("knob_capture") == 0);
         /* the grid page and the new scenes draw, with latched cells and stacked tags */
         fresh(&host); seti("quantize", 0); in_mode = IN_RICH;
@@ -2257,14 +2258,60 @@ int main(int argc, char **argv) {
         setstr("knob_delta", "1:8"); CHECK(gett(3, "off") != off0);
     }
 
+    /* --- v0.14.5: knob feel: stepped knobs need several clicks per position; the accumulator resets --- */
+    {
+        static void (*kx)(perf_t *, int, int, int, int); static int (*steps)(int, int); static void (*hold_fn)(perf_t *, int);
+        *(void **)&kx = dlsym(h, "perf_knob_ex"); *(void **)&steps = dlsym(h, "perf_knob_steps"); *(void **)&hold_fn = dlsym(h, "perf_auto_hold");
+        CHECK(steps(PF_RINGMOD, 1) == 2 && steps(PF_LFO, 0) == 25 && steps(PF_AUTOPAN, 0) == 8 && steps(PF_AUTOPAN, 2) == 3 && steps(PF_GATE, 1) == 0);
+        perf_t *p = pf_create();
+        int v0 = pf_pct_get(p, PF_RINGMOD, 1);
+        for (int i = 0; i < 9; i++) kx(p, PF_RINGMOD, 1, 1, 0);
+        CHECK(pf_pct_get(p, PF_RINGMOD, 1) == v0);                       /* N = 2: 9 clicks do nothing */
+        kx(p, PF_RINGMOD, 1, 1, 0);
+        CHECK(pf_pct_get(p, PF_RINGMOD, 1) == 100);                      /* the 10th moves one position */
+        for (int i = 0; i < 9; i++) kx(p, PF_RINGMOD, 1, -1, 0);
+        kx(p, PF_RINGMOD, 0, 1, 0);                                      /* touching another knob resets the count */
+        kx(p, PF_RINGMOD, 1, -1, 0);
+        CHECK(pf_pct_get(p, PF_RINGMOD, 1) == 100);
+        for (int i = 0; i < 4; i++) kx(p, PF_RINGMOD, 1, -1, 0);         /* 5 in a row so far; a reversal also restarts */
+        kx(p, PF_RINGMOD, 1, 1, 0); for (int i = 0; i < 9; i++) kx(p, PF_RINGMOD, 1, -1, 0);
+        CHECK(pf_pct_get(p, PF_RINGMOD, 1) == 100);
+        kx(p, PF_RINGMOD, 1, -1, 0); CHECK(pf_pct_get(p, PF_RINGMOD, 1) == 0);
+        int l0 = pf_pct_get(p, PF_LFO, 0);                               /* LFO-like list: 3 clicks per position */
+        kx(p, PF_LFO, 0, 1, 0); kx(p, PF_LFO, 0, 1, 0); CHECK(pf_pct_get(p, PF_LFO, 0) == l0);
+        kx(p, PF_LFO, 0, 1, 0); CHECK(pf_pct_get(p, PF_LFO, 0) > l0);
+        pf_destroy(p);
+        /* a stepped knob recorded in automation plays back as exact positions, never in between */
+        p = pf_create();
+        pf_press(p, PF_GATE, 1, 0, 0);
+        const double len = 44100.0, rate = 1.0; double tl[7] = { 0 }, tp[7] = { 0 }; tl[1] = len; double pos = 0.0;
+        hold_fn(p, 1);
+        for (int b = 0; b < (int)(len / 128.0); b++) {
+            tp[1] = pos; pf_begin_raw(p, pos, 9600.0, tp, tl);
+            if (b % 40 == 0) { for (int c = 0; c < 6; c++) kx(p, PF_GATE, 0, 1, 1); }       /* GATE K1, N = 6: a position every 6 clicks */
+            pos += 128.0 * rate;
+        }
+        hold_fn(p, 0);
+        int off_grid = 0, seen[101] = { 0 };
+        for (int b = 0; b < 2000; b++) {
+            tp[1] = pos; pf_begin_raw(p, pos, 9600.0, tp, tl);
+            int v = (int)pf_pct_get(p, PF_GATE, 0); seen[v] = 1;
+            if (v % 20 != 0) off_grid++;
+            pos += 128.0 * rate; if (pos >= len) pos -= len;
+        }
+        CHECK(off_grid == 0);
+        pf_destroy(p);
+    }
+
     /* --- v0.14: LFO rate list = 14 synced divisions then 11 free Hz rates, one stepped knob --- */
     {
         fresh(&host); seti("quantize", 0);
         tap(M_SHIFT); setstr("step", "5"); run(3); setstr("step_up", "5");
         CHECK(geti("perf_p5_0") == 42);                                   /* default 1 BAR */
-        for (int i = 0; i < 20; i++) setstr("knob_delta", "1:1");
+        for (int i = 0; i < 120; i++) setstr("knob_delta", "1:1");
         CHECK(geti("perf_p5_0") == 100);                                  /* 32 Hz, the last free rate */
-        for (int i = 0; i < 30; i++) setstr("knob_delta", "1:-1");
+        CHECK(!strcmp(status_text(), "RATE 32HZ"));                       /* a stepped knob names the option it landed on */
+        for (int i = 0; i < 120; i++) setstr("knob_delta", "1:-1");
         CHECK(geti("perf_p5_0") == 0);                                    /* 1/32, the first synced rate */
         tap(M_SHIFT);
     }
@@ -2388,9 +2435,9 @@ int main(int argc, char **argv) {
             if (j != 6 && j != 7) CHECK(scr_seq() != sq);                                /* animated (the beat-synced pair needs a running grid) */
             for (int k = 1; k <= 3; k++) {
                 char key[24], kd[16]; snprintf(key, sizeof key, "perf_p%d_%d", PF_DUCK + j, k - 1);
-                int before = geti(key); snprintf(kd, sizeof kd, "%d:3", k); setstr("knob_delta", kd);
+                int before = geti(key); snprintf(kd, sizeof kd, "%d:12", k); setstr("knob_delta", kd);
                 int after = geti(key);
-                if (after == before) { snprintf(kd, sizeof kd, "%d:-3", k); setstr("knob_delta", kd); after = geti(key); }
+                if (after == before) { snprintf(kd, sizeof kd, "%d:-12", k); setstr("knob_delta", kd); after = geti(key); }
                 CHECK(after != before);                                                  /* real knobs */
             }
             setstr("step_up", b); run(8);

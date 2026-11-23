@@ -71,7 +71,10 @@ unsigned perf_latch_mask(const perf_t *p);
 
 /* control thread: knobs */
 void perf_knob(perf_t *p, int fx, int knob, int delta);   /* knob 0..7, relative clicks (2 % each; stepped params move one option) */
-void perf_knob_ex(perf_t *p, int fx, int knob, int delta, int fine);   /* fine = 0.5 % per click (automation hold) */
+void perf_knob_ex(perf_t *p, int fx, int knob, int delta, int fine);
+/* knob type: 0 = continuous, N >= 2 = stepped with N positions (a stepped knob moves one position per 10 clicks for N <= 4,
+ * 6 for N <= 8, 3 for longer lists; the click accumulator resets when another knob or effect is touched or the turn reverses) */
+int  perf_knob_steps(int fx, int knob);   /* fine = 0.5 % per click (automation hold) */
 int  perf_pct(const perf_t *p, int fx, int knob);          /* the stored 0..100 */
 void perf_pct_set(perf_t *p, int fx, int knob, int v);
 

@@ -590,7 +590,12 @@ static void knob_delta(synth_t *s, const char *val) {
                 return;
             }
             s->grid_view = 0;                          /* turning a knob goes back to the scene of the effect */
+            int before = perf_pct(s->perf, pfx, n - 1);
             perf_knob_ex(s->perf, pfx, n - 1, d, s->auto_hold != 0);   /* 0.5 % clicks while the REC pad is held */
+            if (perf_knob_steps(pfx, n - 1) && perf_pct(s->perf, pfx, n - 1) != before) {   /* a stepped knob names the option it landed on */
+                char tx[16]; perf_ptext(s->perf, pfx, n - 1, tx, sizeof tx);
+                say(s, "%s %s", perf_plabel(pfx, n - 1), tx);
+            }
             if (s->auto_hold) { s->auto_turned = 1; say(s, "AUTO %d %s %s", s->auto_hold, perf_short(pfx), perf_plabel(pfx, n - 1)); }
         }
         return;
